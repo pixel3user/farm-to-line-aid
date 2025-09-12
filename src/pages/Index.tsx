@@ -1,12 +1,80 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+import { useState, useEffect } from "react";
+import Navigation from "@/components/Navigation";
+import DashboardOverview from "@/components/DashboardOverview";
+import ProductManagement from "@/components/ProductManagement";
+import StoreManagement from "@/components/StoreManagement";
+import MarketingTools from "@/components/MarketingTools";
+import Analytics from "@/components/Analytics";
+import heroImage from "@/assets/hero-farm-tech.jpg";
 
 const Index = () => {
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [isLiffApp, setIsLiffApp] = useState(false);
+
+  useEffect(() => {
+    // Check if running inside LINE LIFF
+    const userAgent = navigator.userAgent.toLowerCase();
+    const isInLine = userAgent.includes('line');
+    setIsLiffApp(isInLine);
+  }, []);
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case "products":
+        return <ProductManagement />;
+      case "stores":
+        return <StoreManagement />;
+      case "marketing":
+        return <MarketingTools />;
+      case "analytics":
+        return <Analytics />;
+      case "buyers":
+        return <div className="p-6"><h1>Buyer Management Coming Soon</h1></div>;
+      default:
+        return <DashboardOverview />;
+    }
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
-      </div>
+    <div className="min-h-screen bg-background">
+      {/* Hero Section - Only show on first load or non-LIFF environments */}
+      {activeTab === "dashboard" && !isLiffApp && (
+        <section className="relative h-96 overflow-hidden">
+          <img 
+            src={heroImage} 
+            alt="Farm2Market AI - Agricultural Technology"
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-gradient-hero/80 flex items-center justify-center">
+            <div className="text-center text-white space-y-4 max-w-2xl px-6">
+              <h1 className="text-4xl md:text-6xl font-bold">
+                Farm2Market AI
+              </h1>
+              <p className="text-xl md:text-2xl opacity-90">
+                智慧農業銷售助理 | Agricultural Sales Assistant
+              </p>
+              <p className="text-base md:text-lg opacity-80">
+                Transform your farm sales with AI-powered LINE integration
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Navigation */}
+      <Navigation activeTab={activeTab} onTabChange={setActiveTab} />
+
+      {/* Main Content */}
+      <main className="min-h-screen">
+        {renderContent()}
+      </main>
+
+      {/* LIFF Integration Info */}
+      {isLiffApp && (
+        <div className="fixed bottom-4 right-4 p-3 bg-primary text-primary-foreground rounded-lg shadow-strong text-sm">
+          🤖 Connected to LINE Bot
+        </div>
+      )}
     </div>
   );
 };
