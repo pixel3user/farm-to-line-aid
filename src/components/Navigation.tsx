@@ -11,7 +11,8 @@ import {
   Users,
   Settings,
   HelpCircle,
-  MessageCircle
+  MessageCircle,
+  Brain
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,7 @@ const Navigation = ({ activeTab, onTabChange }: NavigationProps) => {
     { id: "stores", label: "Stores", icon: Store },
     { id: "marketing", label: "Marketing", icon: PenTool },
     { id: "analytics", label: "Analytics", icon: BarChart3 },
+    { id: "ai-brain", label: "AI Brain", icon: Brain },
     { id: "buyers", label: "Buyers", icon: Users },
     { id: "line-demo", label: "LINE Demo", icon: MessageCircle },
   ];

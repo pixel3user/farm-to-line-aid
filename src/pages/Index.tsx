@@ -6,6 +6,7 @@ import StoreManagement from "@/components/StoreManagement";
 import MarketingTools from "@/components/MarketingTools";
 import Analytics from "@/components/Analytics";
 import LineBotDemo from "@/components/LineBotDemo";
+import { AIBrainVisualization } from "@/components/AIBrainVisualization";
 import heroImage from "@/assets/hero-farm-tech.jpg";
 
 const Index = () => {
@@ -29,6 +30,8 @@ const Index = () => {
         return <MarketingTools />;
       case "analytics":
         return <Analytics />;
+      case "ai-brain":
+        return <AIBrainVisualization />;
       case "buyers":
         return <div className="p-6"><h1>Buyer Management Coming Soon</h1></div>;
       case "line-demo":
