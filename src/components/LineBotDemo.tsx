@@ -1,198 +1,136 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { 
-  MessageCircle, 
-  Package, 
-  Handshake, 
-  TrendingUp, 
-  Camera, 
-  Send,
+  ArrowLeft,
+  Search,
   Menu,
-  Phone,
-  Settings
+  MoreHorizontal,
+  Plus,
+  Camera,
+  Image,
+  Mic,
+  Smile
 } from "lucide-react";
 
 const LineBotDemo = () => {
-  const [activeTab, setActiveTab] = useState("chat");
-  const [messages, setMessages] = useState([
-    {
-      type: "bot",
-      content: "🌾 歡迎使用 Farm2Market AI！",
-      time: "10:30"
-    },
-    {
-      type: "bot", 
-      content: "您的智慧農業銷售助理已啟動。點選下方功能選單開始使用：",
-      time: "10:30"
-    }
-  ]);
-
-  const quickActions = [
-    { icon: Package, label: "📦 管理產品", action: "products" },
-    { icon: Handshake, label: "🤝 查看交易", action: "deals" },
-    { icon: TrendingUp, label: "📈 行銷工具", action: "marketing" }
-  ];
-
-  const handleQuickAction = (action: string) => {
-    const newMessage = {
-      type: "user" as const,
-      content: quickActions.find(a => a.action === action)?.label || "",
-      time: "10:31"
-    };
-    
-    setMessages(prev => [...prev, newMessage]);
-    
-    setTimeout(() => {
-      let botResponse = "";
-      switch(action) {
-        case "products":
-          botResponse = "📦 產品管理選項：\n• 新增產品\n• 查看庫存\n• 更新價格\n• 生成產品卡片";
-          break;
-        case "deals":
-          botResponse = "🤝 您目前有 3 筆進行中的交易：\n• 永豐超市 - 雞蛋 50箱\n• 全聯 - 雞蛋 30箱\n• 家樂福 - 雞蛋 80箱";
-          break;
-        case "marketing":
-          botResponse = "📈 行銷工具：\n• 生成產品宣傳單\n• 找尋新店家\n• 自動補貨提醒\n• 銷售數據分析";
-          break;
-      }
-      
-      setMessages(prev => [...prev, {
-        type: "bot",
-        content: botResponse,
-        time: "10:31"
-      }]);
-    }, 1000);
-  };
-
   return (
-    <div className="max-w-md mx-auto bg-white rounded-lg shadow-lg overflow-hidden">
-      {/* LINE Header */}
-      <div className="bg-primary text-primary-foreground p-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-primary-glow rounded-full flex items-center justify-center">
-            <span className="text-xs font-bold">AI</span>
-          </div>
-          <div>
-            <h3 className="font-semibold">Farm2Market AI</h3>
-            <p className="text-xs opacity-80">智慧農業銷售助理</p>
-          </div>
+    <div className="max-w-md mx-auto bg-white shadow-2xl overflow-hidden h-[700px] flex flex-col">
+      {/* Status Bar */}
+      <div className="bg-gray-100 px-4 py-1 flex justify-between items-center text-xs text-gray-600">
+        <span>2:58</span>
+        <div className="flex gap-1">
+          <span>🔇</span>
+          <span>📶</span>
+          <span>🔋</span>
+          <span>25</span>
         </div>
-        <div className="flex gap-2">
-          <Phone className="w-5 h-5" />
-          <Settings className="w-5 h-5" />
+      </div>
+
+      {/* Header */}
+      <div className="bg-white border-b px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <ArrowLeft className="w-5 h-5" />
+          <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center">
+            <span className="text-white text-xs font-bold">★</span>
+          </div>
+          <span className="font-medium text-gray-900">Farm2Market AI</span>
+        </div>
+        <div className="flex gap-4">
+          <Search className="w-5 h-5 text-gray-600" />
+          <Menu className="w-5 h-5 text-gray-600" />
+          <MoreHorizontal className="w-5 h-5 text-gray-600" />
         </div>
       </div>
 
       {/* Chat Area */}
-      <div className="h-96 bg-gray-50 p-4 overflow-y-auto">
-        {messages.map((message, index) => (
-          <div
-            key={index}
-            className={`mb-3 flex ${message.type === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-xs px-3 py-2 rounded-lg ${
-                message.type === "user"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-white border shadow-sm"
-              }`}
-            >
-              <p className="text-sm whitespace-pre-line">{message.content}</p>
-              <p className={`text-xs mt-1 ${
-                message.type === "user" ? "text-primary-foreground/70" : "text-muted-foreground"
-              }`}>
-                {message.time}
-              </p>
-            </div>
-          </div>
-        ))}
-        
-        {/* Product Card Demo */}
-        {messages.length > 2 && (
-          <div className="mb-3 flex justify-start">
-            <Card className="max-w-xs bg-white border shadow-sm">
-              <div className="p-3">
-                <img 
-                  src="/api/placeholder/200/120" 
-                  alt="雞蛋產品"
-                  className="w-full h-20 object-cover rounded mb-2"
-                />
-                <h4 className="font-semibold text-sm">新鮮雞蛋</h4>
-                <div className="flex justify-between items-center mt-2">
-                  <span className="text-primary font-semibold">NT$180/箱</span>
-                  <Badge variant="secondary" className="text-xs">庫存: 50箱</Badge>
+      <div className="flex-1 bg-gray-50 p-4 space-y-4 overflow-y-auto">
+        {/* Large Event Card */}
+        <div className="relative">
+          <div className="absolute top-2 right-2 text-xs text-gray-500">5:39 pm</div>
+          <div className="bg-black rounded-2xl overflow-hidden">
+            <div className="relative h-48 bg-gradient-to-br from-blue-900 via-blue-800 to-teal-600">
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
+                <div className="text-4xl font-bold mb-1">09.19</div>
+                <div className="text-sm tracking-wider">FRIDAY</div>
+              </div>
+              <div className="absolute bottom-4 left-4 right-4">
+                <div className="flex justify-center space-x-2 mb-3">
+                  {Array.from({length: 6}).map((_, i) => (
+                    <div key={i} className="w-8 h-8 bg-yellow-400 rounded-full flex items-center justify-center text-xs text-black font-bold">
+                      {String(i + 1).padStart(2, '0')}
+                    </div>
+                  ))}
                 </div>
-                <div className="grid grid-cols-2 gap-2 mt-3">
-                  <Button size="sm" variant="outline" className="text-xs">
-                    編輯
-                  </Button>
-                  <Button size="sm" className="text-xs">
-                    推廣
-                  </Button>
+                <div className="text-xs text-white/80 text-center">
+                  7F, NO.12 SONGSHOU RD.,XINYI DIST.,TAIPEI CITY 110, TAIWAN(R.O.C.)
                 </div>
               </div>
-            </Card>
+            </div>
           </div>
-        )}
+        </div>
+
+        {/* Bot Avatar and Card */}
+        <div className="flex items-start gap-2">
+          <div className="w-8 h-8 bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+            AI
+          </div>
+          <div className="flex-1">
+            <div className="bg-white rounded-2xl overflow-hidden shadow-sm max-w-xs">
+              <div className="relative h-40 bg-gradient-to-r from-blue-400 to-teal-400">
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-center text-white">
+                    <div className="text-3xl font-bold mb-2">SON OF SON</div>
+                    <div className="text-xs opacity-90">AFTERLIFE SIAMESE MELODIC TECHNO THE GREAT BLONDINO</div>
+                  </div>
+                </div>
+                <div className="absolute bottom-4 right-4 w-16 h-16">
+                  <img 
+                    src="/api/placeholder/64/64" 
+                    alt="Person floating in water"
+                    className="w-full h-full object-cover rounded"
+                  />
+                </div>
+              </div>
+              <div className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Badge className="bg-green-500 text-white text-xs px-2 py-1">免費</Badge>
+                </div>
+                <div className="text-sm font-medium text-gray-900 mb-2">
+                  09.12 (FRI) SON OF SON = ...
+                </div>
+                <div className="flex justify-between items-center text-xs text-gray-500 mb-4">
+                  <span>有效期間</span>
+                  <span>2025/09/13</span>
+                </div>
+                <Button className="w-full bg-green-500 hover:bg-green-600 text-white rounded-lg py-3">
+                  查看優惠券
+                </Button>
+              </div>
+            </div>
+            <div className="text-xs text-gray-500 mt-1 ml-2">5:39 pm</div>
+          </div>
+        </div>
       </div>
 
-      {/* Quick Action Buttons */}
-      <div className="p-3 bg-white border-t">
-        <div className="grid grid-cols-3 gap-2 mb-3">
-          {quickActions.map((action, index) => (
-            <Button
-              key={index}
-              variant="outline"
-              size="sm"
-              onClick={() => handleQuickAction(action.action)}
-              className="flex flex-col gap-1 h-auto py-2 text-xs"
-            >
-              <action.icon className="w-4 h-4" />
-              <span className="leading-tight">{action.label}</span>
-            </Button>
-          ))}
-        </div>
-        
-        {/* Input Area */}
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm">
-            <Camera className="w-4 h-4" />
-          </Button>
-          <div className="flex-1 bg-gray-100 rounded-full px-3 py-2 text-sm text-muted-foreground">
-            輸入訊息...
-          </div>
-          <Button size="sm">
-            <Send className="w-4 h-4" />
-          </Button>
-        </div>
+      {/* Input Area */}
+      <div className="bg-white border-t px-4 py-3 flex items-center gap-3">
+        <Plus className="w-6 h-6 text-gray-600" />
+        <Camera className="w-6 h-6 text-gray-600" />
+        <Image className="w-6 h-6 text-gray-600" />
+        <div className="flex-1 h-1 border-l border-gray-300"></div>
+        <Smile className="w-6 h-6 text-gray-600" />
+        <Mic className="w-6 h-6 text-gray-600" />
       </div>
 
-      {/* Rich Menu */}
-      <div className="bg-gradient-primary text-white">
-        <div className="grid grid-cols-3 text-center">
-          <button 
-            className="p-3 flex flex-col items-center gap-1 hover:bg-white/10"
-            onClick={() => setActiveTab("dashboard")}
-          >
-            <TrendingUp className="w-5 h-5" />
-            <span className="text-xs">總覽</span>
-          </button>
-          <button 
-            className="p-3 flex flex-col items-center gap-1 hover:bg-white/10"
-            onClick={() => setActiveTab("products")}
-          >
-            <Package className="w-5 h-5" />
-            <span className="text-xs">產品</span>
-          </button>
-          <button 
-            className="p-3 flex flex-col items-center gap-1 hover:bg-white/10"
-            onClick={() => setActiveTab("marketing")}
-          >
-            <MessageCircle className="w-5 h-5" />
-            <span className="text-xs">行銷</span>
-          </button>
+      {/* Bottom Navigation */}
+      <div className="bg-white border-t flex justify-center">
+        <div className="flex gap-16 py-2">
+          <div className="w-8 h-1 bg-gray-300 rounded-full"></div>
+          <div className="w-8 h-8 border border-gray-300 rounded-full"></div>
+          <div className="w-8 h-8 flex items-center justify-center">
+            <ArrowLeft className="w-5 h-5 text-gray-600" />
+          </div>
         </div>
       </div>
     </div>
