@@ -10,7 +10,8 @@ import {
   PenTool, 
   Users,
   Settings,
-  HelpCircle
+  HelpCircle,
+  MessageCircle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -29,6 +30,7 @@ const Navigation = ({ activeTab, onTabChange }: NavigationProps) => {
     { id: "marketing", label: "Marketing", icon: PenTool },
     { id: "analytics", label: "Analytics", icon: BarChart3 },
     { id: "buyers", label: "Buyers", icon: Users },
+    { id: "line-demo", label: "LINE Demo", icon: MessageCircle },
   ];
 
   const NavItems = ({ mobile = false }: { mobile?: boolean }) => (

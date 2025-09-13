@@ -5,6 +5,7 @@ import ProductManagement from "@/components/ProductManagement";
 import StoreManagement from "@/components/StoreManagement";
 import MarketingTools from "@/components/MarketingTools";
 import Analytics from "@/components/Analytics";
+import LineBotDemo from "@/components/LineBotDemo";
 import heroImage from "@/assets/hero-farm-tech.jpg";
 
 const Index = () => {
@@ -30,6 +31,18 @@ const Index = () => {
         return <Analytics />;
       case "buyers":
         return <div className="p-6"><h1>Buyer Management Coming Soon</h1></div>;
+      case "line-demo":
+        return (
+          <div className="p-6">
+            <h1 className="text-3xl font-bold mb-6 text-center">LINE Bot Demo</h1>
+            <p className="text-muted-foreground text-center mb-8">
+              體驗農民如何在 LINE 中使用 Farm2Market AI 智慧助理
+            </p>
+            <div className="flex justify-center">
+              <LineBotDemo />
+            </div>
+          </div>
+        );
       default:
         return <DashboardOverview />;
     }
