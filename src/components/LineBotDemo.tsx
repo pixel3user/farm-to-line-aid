@@ -45,70 +45,95 @@ const LineBotDemo = () => {
 
       {/* Chat Area */}
       <div className="flex-1 bg-gray-50 p-4 space-y-4 overflow-y-auto">
-        {/* Large Event Card */}
-        <div className="relative">
-          <div className="absolute top-2 right-2 text-xs text-gray-500">5:39 pm</div>
-          <div className="bg-black rounded-2xl overflow-hidden">
-            <div className="relative h-48 bg-gradient-to-br from-blue-900 via-blue-800 to-teal-600">
-              <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
-                <div className="text-4xl font-bold mb-1">09.19</div>
-                <div className="text-sm tracking-wider">FRIDAY</div>
-              </div>
-              <div className="absolute bottom-4 left-4 right-4">
-                <div className="flex justify-center space-x-2 mb-3">
-                  {Array.from({length: 6}).map((_, i) => (
-                    <div key={i} className="w-8 h-8 bg-yellow-400 rounded-full flex items-center justify-center text-xs text-black font-bold">
-                      {String(i + 1).padStart(2, '0')}
-                    </div>
-                  ))}
-                </div>
-                <div className="text-xs text-white/80 text-center">
-                  7F, NO.12 SONGSHOU RD.,XINYI DIST.,TAIPEI CITY 110, TAIWAN(R.O.C.)
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Bot Avatar and Card */}
+        {/* Welcome Message */}
         <div className="flex items-start gap-2">
-          <div className="w-8 h-8 bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+          <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
             AI
           </div>
           <div className="flex-1">
-            <div className="bg-white rounded-2xl overflow-hidden shadow-sm max-w-xs">
-              <div className="relative h-40 bg-gradient-to-r from-blue-400 to-teal-400">
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-center text-white">
-                    <div className="text-3xl font-bold mb-2">SON OF SON</div>
-                    <div className="text-xs opacity-90">AFTERLIFE SIAMESE MELODIC TECHNO THE GREAT BLONDINO</div>
-                  </div>
-                </div>
-                <div className="absolute bottom-4 right-4 w-16 h-16">
-                  <img 
-                    src="/api/placeholder/64/64" 
-                    alt="Person floating in water"
-                    className="w-full h-full object-cover rounded"
-                  />
-                </div>
+            <div className="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm max-w-xs">
+              <div className="text-sm text-gray-900">
+                🌾 歡迎使用 Farm2Market AI！
               </div>
-              <div className="p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Badge className="bg-green-500 text-white text-xs px-2 py-1">免費</Badge>
-                </div>
-                <div className="text-sm font-medium text-gray-900 mb-2">
-                  09.12 (FRI) SON OF SON = ...
-                </div>
-                <div className="flex justify-between items-center text-xs text-gray-500 mb-4">
-                  <span>有效期間</span>
-                  <span>2025/09/13</span>
-                </div>
-                <Button className="w-full bg-green-500 hover:bg-green-600 text-white rounded-lg py-3">
-                  查看優惠券
+            </div>
+            <div className="text-xs text-gray-500 mt-1 ml-2">10:30 am</div>
+          </div>
+        </div>
+
+        {/* Bot Menu Message */}
+        <div className="flex items-start gap-2">
+          <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+            AI
+          </div>
+          <div className="flex-1">
+            <div className="bg-white rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm max-w-xs">
+              <div className="text-sm text-gray-900 mb-3">
+                您的智慧農業銷售助理已啟動。選擇功能：
+              </div>
+              <div className="space-y-2">
+                <Button className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm py-2 rounded-lg justify-start">
+                  📦 管理產品
+                </Button>
+                <Button className="w-full bg-orange-50 hover:bg-orange-100 text-orange-700 text-sm py-2 rounded-lg justify-start">
+                  🤝 查看交易
+                </Button>
+                <Button className="w-full bg-purple-50 hover:bg-purple-100 text-purple-700 text-sm py-2 rounded-lg justify-start">
+                  📈 行銷工具
                 </Button>
               </div>
             </div>
-            <div className="text-xs text-gray-500 mt-1 ml-2">5:39 pm</div>
+            <div className="text-xs text-gray-500 mt-1 ml-2">10:30 am</div>
+          </div>
+        </div>
+
+        {/* User Selection */}
+        <div className="flex justify-end">
+          <div className="bg-blue-500 text-white rounded-2xl rounded-tr-sm px-4 py-3 max-w-xs">
+            <div className="text-sm">📦 管理產品</div>
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <div className="text-xs text-gray-500 mr-2">10:31 am</div>
+        </div>
+
+        {/* Product Management Response */}
+        <div className="flex items-start gap-2">
+          <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
+            AI
+          </div>
+          <div className="flex-1">
+            <div className="bg-white rounded-2xl rounded-tl-sm overflow-hidden shadow-sm max-w-xs">
+              <div className="p-4">
+                <div className="text-sm font-medium text-gray-900 mb-3">
+                  📦 您的產品庫存
+                </div>
+                <div className="space-y-3">
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="font-medium text-sm">新鮮雞蛋</span>
+                      <Badge className="bg-green-100 text-green-800 text-xs">充足</Badge>
+                    </div>
+                    <div className="text-xs text-gray-600">庫存: 150箱 | 價格: NT$180/箱</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-3">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="font-medium text-sm">有機雞蛋</span>
+                      <Badge className="bg-yellow-100 text-yellow-800 text-xs">偏低</Badge>
+                    </div>
+                    <div className="text-xs text-gray-600">庫存: 25箱 | 價格: NT$280/箱</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2 mt-4">
+                  <Button className="bg-blue-500 hover:bg-blue-600 text-white text-xs py-2 rounded-lg">
+                    新增產品
+                  </Button>
+                  <Button className="bg-green-500 hover:bg-green-600 text-white text-xs py-2 rounded-lg">
+                    更新庫存
+                  </Button>
+                </div>
+              </div>
+            </div>
+            <div className="text-xs text-gray-500 mt-1 ml-2">10:31 am</div>
           </div>
         </div>
       </div>
