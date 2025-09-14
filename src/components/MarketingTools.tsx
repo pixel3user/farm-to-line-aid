@@ -23,6 +23,9 @@ import {
   Settings
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import marketingImage1 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (4).png";
+import marketingImage2 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (5).png";
+import marketingImage3 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt.png";
 
 const MarketingTools = () => {
   const [showGenerator, setShowGenerator] = useState(false);
@@ -75,7 +78,8 @@ const MarketingTools = () => {
       product: "A 級雞蛋",
       createdAt: "2 小時前",
       downloads: 12,
-      status: "ready"
+      status: "ready",
+      previewImage: marketingImage1
     },
     {
       id: 2,
@@ -84,7 +88,8 @@ const MarketingTools = () => {
       product: "有機放養雞蛋",
       createdAt: "1 天前",
       downloads: 8,
-      status: "ready"
+      status: "ready",
+      previewImage: marketingImage2
     },
     {
       id: 3,
@@ -93,7 +98,8 @@ const MarketingTools = () => {
       product: "優質鴨蛋",
       createdAt: "3 天前",
       downloads: 15,
-      status: "ready"
+      status: "ready",
+      previewImage: marketingImage3
     }
   ];
 
@@ -329,11 +335,12 @@ const MarketingTools = () => {
                   </div>
                   
                   {/* Preview Area */}
-                  <div className="aspect-[4/3] bg-gradient-primary/10 rounded-lg flex items-center justify-center mb-4 border border-primary/20">
-                    <div className="text-center">
-                      <FileText className="h-8 w-8 text-primary/40 mx-auto mb-2" />
-                      <p className="text-xs text-muted-foreground">預覽</p>
-                    </div>
+                  <div className="aspect-[4/3] bg-gradient-primary/10 rounded-lg overflow-hidden mb-4 border border-primary/20">
+                    <img 
+                      src={material.previewImage} 
+                      alt={`${material.name} preview`}
+                      className="w-full h-full object-cover"
+                    />
                   </div>
                   
                   <div className="space-y-2 text-xs text-muted-foreground">

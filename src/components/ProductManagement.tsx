@@ -20,6 +20,9 @@ import {
   Upload
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import eggImage1 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (1).png";
+import eggImage2 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (2).png";
+import eggImage3 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (3).png";
 
 const ProductManagement = () => {
   const [showAddProduct, setShowAddProduct] = useState(false);
@@ -37,7 +40,7 @@ const ProductManagement = () => {
       status: "active",
       lastOrder: "2 天前",
       totalSold: "1,250 盒",
-      image: "/placeholder.svg"
+      image: eggImage1
     },
     {
       id: 2,
@@ -50,7 +53,7 @@ const ProductManagement = () => {
       status: "low_stock",
       lastOrder: "5 天前",
       totalSold: "420 盒",
-      image: "/placeholder.svg"
+      image: eggImage2
     },
     {
       id: 3,
@@ -63,7 +66,7 @@ const ProductManagement = () => {
       status: "active",
       lastOrder: "1 天前",
       totalSold: "180 盒",
-      image: "/placeholder.svg"
+      image: eggImage3
     }
   ];
 
@@ -196,9 +199,13 @@ const ProductManagement = () => {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Product Image Placeholder */}
-              <div className="aspect-video bg-gradient-primary/10 rounded-lg flex items-center justify-center border border-primary/20">
-                <Package className="h-12 w-12 text-primary/40" />
+              {/* Product Image */}
+              <div className="aspect-video bg-gradient-primary/10 rounded-lg overflow-hidden border border-primary/20">
+                <img 
+                  src={product.image} 
+                  alt={product.name}
+                  className="w-full h-full object-cover"
+                />
               </div>
 
               {/* Stock Info */}
