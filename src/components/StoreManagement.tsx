@@ -29,15 +29,15 @@ const StoreManagement = () => {
   const connectedStores = [
     {
       id: 1,
-      name: "GreenMart Organic",
-      type: "Supermarket",
-      location: "Hsinchu City Center",
-      distance: "2.3 km",
+      name: "綠色有機超市",
+      type: "超市",
+      location: "新竹市中心",
+      distance: "2.3 公里",
       contact: "+886-3-123-4567",
       email: "orders@greenmart.tw",
       status: "active",
-      lastOrder: "2 days ago",
-      orderFrequency: "Every 3 days",
+      lastOrder: "2 天前",
+      orderFrequency: "每 3 天",
       avgOrderValue: "NT$2,400",
       totalOrders: 24,
       rating: 4.8,
@@ -45,15 +45,15 @@ const StoreManagement = () => {
     },
     {
       id: 2,
-      name: "FreshMart Express",
-      type: "Convenience Store",
-      location: "Zhubei District",
-      distance: "4.1 km",
+      name: "新鮮便利超商",
+      type: "便利商店",
+      location: "竹北區",
+      distance: "4.1 公里",
       contact: "+886-3-987-6543",
       email: "supply@freshmart.tw",
       status: "active",
-      lastOrder: "1 day ago",
-      orderFrequency: "Every 2 days",
+      lastOrder: "1 天前",
+      orderFrequency: "每 2 天",
       avgOrderValue: "NT$1,800",
       totalOrders: 32,
       rating: 4.6,
@@ -61,15 +61,15 @@ const StoreManagement = () => {
     },
     {
       id: 3,
-      name: "Organic Valley Market",
-      type: "Organic Store",
-      location: "Xinpu Township",
-      distance: "1.8 km",
+      name: "有機谷市場",
+      type: "有機商店",
+      location: "新埔鎮",
+      distance: "1.8 公里",
       contact: "+886-3-555-7890",
       email: "orders@organicvalley.tw",
       status: "pending",
-      lastOrder: "Never",
-      orderFrequency: "New contact",
+      lastOrder: "從未下單",
+      orderFrequency: "新聯絡人",
       avgOrderValue: "NT$0",
       totalOrders: 0,
       rating: 4.9,
@@ -79,57 +79,57 @@ const StoreManagement = () => {
 
   const nearbyStores = [
     {
-      name: "Natural Foods Co-op",
-      type: "Organic Store",
-      distance: "3.2 km",
+      name: "天然食品合作社",
+      type: "有機商店",
+      distance: "3.2 公里",
       rating: 4.7,
-      potential: "High",
-      reason: "Specializes in local farm products"
+      potential: "高",
+      reason: "專營在地農場產品"
     },
     {
-      name: "Farm Fresh Market",
-      type: "Farmers Market",
-      distance: "5.1 km",
+      name: "農場鮮品市場",
+      type: "農夫市集",
+      distance: "5.1 公里",
       rating: 4.5,
-      potential: "Medium",
-      reason: "Weekend market, seasonal demand"
+      potential: "中",
+      reason: "週末市集，季節性需求"
     },
     {
-      name: "City Deli & Bakery",
-      type: "Restaurant/Bakery",
-      distance: "2.8 km",
+      name: "城市熟食與烘焙",
+      type: "餐廳/烘焙坊",
+      distance: "2.8 公里",
       rating: 4.8,
-      potential: "High",
-      reason: "Uses premium eggs for baking"
+      potential: "高",
+      reason: "使用優質雞蛋製作烘焙食品"
     }
   ];
 
   const handleSendIntro = (storeName: string) => {
     toast({
-      title: "Introduction Sent! 📧",
-      description: `AI-generated introduction sent to ${storeName}. We'll track their response.`,
+      title: "介紹信已發送！ 📧",
+      description: `AI 生成的介紹信已發送給 ${storeName}。我們將追蹤他們的回應。`,
     });
   };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "active":
-        return <Badge variant="default" className="bg-success">Active</Badge>;
+        return <Badge variant="default" className="bg-success">活躍</Badge>;
       case "pending":
-        return <Badge variant="secondary">Pending</Badge>;
+        return <Badge variant="secondary">待定</Badge>;
       default:
-        return <Badge variant="outline">Unknown</Badge>;
+        return <Badge variant="outline">未知</Badge>;
     }
   };
 
   const getRelationshipBadge = (relationship: string) => {
     switch (relationship) {
       case "established":
-        return <Badge variant="outline" className="border-primary text-primary">Established</Badge>;
+        return <Badge variant="outline" className="border-primary text-primary">已建立</Badge>;
       case "new_lead":
-        return <Badge variant="outline" className="border-accent text-accent">New Lead</Badge>;
+        return <Badge variant="outline" className="border-accent text-accent">新客戶</Badge>;
       default:
-        return <Badge variant="outline">Contact</Badge>;
+        return <Badge variant="outline">聯絡人</Badge>;
     }
   };
 
@@ -138,39 +138,39 @@ const StoreManagement = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Store Management</h1>
-          <p className="text-muted-foreground mt-1">Manage your store relationships and discover new opportunities</p>
+          <h1 className="text-3xl font-bold text-foreground">商店管理</h1>
+          <p className="text-muted-foreground mt-1">管理商店關係並發現新機會</p>
         </div>
         <div className="flex gap-2">
           <Dialog open={showStoreLocator} onOpenChange={setShowStoreLocator}>
             <DialogTrigger asChild>
               <Button variant="farm" className="gap-2">
                 <Search className="h-4 w-4" />
-                Find New Stores
+                尋找新商店
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-4xl">
               <DialogHeader>
-                <DialogTitle>AI Store Locator</DialogTitle>
+                <DialogTitle>AI 商店定位器</DialogTitle>
                 <DialogDescription>
-                  Discover potential buyers near your farm using AI-powered matching
+                  使用 AI 驅動匹配發現您農場附近的潛在買家
                 </DialogDescription>
               </DialogHeader>
               
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <Label htmlFor="location">Search Radius</Label>
-                    <Input id="location" placeholder="10 km from farm" />
+                    <Label htmlFor="location">搜尋半徑</Label>
+                    <Input id="location" placeholder="農場 10 公里內" />
                   </div>
                   <div>
-                    <Label htmlFor="storeType">Store Type</Label>
-                    <Input id="storeType" placeholder="Organic, Supermarket, etc." />
+                    <Label htmlFor="storeType">商店類型</Label>
+                    <Input id="storeType" placeholder="有機、超市等" />
                   </div>
                   <div className="flex items-end">
                     <Button variant="hero" className="w-full">
                       <Search className="h-4 w-4 mr-2" />
-                      Search Stores
+                      搜尋商店
                     </Button>
                   </div>
                 </div>
@@ -192,12 +192,12 @@ const StoreManagement = () => {
                       </CardHeader>
                       <CardContent className="space-y-3">
                         <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">Distance</span>
+                          <span className="text-muted-foreground">距離</span>
                           <span>{store.distance}</span>
                         </div>
                         <div className="flex items-center justify-between text-sm">
-                          <span className="text-muted-foreground">Potential</span>
-                          <Badge variant={store.potential === "High" ? "default" : "secondary"}>
+                          <span className="text-muted-foreground">潛力</span>
+                          <Badge variant={store.potential === "高" ? "default" : "secondary"}>
                             {store.potential}
                           </Badge>
                         </div>
@@ -209,7 +209,7 @@ const StoreManagement = () => {
                             className="flex-1"
                             onClick={() => handleSendIntro(store.name)}
                           >
-                            Send Intro
+                            發送介紹
                           </Button>
                           <Button size="sm" variant="outline">
                             <Phone className="h-3 w-3" />
@@ -225,7 +225,7 @@ const StoreManagement = () => {
           
           <Button variant="outline" className="gap-2">
             <Filter className="h-4 w-4" />
-            Filter
+            篩選
           </Button>
         </div>
       </div>
@@ -270,19 +270,19 @@ const StoreManagement = () => {
               {/* Performance Stats */}
               <div className="grid grid-cols-2 gap-4 pt-2 border-t border-border/50">
                 <div>
-                  <p className="text-xs text-muted-foreground">Total Orders</p>
+                  <p className="text-xs text-muted-foreground">總訂單</p>
                   <p className="font-semibold text-foreground">{store.totalOrders}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Avg Order</p>
+                  <p className="text-xs text-muted-foreground">平均訂單</p>
                   <p className="font-semibold text-foreground">{store.avgOrderValue}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Frequency</p>
+                  <p className="text-xs text-muted-foreground">頻率</p>
                   <p className="font-semibold text-foreground">{store.orderFrequency}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground">Rating</p>
+                  <p className="text-xs text-muted-foreground">評分</p>
                   <div className="flex items-center gap-1">
                     <Star className="h-3 w-3 fill-secondary text-secondary" />
                     <span className="font-semibold">{store.rating}</span>
@@ -293,30 +293,30 @@ const StoreManagement = () => {
               {/* Last Activity */}
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Clock className="h-3 w-3" />
-                <span>Last order: {store.lastOrder}</span>
+                <span>上次訂單：{store.lastOrder}</span>
               </div>
 
               {/* Actions */}
               <div className="flex gap-2 pt-2">
                 <Button variant="outline" size="sm" className="flex-1">
                   <Phone className="h-3 w-3 mr-1" />
-                  Call
+                  通話
                 </Button>
                 <Button variant="farm" size="sm" className="flex-1">
                   <Mail className="h-3 w-3 mr-1" />
-                  Message
+                  訊息
                 </Button>
               </div>
 
               {/* AI Suggestions for established stores */}
               {store.relationship === "established" && store.status === "active" && (
                 <div className="p-3 rounded-lg bg-primary-lighter border border-primary/20">
-                  <p className="text-xs font-medium text-primary">AI Insight</p>
+                  <p className="text-xs font-medium text-primary">AI 洞察</p>
                   <p className="text-xs text-primary/80 mt-1">
-                    {store.name} usually reorders tomorrow. Send a friendly reminder?
+                    {store.name} 通常明天會下單。發送友善提醒？
                   </p>
                   <Button size="sm" variant="outline" className="mt-2 text-xs h-7">
-                    Send Reminder
+                    發送提醒
                   </Button>
                 </div>
               )}
@@ -324,12 +324,12 @@ const StoreManagement = () => {
               {/* Follow-up suggestions for new leads */}
               {store.relationship === "new_lead" && (
                 <div className="p-3 rounded-lg bg-accent-light border border-accent/20">
-                  <p className="text-xs font-medium">Follow-up Suggestion</p>
+                  <p className="text-xs font-medium">追蹤建議</p>
                   <p className="text-xs opacity-80 mt-1">
-                    Schedule a call to discuss their organic egg requirements
+                    安排通話討論他們的有機雞蛋需求
                   </p>
                   <Button size="sm" variant="outline" className="mt-2 text-xs h-7">
-                    Schedule Call
+                    安排通話
                   </Button>
                 </div>
               )}
@@ -343,31 +343,31 @@ const StoreManagement = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <TrendingUp className="h-5 w-5 text-primary" />
-            Store Relationship Overview
+            商店關係概覽
           </CardTitle>
-          <CardDescription>AI-powered insights on your store relationships</CardDescription>
+          <CardDescription>您商店關係的 AI 驅動洞察</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="text-center p-4 rounded-lg bg-success-light border border-success/20">
               <DollarSign className="h-6 w-6 mx-auto text-success mb-2" />
               <p className="text-2xl font-bold text-success-foreground">NT$156K</p>
-              <p className="text-sm text-success-foreground/80">Total Revenue</p>
+              <p className="text-sm text-success-foreground/80">總營收</p>
             </div>
             <div className="text-center p-4 rounded-lg bg-primary-lighter border border-primary/20">
               <Store className="h-6 w-6 mx-auto text-primary mb-2" />
               <p className="text-2xl font-bold text-primary">12</p>
-              <p className="text-sm text-primary/80">Active Stores</p>
+              <p className="text-sm text-primary/80">活躍商店</p>
             </div>
             <div className="text-center p-4 rounded-lg bg-accent-light border border-accent/20">
               <Package className="h-6 w-6 mx-auto text-accent mb-2" />
               <p className="text-2xl font-bold">856</p>
-              <p className="text-sm opacity-80">Total Orders</p>
+              <p className="text-sm opacity-80">總訂單</p>
             </div>
             <div className="text-center p-4 rounded-lg bg-secondary-dark/20 border border-secondary/20">
               <Calendar className="h-6 w-6 mx-auto text-secondary-dark mb-2" />
               <p className="text-2xl font-bold text-secondary-dark">2.3</p>
-              <p className="text-sm text-secondary-dark/80">Avg Days Between Orders</p>
+              <p className="text-sm text-secondary-dark/80">平均訂單間隔天數</p>
             </div>
           </div>
         </CardContent>

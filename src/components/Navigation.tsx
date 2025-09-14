@@ -25,14 +25,14 @@ const Navigation = ({ activeTab, onTabChange }: NavigationProps) => {
   const [isOpen, setIsOpen] = useState(false);
 
   const menuItems = [
-    { id: "dashboard", label: "Dashboard", icon: Home },
-    { id: "products", label: "Products", icon: Package },
-    { id: "stores", label: "Stores", icon: Store },
-    { id: "marketing", label: "Marketing", icon: PenTool },
-    { id: "analytics", label: "Analytics", icon: BarChart3 },
-    { id: "ai-brain", label: "AI Brain", icon: Brain },
-    { id: "buyers", label: "Buyers", icon: Users },
-    { id: "line-demo", label: "LINE Demo", icon: MessageCircle },
+    { id: "dashboard", label: "儀表板", icon: Home },
+    { id: "products", label: "產品管理", icon: Package },
+    { id: "stores", label: "商店管理", icon: Store },
+    { id: "marketing", label: "行銷工具", icon: PenTool },
+    { id: "analytics", label: "數據分析", icon: BarChart3 },
+    { id: "ai-brain", label: "AI 大腦", icon: Brain },
+    { id: "buyers", label: "買方管理", icon: Users },
+    { id: "line-demo", label: "LINE 演示", icon: MessageCircle },
   ];
 
   const NavItems = ({ mobile = false }: { mobile?: boolean }) => (
@@ -76,7 +76,7 @@ const Navigation = ({ activeTab, onTabChange }: NavigationProps) => {
             <div className="pt-12 space-y-4">
               <div className="px-4">
                 <h2 className="text-lg font-semibold text-primary">Farm2Market AI</h2>
-                <p className="text-sm text-muted-foreground">Agricultural Sales Assistant</p>
+                <p className="text-sm text-muted-foreground">智慧農業銷售助理</p>
               </div>
               <nav className="space-y-2 px-4">
                 <NavItems mobile />

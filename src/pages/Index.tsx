@@ -33,11 +33,11 @@ const Index = () => {
       case "ai-brain":
         return <AIBrainVisualization />;
       case "buyers":
-        return <div className="p-6"><h1>Buyer Management Coming Soon</h1></div>;
+        return <div className="p-6"><h1>買方管理即將推出</h1></div>;
       case "line-demo":
         return (
           <div className="p-6">
-            <h1 className="text-3xl font-bold mb-6 text-center">LINE Bot Demo</h1>
+            <h1 className="text-3xl font-bold mb-6 text-center">LINE Bot 演示</h1>
             <p className="text-muted-foreground text-center mb-8">
               體驗農民如何在 LINE 中使用 Farm2Market AI 智慧助理
             </p>
@@ -67,10 +67,10 @@ const Index = () => {
                 Farm2Market AI
               </h1>
               <p className="text-xl md:text-2xl opacity-90">
-                智慧農業銷售助理 | Agricultural Sales Assistant
+                智慧農業銷售助理
               </p>
               <p className="text-base md:text-lg opacity-80">
-                Transform your farm sales with AI-powered LINE integration
+                運用 AI 驅動的 LINE 整合轉變您的農場銷售
               </p>
             </div>
           </div>
@@ -88,7 +88,7 @@ const Index = () => {
       {/* LIFF Integration Info */}
       {isLiffApp && (
         <div className="fixed bottom-4 right-4 p-3 bg-primary text-primary-foreground rounded-lg shadow-strong text-sm">
-          🤖 Connected to LINE Bot
+          🤖 已連接到 LINE Bot
         </div>
       )}
     </div>

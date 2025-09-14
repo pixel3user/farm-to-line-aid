@@ -19,30 +19,30 @@ import aiAssistantIcon from "@/assets/ai-assistant-icon.png";
 const DashboardOverview = () => {
   const stats = [
     {
-      title: "Active Products",
+      title: "活躍產品",
       value: "8",
-      change: "+2 this week",
+      change: "+2 本週新增",
       icon: Package,
       color: "text-primary"
     },
     {
-      title: "Connected Stores",
+      title: "合作商店",
       value: "12",
-      change: "+3 new leads",
+      change: "+3 新客戶",
       icon: Store,
       color: "text-accent"
     },
     {
-      title: "Weekly Revenue",
+      title: "週營業額",
       value: "NT$45,200",
-      change: "+15% vs last week",
+      change: "+15% 相比上週",
       icon: DollarSign,
       color: "text-success"
     },
     {
-      title: "Reorder Rate",
+      title: "回購率",
       value: "85%",
-      change: "+12% improvement",
+      change: "+12% 提升",
       icon: TrendingUp,
       color: "text-secondary-dark"
     }
@@ -51,55 +51,55 @@ const DashboardOverview = () => {
   const recentActivity = [
     {
       type: "order",
-      message: "GreenMart placed repeat order for Grade A eggs",
-      time: "2 hours ago",
+      message: "綠色超市下了 A 級雞蛋的重複訂單",
+      time: "2 小時前",
       status: "success"
     },
     {
       type: "alert",
-      message: "FreshMart inventory running low - reorder suggested",
-      time: "4 hours ago",
+      message: "新鮮超市庫存不足 - 建議補貨",
+      time: "4 小時前",
       status: "warning"
     },
     {
       type: "lead",
-      message: "New store interested: Organic Valley Market",
-      time: "6 hours ago",
+      message: "新商店有興趣：有機谷市場",
+      time: "6 小時前",
       status: "info"
     },
     {
       type: "marketing",
-      message: "Recipe card generated for farm-fresh eggs",
-      time: "1 day ago",
+      message: "為農場新鮮雞蛋生成食譜卡",
+      time: "1 天前",
       status: "success"
     }
   ];
 
   const quickActions = [
     {
-      title: "Add New Product",
-      description: "List a new product for sale",
+      title: "新增產品",
+      description: "上架新產品販售",
       icon: Plus,
       action: "products",
       variant: "default" as const
     },
     {
-      title: "Find New Stores",
-      description: "Discover potential buyers nearby",
+      title: "尋找新商店",
+      description: "發現附近潛在買家",
       icon: Store,
       action: "stores",
       variant: "secondary" as const
     },
     {
-      title: "Create Marketing",
-      description: "Generate flyers and product cards",
+      title: "創建行銷",
+      description: "生成傳單和產品卡",
       icon: BarChart3,
       action: "marketing",
       variant: "farm" as const
     },
     {
-      title: "Check Analytics",
-      description: "View sales performance",
+      title: "查看分析",
+      description: "檢視銷售績效",
       icon: TrendingUp,
       action: "analytics",
       variant: "outline" as const
@@ -111,14 +111,14 @@ const DashboardOverview = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">Good Morning! 🌅</h1>
-          <p className="text-muted-foreground mt-1">Here's your farm business overview for today</p>
+          <h1 className="text-3xl font-bold text-foreground">早安！ 🌅</h1>
+          <p className="text-muted-foreground mt-1">這是您今天的農場業務概覽</p>
         </div>
         <div className="flex items-center gap-3">
-          <img src={aiAssistantIcon} alt="AI Assistant" className="w-12 h-12 rounded-lg shadow-medium" />
+          <img src={aiAssistantIcon} alt="AI 助理" className="w-12 h-12 rounded-lg shadow-medium" />
           <div>
-            <p className="text-sm font-medium">AI Assistant Active</p>
-            <p className="text-xs text-muted-foreground">Monitoring 8 products</p>
+            <p className="text-sm font-medium">AI 助理運作中</p>
+            <p className="text-xs text-muted-foreground">監控 8 項產品</p>
           </div>
         </div>
       </div>
@@ -149,9 +149,9 @@ const DashboardOverview = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Calendar className="h-5 w-5 text-primary" />
-            Quick Actions
+            快速操作
           </CardTitle>
-          <CardDescription>Common tasks to help grow your farm business</CardDescription>
+          <CardDescription>幫助發展農場業務的常用任務</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -182,9 +182,9 @@ const DashboardOverview = () => {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Clock className="h-5 w-5 text-primary" />
-              Recent Activity
+              最新動態
             </CardTitle>
-            <CardDescription>Latest updates from your farm business</CardDescription>
+            <CardDescription>您農場業務的最新更新</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {recentActivity.map((activity, index) => (
@@ -207,42 +207,42 @@ const DashboardOverview = () => {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <img src={aiAssistantIcon} alt="AI" className="w-5 h-5" />
-              AI Insights
+              AI 洞察
             </CardTitle>
-            <CardDescription>Smart recommendations for your business</CardDescription>
+            <CardDescription>為您業務提供智慧建議</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="p-4 rounded-lg bg-success-light border border-success/20">
               <div className="flex items-center gap-2 mb-2">
                 <CheckCircle className="h-4 w-4 text-success" />
-                <p className="font-medium text-success-foreground">Reorder Opportunity</p>
+                <p className="font-medium text-success-foreground">補貨機會</p>
               </div>
               <p className="text-sm text-success-foreground/80">
-                FreshMart typically reorders every 3 days. Send a gentle reminder today to maintain supply.
+                新鮮超市通常每 3 天補貨一次。今天發送溫和提醒以維持供應。
               </p>
-              <Button size="sm" variant="success" className="mt-2">Send Reminder</Button>
+              <Button size="sm" variant="success" className="mt-2">發送提醒</Button>
             </div>
 
             <div className="p-4 rounded-lg bg-warning-light border border-warning/20">
               <div className="flex items-center gap-2 mb-2">
                 <AlertTriangle className="h-4 w-4 text-warning" />
-                <p className="font-medium text-warning-foreground">Marketing Suggestion</p>
+                <p className="font-medium text-warning-foreground">行銷建議</p>
               </div>
               <p className="text-sm text-warning-foreground/80">
-                Create a recipe card for your premium eggs - 73% higher conversion rate.
+                為您的優質雞蛋創建食譜卡 - 轉換率提高 73%。
               </p>
-              <Button size="sm" variant="warning" className="mt-2">Create Recipe</Button>
+              <Button size="sm" variant="warning" className="mt-2">創建食譜</Button>
             </div>
 
             <div className="p-4 rounded-lg bg-accent-light border border-accent/20">
               <div className="flex items-center gap-2 mb-2">
                 <Store className="h-4 w-4 text-accent" />
-                <p className="font-medium">New Store Potential</p>
+                <p className="font-medium">新商店潛力</p>
               </div>
               <p className="text-sm opacity-80">
-                3 organic markets opened within 5km - perfect for your farm-fresh eggs.
+                5 公里內有 3 家有機市場開業 - 非常適合您的農場新鮮雞蛋。
               </p>
-              <Button size="sm" variant="outline" className="mt-2">Explore Leads</Button>
+              <Button size="sm" variant="outline" className="mt-2">探索客戶</Button>
             </div>
           </CardContent>
         </Card>
