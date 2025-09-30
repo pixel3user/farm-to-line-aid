@@ -23,6 +23,8 @@ import {
   Settings
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { DatabaseService } from "@/lib/database";
 import marketingImage1 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (4).png";
 import marketingImage2 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (5).png";
 import marketingImage3 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt.png";
@@ -31,6 +33,7 @@ const MarketingTools = () => {
   const [showGenerator, setShowGenerator] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState("flyer");
   const { toast } = useToast();
+  const { user, userMarketingMaterials, userProducts, refreshUserData } = useAuth();
 
   const templates = [
     {
@@ -70,45 +73,40 @@ const MarketingTools = () => {
     }
   ];
 
-  const generatedMaterials = [
-    {
-      id: 1,
-      name: "農場新鮮雞蛋傳單",
-      type: "flyer",
-      product: "A 級雞蛋",
-      createdAt: "2 小時前",
-      downloads: 12,
-      status: "ready",
-      previewImage: marketingImage1
-    },
-    {
-      id: 2,
-      name: "有機雞蛋食譜卡",
-      type: "recipe",
-      product: "有機放養雞蛋",
-      createdAt: "1 天前",
-      downloads: 8,
-      status: "ready",
-      previewImage: marketingImage2
-    },
-    {
-      id: 3,
-      name: "鴨蛋貨架卡",
-      type: "card",
-      product: "優質鴨蛋",
-      createdAt: "3 天前",
-      downloads: 15,
-      status: "ready",
-      previewImage: marketingImage3
-    }
-  ];
+  // Use real user marketing materials from database
+  const generatedMaterials = userMarketingMaterials.map(material => ({
+    id: material.id,
+    name: material.title,
+    type: material.type === 'flyer' ? 'flyer' : 
+          material.type === 'shelf_card' ? 'card' :
+          material.type === 'recipe_card' ? 'recipe' : 'social',
+    product: userProducts.find(p => p.id === material.productId)?.name || "未指定產品",
+    createdAt: material.createdAt ? "2 小時前" : "剛剛", // This would be formatted from timestamp
+    downloads: material.usage?.timesUsed || 0,
+    status: material.isActive ? "ready" : "draft",
+    previewImage: marketingImage1 // Default image
+  }));
 
-  const handleGenerateMaterial = () => {
-    toast({
-      title: "行銷材料生成完成！ 🎨",
-      description: "您的 AI 設計行銷材料已準備下載。",
-    });
-    setShowGenerator(false);
+  const handleGenerateMaterial = async (materialData: any) => {
+    try {
+      if (!user) return;
+      
+      await DatabaseService.createMarketingMaterial(user.id, materialData);
+      await refreshUserData();
+      
+      toast({
+        title: "行銷材料生成完成！ 🎨",
+        description: "您的 AI 設計行銷材料已準備下載。",
+      });
+      setShowGenerator(false);
+    } catch (error) {
+      console.error('Failed to create marketing material:', error);
+      toast({
+        title: "生成失敗",
+        description: "請稍後再試。",
+        variant: "destructive"
+      });
+    }
   };
 
   const getTypeIcon = (type: string) => {

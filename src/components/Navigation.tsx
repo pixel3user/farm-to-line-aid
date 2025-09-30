@@ -12,7 +12,8 @@ import {
   Settings,
   HelpCircle,
   MessageCircle,
-  Brain
+  Brain,
+  User
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +33,8 @@ const Navigation = ({ activeTab, onTabChange }: NavigationProps) => {
     { id: "analytics", label: "數據分析", icon: BarChart3 },
     { id: "ai-brain", label: "AI 大腦", icon: Brain },
     { id: "buyers", label: "買方管理", icon: Users },
+    { id: "profile", label: "個人資料", icon: User },
+    { id: "test", label: "整合測試", icon: Settings },
     { id: "line-demo", label: "LINE 演示", icon: MessageCircle },
   ];
 

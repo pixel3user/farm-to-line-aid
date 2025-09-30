@@ -21,61 +21,34 @@ import {
   Package
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { DatabaseService } from "@/lib/database";
 
 const StoreManagement = () => {
   const [showStoreLocator, setShowStoreLocator] = useState(false);
   const { toast } = useToast();
+  const { user, userStores, refreshUserData } = useAuth();
 
-  const connectedStores = [
-    {
-      id: 1,
-      name: "綠色有機超市",
-      type: "超市",
-      location: "新竹市中心",
-      distance: "2.3 公里",
-      contact: "+886-3-123-4567",
-      email: "orders@greenmart.tw",
-      status: "active",
-      lastOrder: "2 天前",
-      orderFrequency: "每 3 天",
-      avgOrderValue: "NT$2,400",
-      totalOrders: 24,
-      rating: 4.8,
-      relationship: "established"
-    },
-    {
-      id: 2,
-      name: "新鮮便利超商",
-      type: "便利商店",
-      location: "竹北區",
-      distance: "4.1 公里",
-      contact: "+886-3-987-6543",
-      email: "supply@freshmart.tw",
-      status: "active",
-      lastOrder: "1 天前",
-      orderFrequency: "每 2 天",
-      avgOrderValue: "NT$1,800",
-      totalOrders: 32,
-      rating: 4.6,
-      relationship: "established"
-    },
-    {
-      id: 3,
-      name: "有機谷市場",
-      type: "有機商店",
-      location: "新埔鎮",
-      distance: "1.8 公里",
-      contact: "+886-3-555-7890",
-      email: "orders@organicvalley.tw",
-      status: "pending",
-      lastOrder: "從未下單",
-      orderFrequency: "新聯絡人",
-      avgOrderValue: "NT$0",
-      totalOrders: 0,
-      rating: 4.9,
-      relationship: "new_lead"
-    }
-  ];
+  // Use real user stores from database
+  const connectedStores = userStores.map(store => ({
+    id: store.id,
+    name: store.name,
+    type: store.type === 'supermarket' ? '超市' : 
+          store.type === 'restaurant' ? '餐廳' :
+          store.type === 'farmers_market' ? '農夫市集' :
+          store.type === 'online_store' ? '線上商店' : '其他',
+    location: store.location,
+    distance: "2.3 公里", // This would be calculated from user location
+    contact: store.contact?.phone || "未提供",
+    email: store.contact?.email || "未提供",
+    status: store.status === 'customer' ? 'active' : 'potential',
+    lastOrder: store.metadata?.lastOrder ? "2 天前" : "無",
+    orderFrequency: "每 3 天", // This would be calculated from order history
+    avgOrderValue: `NT$${store.metadata?.totalRevenue ? Math.round(store.metadata.totalRevenue / Math.max(store.metadata.totalOrders, 1)) : 0}`,
+    totalOrders: store.metadata?.totalOrders || 0,
+    rating: 4.8, // This would be calculated from feedback
+    relationship: store.status === 'customer' ? 'established' : 'potential'
+  }));
 
   const nearbyStores = [
     {

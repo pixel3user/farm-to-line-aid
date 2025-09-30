@@ -7,6 +7,8 @@ import MarketingTools from "@/components/MarketingTools";
 import Analytics from "@/components/Analytics";
 import LineBotDemo from "@/components/LineBotDemo";
 import { AIBrainVisualization } from "@/components/AIBrainVisualization";
+import UserProfile from "@/components/UserProfile";
+import TestIntegration from "@/pages/TestIntegration";
 import heroImage from "@/assets/hero-farm-tech.jpg";
 
 const Index = () => {
@@ -34,6 +36,17 @@ const Index = () => {
         return <AIBrainVisualization />;
       case "buyers":
         return <div className="p-6"><h1>買方管理即將推出</h1></div>;
+      case "profile":
+        return (
+          <div className="p-6">
+            <h1 className="text-3xl font-bold mb-6 text-center">個人資料</h1>
+            <div className="flex justify-center">
+              <UserProfile />
+            </div>
+          </div>
+        );
+      case "test":
+        return <TestIntegration />;
       case "line-demo":
         return (
           <div className="p-6">

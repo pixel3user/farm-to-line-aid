@@ -14,66 +14,71 @@ import {
   BarChart3,
   Calendar
 } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
 import aiAssistantIcon from "@/assets/ai-assistant-icon.png";
 
 const DashboardOverview = () => {
+  const { user, userStats, userProducts, userStores } = useAuth();
+
+  // Calculate stats from real data
   const stats = [
     {
       title: "活躍產品",
-      value: "8",
-      change: "+2 本週新增",
+      value: userStats?.activeProducts?.toString() || "0",
+      change: `+${userProducts.length} 總產品`,
       icon: Package,
       color: "text-primary"
     },
     {
       title: "合作商店",
-      value: "12",
-      change: "+3 新客戶",
+      value: userStats?.totalStores?.toString() || "0",
+      change: `${userStores.filter(s => s.status === 'customer').length} 客戶`,
       icon: Store,
       color: "text-accent"
     },
     {
-      title: "週營業額",
-      value: "NT$45,200",
-      change: "+15% 相比上週",
+      title: "總營業額",
+      value: `NT$${userStats?.totalRevenue?.toLocaleString() || "0"}`,
+      change: `+${userStats?.monthlyGrowth || 0}% 月成長`,
       icon: DollarSign,
       color: "text-success"
     },
     {
-      title: "回購率",
-      value: "85%",
-      change: "+12% 提升",
+      title: "行銷素材",
+      value: userStats?.totalMarketingMaterials?.toString() || "0",
+      change: "AI 生成",
       icon: TrendingUp,
       color: "text-secondary-dark"
     }
   ];
 
+  // Generate recent activity from real data
   const recentActivity = [
-    {
-      type: "order",
-      message: "綠色超市下了 A 級雞蛋的重複訂單",
-      time: "2 小時前",
-      status: "success"
-    },
-    {
+    ...(userProducts.filter(p => p.stock <= 10).map(product => ({
       type: "alert",
-      message: "新鮮超市庫存不足 - 建議補貨",
-      time: "4 小時前",
-      status: "warning"
-    },
+      message: `${product.name} 庫存不足 - 建議補貨`,
+      time: "剛剛",
+      status: "warning" as const
+    }))),
+    ...(userStores.filter(s => s.status === 'customer').slice(0, 2).map(store => ({
+      type: "order",
+      message: `${store.name} 下了重複訂單`,
+      time: "2 小時前",
+      status: "success" as const
+    }))),
     {
       type: "lead",
       message: "新商店有興趣：有機谷市場",
       time: "6 小時前",
-      status: "info"
+      status: "info" as const
     },
     {
       type: "marketing",
       message: "為農場新鮮雞蛋生成食譜卡",
       time: "1 天前",
-      status: "success"
+      status: "success" as const
     }
-  ];
+  ].slice(0, 4);
 
   const quickActions = [
     {
@@ -118,7 +123,7 @@ const DashboardOverview = () => {
           <img src={aiAssistantIcon} alt="AI 助理" className="w-12 h-12 rounded-lg shadow-medium" />
           <div>
             <p className="text-sm font-medium">AI 助理運作中</p>
-            <p className="text-xs text-muted-foreground">監控 8 項產品</p>
+            <p className="text-xs text-muted-foreground">監控 {userStats?.totalProducts || 0} 項產品</p>
           </div>
         </div>
       </div>

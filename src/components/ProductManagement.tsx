@@ -20,6 +20,8 @@ import {
   Upload
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/contexts/AuthContext";
+import { DatabaseService } from "@/lib/database";
 import eggImage1 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (1).png";
 import eggImage2 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (2).png";
 import eggImage3 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (3).png";
@@ -27,55 +29,43 @@ import eggImage3 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqi
 const ProductManagement = () => {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const { toast } = useToast();
+  const { user, userProducts, refreshUserData } = useAuth();
 
-  const products = [
-    {
-      id: 1,
-      name: "農場新鮮 A 級雞蛋",
-      category: "雞蛋",
-      price: "NT$180",
-      unit: "每 30 顆裝",
-      stock: 45,
-      minStock: 10,
-      status: "active",
-      lastOrder: "2 天前",
-      totalSold: "1,250 盒",
-      image: eggImage1
-    },
-    {
-      id: 2,
-      name: "有機放養雞蛋",
-      category: "雞蛋",
-      price: "NT$280",
-      unit: "每 30 顆裝",
-      stock: 8,
-      minStock: 15,
-      status: "low_stock",
-      lastOrder: "5 天前",
-      totalSold: "420 盒",
-      image: eggImage2
-    },
-    {
-      id: 3,
-      name: "優質鴨蛋",
-      category: "鴨蛋",
-      price: "NT$320",
-      unit: "每 20 顆裝",
-      stock: 22,
-      minStock: 5,
-      status: "active",
-      lastOrder: "1 天前",
-      totalSold: "180 盒",
-      image: eggImage3
+  // Use real user products from database
+  const products = userProducts.map(product => ({
+    id: product.id,
+    name: product.name,
+    category: product.category,
+    price: `NT$${product.price}`,
+    unit: product.unit,
+    stock: product.stock,
+    minStock: 10, // Default minimum stock
+    status: product.stock <= 10 ? "low_stock" : "active",
+    lastOrder: "2 天前", // This would come from order history
+    totalSold: "1,250 盒", // This would be calculated from sales data
+    image: eggImage1 // Default image, could be from product.images[0]
+  }));
+
+  const handleAddProduct = async (productData: any) => {
+    try {
+      if (!user) return;
+      
+      await DatabaseService.createProduct(user.id, productData);
+      await refreshUserData();
+      
+      toast({
+        title: "產品新增成功！ 🎉",
+        description: "您的新產品已新增，AI 行銷材料正在生成中。",
+      });
+      setShowAddProduct(false);
+    } catch (error) {
+      console.error('Failed to add product:', error);
+      toast({
+        title: "新增失敗",
+        description: "請稍後再試。",
+        variant: "destructive"
+      });
     }
-  ];
-
-  const handleAddProduct = () => {
-    toast({
-      title: "產品新增成功！ 🎉",
-      description: "您的新產品已新增，AI 行銷材料正在生成中。",
-    });
-    setShowAddProduct(false);
   };
 
   const getStatusBadge = (status: string, stock: number, minStock: number) => {

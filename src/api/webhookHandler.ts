@@ -45,6 +45,43 @@ export class WebhookHandler {
     await this.lineBot.replyMessage(event.replyToken, welcomeMessages);
   }
 
+  // Handle web app access request
+  private async handleWebAppAccess(event: WebhookEvent): Promise<void> {
+    if (!event.replyToken || !event.source?.userId) return;
+
+    try {
+      // Get user profile from LINE
+      const userProfile = await this.lineBot.getUserProfile(event.source.userId);
+      
+      // Create web app URL with user parameters
+      const webAppUrl = `${process.env.LIFF_URL || 'https://your-app-url.com'}?userId=${userProfile.userId}&displayName=${encodeURIComponent(userProfile.displayName)}&pictureUrl=${encodeURIComponent(userProfile.pictureUrl || '')}`;
+      
+      const messages = [{
+        type: 'text',
+        text: '正在為您開啟 Farm2Market AI 管理介面...'
+      }, {
+        type: 'text',
+        text: '點擊下方連結進入您的專屬管理面板：',
+        quickReply: {
+          items: [{
+            type: 'action',
+            action: {
+              type: 'uri',
+              label: '開啟管理介面',
+              uri: webAppUrl
+            }
+          }]
+        }
+      }];
+
+      await this.lineBot.replyMessage(event.replyToken, messages);
+    } catch (error) {
+      console.error('Error handling web app access:', error);
+      const errorMessage = MessageTemplates.errorMessage('無法開啟管理介面，請稍後再試。');
+      await this.lineBot.replyMessage(event.replyToken, errorMessage);
+    }
+  }
+
   // Handle text/image messages
   private async handleMessage(event: WebhookEvent): Promise<void> {
     if (!event.replyToken || !event.message) return;
@@ -71,6 +108,8 @@ export class WebhookHandler {
       await this.handleMarketingInquiry(replyToken);
     } else if (lowerText.includes('報告') || lowerText.includes('analytics')) {
       await this.handleAnalyticsInquiry(replyToken);
+    } else if (lowerText.includes('管理') || lowerText.includes('dashboard') || lowerText.includes('管理介面')) {
+      await this.handleWebAppAccess({ replyToken, source: { userId } } as WebhookEvent);
     } else if (lowerText.includes('幫助') || lowerText.includes('help')) {
       await this.handleHelpInquiry(replyToken);
     } else {
