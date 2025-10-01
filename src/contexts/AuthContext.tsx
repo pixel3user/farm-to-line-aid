@@ -392,9 +392,37 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
 
-      // In a real implementation, you would send the ID token to your backend
-      // to verify it and get a custom Firebase token
-      // For now, we'll create a user document directly
+      // Exchange LIFF ID token for Firebase custom token
+      let firebaseUser = null;
+      if (idToken) {
+        try {
+          console.log('Exchanging LIFF ID token for Firebase custom token...');
+          const response = await fetch('/api/auth/line', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ idToken }),
+          });
+
+          if (response.ok) {
+            const authResult = await response.json();
+            console.log('Custom token received, signing in to Firebase...');
+            
+            // Sign in to Firebase with custom token
+            const { signInWithCustomToken } = await import('firebase/auth');
+            const userCredential = await signInWithCustomToken(auth, authResult.customToken);
+            firebaseUser = userCredential.user;
+            console.log('Firebase authentication successful:', firebaseUser.uid);
+          } else {
+            console.error('Failed to exchange LIFF token:', response.status);
+            throw new Error('Token exchange failed');
+          }
+        } catch (authError) {
+          console.error('Firebase authentication failed:', authError);
+          throw authError;
+        }
+      }
       
       const userRef = doc(db, 'line_users', profile.userId);
       const userSnap = await getDoc(userRef);
@@ -473,9 +501,34 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setIsLoading(false);
     } catch (error) {
       console.error('Firebase authentication failed:', error);
+      
+      // Fallback: Create a LineUser from profile to allow app to proceed in demo mode
+      console.log('Creating fallback user for demo mode...');
+      const fallbackUser: LineUser = {
+        id: profile.userId,
+        lineUserId: profile.userId,
+        displayName: profile.displayName,
+        pictureUrl: profile.pictureUrl,
+        statusMessage: profile.statusMessage,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        isActive: true,
+        subscriptionTier: 'free',
+        preferences: { 
+          language: 'zh-TW', 
+          notifications: true, 
+          marketingOptIn: false 
+        },
+        metadata: { 
+          totalMessages: 0, 
+          lastInteraction: Timestamp.now(), 
+          favoriteFeatures: [] 
+        }
+      };
+      
+      setUser(fallbackUser);
       setIsLoading(false);
-      // Don't re-throw error to prevent breaking the flow
-      console.log('Continuing with authentication flow despite error');
+      console.log('Fallback user created, app can proceed in demo mode');
     }
   };
 

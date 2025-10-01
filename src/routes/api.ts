@@ -186,6 +186,58 @@ router.get('/user/:userId/marketing-materials', async (req: any, res: any) => {
   }
 });
 
+// POST: LINE authentication endpoint
+router.post('/auth/line', async (req: any, res: any) => {
+  try {
+    const { idToken } = req.body;
+    
+    if (!idToken) {
+      return res.status(400).json({ error: 'LIFF ID token is required' });
+    }
+
+    // Verify LIFF ID token with LINE API
+    const lineResponse = await fetch('https://api.line.me/oauth2/v2.1/verify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        id_token: idToken,
+        client_id: process.env.LINE_CHANNEL_ID || '',
+      }),
+    });
+
+    if (!lineResponse.ok) {
+      console.error('LINE token verification failed:', lineResponse.status);
+      return res.status(401).json({ error: 'Invalid LIFF ID token' });
+    }
+
+    const lineUser = await lineResponse.json();
+    console.log('LINE user verified:', lineUser.sub);
+
+    // Create Firebase custom token
+    const admin = require('firebase-admin');
+    const customToken = await admin.auth().createCustomToken(lineUser.sub, {
+      lineUserId: lineUser.sub,
+      displayName: lineUser.name,
+      pictureUrl: lineUser.picture,
+    });
+
+    res.json({
+      success: true,
+      customToken,
+      user: {
+        lineUserId: lineUser.sub,
+        displayName: lineUser.name,
+        pictureUrl: lineUser.picture,
+      }
+    });
+  } catch (error) {
+    console.error('LINE authentication error:', error);
+    res.status(500).json({ error: 'Authentication failed' });
+  }
+});
+
 // GET: System health check
 router.get('/health', async (req: any, res: any) => {
   try {
