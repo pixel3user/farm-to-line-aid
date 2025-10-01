@@ -176,8 +176,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               if (idToken) {
                 await authenticateWithFirebase(idToken, profile);
               } else {
-                console.log('No ID token available, setting loading to false');
-                setIsLoading(false);
+                console.log('No ID token available, using profile fallback authentication');
+                await authenticateWithFirebase('', profile);
               }
             } else {
               console.log('User is not logged in to LIFF');
