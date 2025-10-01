@@ -38,6 +38,21 @@ export class UserDataService {
   // Get user statistics
   static async getUserStats(userId: string): Promise<UserStats> {
     try {
+      if (!db) {
+        console.warn('Firestore unavailable, returning mock stats');
+        return {
+          totalProducts: 0,
+          totalStores: 0,
+          totalConversations: 0,
+          totalMarketingMaterials: 0,
+          lastActivity: Timestamp.now(),
+          activeProducts: 0,
+          lowStockProducts: 0,
+          totalRevenue: 0,
+          monthlyGrowth: 0
+        };
+      }
+
       const [productsSnap, storesSnap, conversationsSnap, materialsSnap] = await Promise.all([
         getDocs(query(collection(db, 'products'), where('userId', '==', userId))),
         getDocs(query(collection(db, 'stores'), where('userId', '==', userId))),
@@ -76,6 +91,11 @@ export class UserDataService {
   // Get user products
   static async getUserProducts(userId: string, limitCount: number = 10): Promise<Product[]> {
     try {
+      if (!db) {
+        console.warn('Firestore unavailable, returning empty product list');
+        return [];
+      }
+
       const q = query(
         collection(db, 'products'),
         where('userId', '==', userId),
@@ -95,6 +115,11 @@ export class UserDataService {
   // Get user stores
   static async getUserStores(userId: string, limitCount: number = 10): Promise<Store[]> {
     try {
+      if (!db) {
+        console.warn('Firestore unavailable, returning empty store list');
+        return [];
+      }
+
       const q = query(
         collection(db, 'stores'),
         where('userId', '==', userId),
@@ -113,6 +138,11 @@ export class UserDataService {
   // Get recent conversations
   static async getRecentConversations(userId: string, limitCount: number = 10): Promise<Conversation[]> {
     try {
+      if (!db) {
+        console.warn('Firestore unavailable, returning empty conversation list');
+        return [];
+      }
+
       const q = query(
         collection(db, 'conversations'),
         where('userId', '==', userId),
@@ -131,6 +161,11 @@ export class UserDataService {
   // Get marketing materials
   static async getMarketingMaterials(userId: string, limitCount: number = 10): Promise<MarketingMaterial[]> {
     try {
+      if (!db) {
+        console.warn('Firestore unavailable, returning empty marketing materials list');
+        return [];
+      }
+
       const q = query(
         collection(db, 'marketing_materials'),
         where('userId', '==', userId),
@@ -150,6 +185,11 @@ export class UserDataService {
   // Get low stock products
   static async getLowStockProducts(userId: string, threshold: number = 10): Promise<Product[]> {
     try {
+      if (!db) {
+        console.warn('Firestore unavailable, returning empty low stock list');
+        return [];
+      }
+
       const q = query(
         collection(db, 'products'),
         where('userId', '==', userId),
@@ -169,6 +209,28 @@ export class UserDataService {
   // Get complete dashboard data
   static async getDashboardData(userId: string): Promise<DashboardData> {
     try {
+      if (!db) {
+        console.warn('Firestore unavailable, returning empty dashboard data');
+        return {
+          stats: {
+            totalProducts: 0,
+            totalStores: 0,
+            totalConversations: 0,
+            totalMarketingMaterials: 0,
+            lastActivity: Timestamp.now(),
+            activeProducts: 0,
+            lowStockProducts: 0,
+            totalRevenue: 0,
+            monthlyGrowth: 0
+          },
+          recentProducts: [],
+          recentStores: [],
+          recentActivity: [],
+          marketingMaterials: [],
+          lowStockAlerts: []
+        };
+      }
+
       const [stats, recentProducts, recentStores, recentActivity, marketingMaterials, lowStockAlerts] = await Promise.all([
         this.getUserStats(userId),
         this.getUserProducts(userId, 5),
@@ -195,6 +257,11 @@ export class UserDataService {
   // Get user profile
   static async getUserProfile(userId: string): Promise<LineUser | null> {
     try {
+      if (!db) {
+        console.warn('Firestore unavailable, cannot load user profile');
+        return null;
+      }
+
       const userRef = doc(db, 'line_users', userId);
       const userSnap = await getDoc(userRef);
       
