@@ -74,7 +74,7 @@ const MarketingTools = () => {
   ];
 
   // Use real user marketing materials from database
-  const generatedMaterials = userMarketingMaterials.map(material => ({
+  const generatedMaterials = (userMarketingMaterials ?? []).map(material => ({
     id: material.id,
     name: material.title,
     type: material.type === 'flyer' ? 'flyer' : 
@@ -129,7 +129,9 @@ const MarketingTools = () => {
         <div>
           <h1 className="text-3xl font-bold text-foreground">行銷工具</h1>
           <p className="text-muted-foreground mt-1">
-            {materials.length > 0 ? "使用 AI 輔助創建專業行銷材料" : "開始創建您的第一個行銷材料"}
+            {generatedMaterials.length > 0
+              ? "使用 AI 輔助創建專業行銷材料"
+              : "開始創建您的第一個行銷材料"}
           </p>
         </div>
         <Dialog open={showGenerator} onOpenChange={setShowGenerator}>
