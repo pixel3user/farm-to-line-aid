@@ -370,7 +370,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('Authenticating user:', profile.userId, profile.displayName);
       
       if (!db) {
-        console.error('Firebase database not available');
+        console.error('Firebase database not available, falling back to mock user');
+
+        const mockUser: LineUser = {
+          id: profile.userId,
+          lineUserId: profile.userId,
+          displayName: profile.displayName,
+          pictureUrl: profile.pictureUrl,
+          statusMessage: profile.statusMessage,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+          isActive: true,
+          subscriptionTier: 'free',
+          preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
+          metadata: { totalMessages: 0, lastInteraction: Timestamp.now(), favoriteFeatures: [] }
+        };
+
+        setUser(mockUser);
+        setLiffUser(prev => prev ?? profile);
         setIsLoading(false);
         return;
       }
@@ -467,7 +484,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('Loading user data for:', userId);
       
       if (!db) {
-        console.error('Firebase database not available');
+        console.warn('Firebase database not available during load, using demo data');
+
+        const defaultStats = {
+          totalProducts: 0,
+          totalStores: 0,
+          totalConversations: 0,
+          totalMarketingMaterials: 0,
+          lastActivity: Timestamp.now(),
+          activeProducts: 0,
+          lowStockProducts: 0,
+          totalRevenue: 0,
+          monthlyGrowth: 0
+        };
+
+        setUserStats(defaultStats);
+        setUserProducts([]);
+        setUserStores([]);
+        setUserMarketingMaterials([]);
         setIsLoading(false);
         return;
       }
