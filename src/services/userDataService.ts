@@ -7,6 +7,7 @@ import {
   getDocs,
   doc,
   getDoc,
+  updateDoc,
   Timestamp 
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -64,7 +65,7 @@ export class UserDataService {
         activeProducts,
         lowStockProducts,
         totalRevenue,
-        monthlyGrowth: 15 // This would be calculated from historical data
+        monthlyGrowth: 0 // Start with 0 for new users
       };
     } catch (error) {
       console.error('Error fetching user stats:', error);

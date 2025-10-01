@@ -158,7 +158,7 @@ export const createSampleDataForUser = async (userId: string) => {
     const createdProducts = [];
     for (const productData of sampleProducts) {
       const result = await DatabaseService.createProduct(userId, productData);
-      createdProducts.push(result);
+      createdProducts.push({ id: result.id });
     }
 
     // Create stores

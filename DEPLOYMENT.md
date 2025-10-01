@@ -243,3 +243,4 @@ Track these KPIs for bot success:
 ---
 
 Built with ❤️ using React, Firebase, Gemini AI, and LINE Messaging API.
+

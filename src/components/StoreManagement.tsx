@@ -112,7 +112,9 @@ const StoreManagement = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">商店管理</h1>
-          <p className="text-muted-foreground mt-1">管理商店關係並發現新機會</p>
+          <p className="text-muted-foreground mt-1">
+            {connectedStores.length > 0 ? "管理商店關係並發現新機會" : "開始建立您的商店網絡"}
+          </p>
         </div>
         <div className="flex gap-2">
           <Dialog open={showStoreLocator} onOpenChange={setShowStoreLocator}>
@@ -204,8 +206,9 @@ const StoreManagement = () => {
       </div>
 
       {/* Store Cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-        {connectedStores.map((store) => (
+      {connectedStores.length > 0 ? (
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+          {connectedStores.map((store) => (
           <Card key={store.id} className="bg-gradient-card shadow-soft hover:shadow-medium transition-all">
             <CardHeader>
               <div className="flex items-start justify-between">
@@ -309,7 +312,20 @@ const StoreManagement = () => {
             </CardContent>
           </Card>
         ))}
-      </div>
+        </div>
+      ) : (
+        <div className="text-center py-12">
+          <div className="w-24 h-24 mx-auto mb-6 bg-gradient-primary/10 rounded-full flex items-center justify-center">
+            <Store className="w-12 h-12 text-primary" />
+          </div>
+          <h3 className="text-xl font-semibold text-foreground mb-2">還沒有合作的商店</h3>
+          <p className="text-muted-foreground mb-6">開始尋找附近的商店來建立您的銷售網絡</p>
+          <Button onClick={() => setShowStoreLocator(true)} className="gap-2">
+            <Search className="w-4 h-4" />
+            尋找第一個商店
+          </Button>
+        </div>
+      )}
 
       {/* Performance Overview */}
       <Card className="bg-gradient-card shadow-soft">

@@ -7,13 +7,13 @@ import { getFunctions } from 'firebase/functions';
 
 // Firebase configuration
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "demo-api-key",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "demo-project.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "demo-project",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "demo-project.appspot.com",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "123456789",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:123456789:web:abcdef",
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-XXXXXXXXXX"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyD2dpOd5vI7BYIAl1sBuumeKJ7wB2Ep06w",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "farm2market-99.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "farm2market-99",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "farm2market-99.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "766264273875",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:766264273875:web:4d16eb47367395315edd26",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-7Q02N1DQ5C"
 };
 
 console.log('Firebase config:', firebaseConfig);

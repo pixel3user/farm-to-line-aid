@@ -54,7 +54,7 @@ export class WebhookHandler {
       const userProfile = await this.lineBot.getUserProfile(event.source.userId);
       
       // Create web app URL with user parameters
-      const webAppUrl = `${process.env.LIFF_URL || 'https://your-app-url.com'}?userId=${userProfile.userId}&displayName=${encodeURIComponent(userProfile.displayName)}&pictureUrl=${encodeURIComponent(userProfile.pictureUrl || '')}`;
+      const webAppUrl = `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?userId=${userProfile.userId}&displayName=${encodeURIComponent(userProfile.displayName)}&pictureUrl=${encodeURIComponent(userProfile.pictureUrl || '')}`;
       
       const messages = [{
         type: 'text',
@@ -204,7 +204,7 @@ export class WebhookHandler {
             {
               type: 'uri',
               label: '📦 管理產品',
-              uri: `${process.env.LIFF_URL || 'https://your-app.lovable.app'}?tab=products`
+              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=products`
             },
             {
               type: 'postback',
@@ -236,12 +236,12 @@ export class WebhookHandler {
             {
               type: 'uri',
               label: '🔍 尋找新店家',
-              uri: `${process.env.LIFF_URL || 'https://your-app.lovable.app'}?tab=stores&action=find`
+              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores&action=find`
             },
             {
               type: 'uri',
               label: '📋 管理客戶',
-              uri: `${process.env.LIFF_URL || 'https://your-app.lovable.app'}?tab=stores`
+              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores`
             }
           ]
         }
@@ -268,7 +268,7 @@ export class WebhookHandler {
             {
               type: 'uri',
               label: '🎨 建立素材',
-              uri: `${process.env.LIFF_URL || 'https://your-app.lovable.app'}?tab=marketing`
+              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=marketing`
             },
             {
               type: 'text',
@@ -316,7 +316,7 @@ export class WebhookHandler {
                 {
                   type: 'uri',
                   label: '開始使用',
-                  uri: `${process.env.LIFF_URL || 'https://your-app.lovable.app'}?tab=products`
+                  uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=products`
                 }
               ]
             },
@@ -327,7 +327,7 @@ export class WebhookHandler {
                 {
                   type: 'uri',
                   label: '開始使用',
-                  uri: `${process.env.LIFF_URL || 'https://your-app.lovable.app'}?tab=stores`
+                  uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores`
                 }
               ]
             },
@@ -338,7 +338,7 @@ export class WebhookHandler {
                 {
                   type: 'uri',
                   label: '開始使用',
-                  uri: `${process.env.LIFF_URL || 'https://your-app.lovable.app'}?tab=marketing`
+                  uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=marketing`
                 }
               ]
             }

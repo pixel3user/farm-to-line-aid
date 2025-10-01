@@ -13,7 +13,8 @@ import {
   HelpCircle,
   MessageCircle,
   Brain,
-  User
+  User,
+  Database
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -35,6 +36,8 @@ const Navigation = ({ activeTab, onTabChange }: NavigationProps) => {
     { id: "buyers", label: "買方管理", icon: Users },
     { id: "profile", label: "個人資料", icon: User },
     { id: "test", label: "整合測試", icon: Settings },
+    { id: "firebase-test", label: "Firebase 測試", icon: Database },
+    { id: "line-test", label: "LINE 測試", icon: MessageCircle },
     { id: "line-demo", label: "LINE 演示", icon: MessageCircle },
   ];
 
@@ -71,12 +74,12 @@ const Navigation = ({ activeTab, onTabChange }: NavigationProps) => {
       <div className="lg:hidden">
         <Sheet open={isOpen} onOpenChange={setIsOpen}>
           <SheetTrigger asChild>
-            <Button variant="outline" size="icon" className="fixed top-4 left-4 z-50">
+            <Button variant="outline" size="icon" className="fixed top-safe-top left-4 z-50 mt-4">
               <Menu className="h-4 w-4" />
             </Button>
           </SheetTrigger>
           <SheetContent side="left" className="w-64 bg-gradient-card">
-            <div className="pt-12 space-y-4">
+            <div className="pt-safe-top space-y-4">
               <div className="px-4">
                 <h2 className="text-lg font-semibold text-primary">Farm2Market AI</h2>
                 <p className="text-sm text-muted-foreground">智慧農業銷售助理</p>
@@ -90,7 +93,7 @@ const Navigation = ({ activeTab, onTabChange }: NavigationProps) => {
       </div>
 
       {/* Desktop Navigation */}
-      <nav className="hidden lg:flex items-center justify-center gap-2 p-4 bg-gradient-card/50 backdrop-blur-sm border-b border-border/50 sticky top-0 z-40">
+      <nav className="hidden lg:flex items-center justify-center gap-2 p-4 pt-safe-top bg-gradient-card/50 backdrop-blur-sm border-b border-border/50 sticky top-0 z-40">
         <div className="flex items-center gap-4 max-w-6xl w-full">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-primary flex items-center justify-center">

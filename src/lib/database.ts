@@ -126,7 +126,7 @@ export interface MarketingMaterial {
 // Database Service Class
 export class DatabaseService {
   // Line User operations
-  static async createLineUser(lineUserData: Partial<LineUser>): Promise<WriteResult> {
+  static async createLineUser(lineUserData: Partial<LineUser>): Promise<{ id: string }> {
     const now = Timestamp.now();
     const userRef = doc(db, 'line_users', lineUserData.lineUserId!);
     
@@ -154,7 +154,8 @@ export class DatabaseService {
       }
     };
 
-    return await setDoc(userRef, userDoc);
+    await setDoc(userRef, userDoc);
+    return { id: lineUserData.lineUserId! };
   }
 
   static async getLineUser(lineUserId: string): Promise<LineUser | null> {
@@ -186,7 +187,7 @@ export class DatabaseService {
   }
 
   // Product operations
-  static async createProduct(userId: string, productData: Partial<Product>): Promise<WriteResult> {
+  static async createProduct(userId: string, productData: Partial<Product>): Promise<{ id: string }> {
     const productRef = doc(collection(db, 'products'));
     const now = Timestamp.now();
     
@@ -207,7 +208,8 @@ export class DatabaseService {
       geminiData: productData.geminiData
     };
 
-    return await setDoc(productRef, productDoc);
+    await setDoc(productRef, productDoc);
+    return { id: productRef.id };
   }
 
   static async getProductsByUser(userId: string): Promise<Product[]> {
@@ -233,7 +235,7 @@ export class DatabaseService {
   }
 
   // Store operations
-  static async createStore(userId: string, storeData: Partial<Store>): Promise<WriteResult> {
+  static async createStore(userId: string, storeData: Partial<Store>): Promise<{ id: string }> {
     const storeRef = doc(collection(db, 'stores'));
     const now = Timestamp.now();
     
@@ -258,7 +260,8 @@ export class DatabaseService {
       updatedAt: now
     };
 
-    return await setDoc(storeRef, storeDoc);
+    await setDoc(storeRef, storeDoc);
+    return { id: storeRef.id };
   }
 
   static async getStoresByUser(userId: string): Promise<Store[]> {
@@ -274,7 +277,7 @@ export class DatabaseService {
   }
 
   // Conversation operations
-  static async createConversation(userId: string, conversationData: Partial<Conversation>): Promise<WriteResult> {
+  static async createConversation(userId: string, conversationData: Partial<Conversation>): Promise<{ id: string }> {
     const conversationRef = doc(collection(db, 'conversations'));
     
     const conversationDoc = {
@@ -287,7 +290,8 @@ export class DatabaseService {
       timestamp: Timestamp.now()
     };
 
-    return await setDoc(conversationRef, conversationDoc);
+    await setDoc(conversationRef, conversationDoc);
+    return { id: conversationRef.id };
   }
 
   static async getRecentConversations(userId: string, limitCount: number = 10): Promise<Conversation[]> {
@@ -303,7 +307,7 @@ export class DatabaseService {
   }
 
   // Marketing Material operations
-  static async createMarketingMaterial(userId: string, materialData: Partial<MarketingMaterial>): Promise<WriteResult> {
+  static async createMarketingMaterial(userId: string, materialData: Partial<MarketingMaterial>): Promise<{ id: string }> {
     const materialRef = doc(collection(db, 'marketing_materials'));
     
     const materialDoc = {
@@ -323,7 +327,8 @@ export class DatabaseService {
       }
     };
 
-    return await setDoc(materialRef, materialDoc);
+    await setDoc(materialRef, materialDoc);
+    return { id: materialRef.id };
   }
 
   static async getMarketingMaterialsByUser(userId: string): Promise<MarketingMaterial[]> {

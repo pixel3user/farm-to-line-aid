@@ -47,7 +47,7 @@ export const LINE_CONFIG = {
   CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
   CHANNEL_SECRET: process.env.LINE_CHANNEL_SECRET || '',
   MESSAGING_API_URL: 'https://api.line.me/v2/bot',
-  LIFF_URL: process.env.LIFF_URL || 'https://your-app.lovable.app',
+  LIFF_URL: process.env.LIFF_URL || 'https://farm2market-99.web.app',
 };
 
 // LINE Bot API Functions

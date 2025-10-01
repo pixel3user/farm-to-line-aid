@@ -128,7 +128,9 @@ const MarketingTools = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">行銷工具</h1>
-          <p className="text-muted-foreground mt-1">使用 AI 輔助創建專業行銷材料</p>
+          <p className="text-muted-foreground mt-1">
+            {materials.length > 0 ? "使用 AI 輔助創建專業行銷材料" : "開始創建您的第一個行銷材料"}
+          </p>
         </div>
         <Dialog open={showGenerator} onOpenChange={setShowGenerator}>
           <DialogTrigger asChild>
@@ -320,8 +322,9 @@ const MarketingTools = () => {
           <CardDescription>最近生成的可使用材料</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {generatedMaterials.map((material) => (
+          {generatedMaterials.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {generatedMaterials.map((material) => (
               <Card key={material.id} className="bg-background/50 hover:shadow-medium transition-all">
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between mb-3">
@@ -359,7 +362,20 @@ const MarketingTools = () => {
                 </CardContent>
               </Card>
             ))}
-          </div>
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <div className="w-24 h-24 mx-auto mb-6 bg-gradient-primary/10 rounded-full flex items-center justify-center">
+                <PenTool className="w-12 h-12 text-primary" />
+              </div>
+              <h3 className="text-xl font-semibold text-foreground mb-2">還沒有行銷材料</h3>
+              <p className="text-muted-foreground mb-6">使用 AI 生成專業的行銷材料來推廣您的產品</p>
+              <Button onClick={() => setShowGenerator(true)} className="gap-2">
+                <Wand2 className="w-4 h-4" />
+                生成第一個行銷材料
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

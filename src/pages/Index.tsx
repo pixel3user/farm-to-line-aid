@@ -9,6 +9,8 @@ import LineBotDemo from "@/components/LineBotDemo";
 import { AIBrainVisualization } from "@/components/AIBrainVisualization";
 import UserProfile from "@/components/UserProfile";
 import TestIntegration from "@/pages/TestIntegration";
+import FirebaseTest from "@/pages/FirebaseTest";
+import TestLineRedirect from "@/pages/TestLineRedirect";
 import heroImage from "@/assets/hero-farm-tech.jpg";
 
 const Index = () => {
@@ -47,6 +49,10 @@ const Index = () => {
         );
       case "test":
         return <TestIntegration />;
+      case "firebase-test":
+        return <FirebaseTest />;
+      case "line-test":
+        return <TestLineRedirect />;
       case "line-demo":
         return (
           <div className="p-6">
@@ -65,7 +71,7 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pt-safe-top pb-safe-bottom">
       {/* Hero Section - Only show on first load or non-LIFF environments */}
       {activeTab === "dashboard" && !isLiffApp && (
         <section className="relative h-96 overflow-hidden">
@@ -100,7 +106,7 @@ const Index = () => {
 
       {/* LIFF Integration Info */}
       {isLiffApp && (
-        <div className="fixed bottom-4 right-4 p-3 bg-primary text-primary-foreground rounded-lg shadow-strong text-sm">
+        <div className="fixed bottom-4 right-4 p-3 bg-primary text-primary-foreground rounded-lg shadow-strong text-sm z-50">
           🤖 已連接到 LINE Bot
         </div>
       )}

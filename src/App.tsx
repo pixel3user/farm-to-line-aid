@@ -66,15 +66,17 @@ const App = () => {
   console.log('App component rendering...');
   
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <AuthProvider>
-          <AppContent />
-        </AuthProvider>
-      </TooltipProvider>
-    </QueryClientProvider>
+    <div className="min-h-screen bg-background pt-safe-top pb-safe-bottom">
+      <QueryClientProvider client={queryClient}>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
+          <AuthProvider>
+            <AppContent />
+          </AuthProvider>
+        </TooltipProvider>
+      </QueryClientProvider>
+    </div>
   );
 };
 

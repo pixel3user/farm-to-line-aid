@@ -37,9 +37,25 @@ interface AuthProviderProps {
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<LineUser | null>(null);
+  const [user, setUser] = useState<LineUser | null>(() => {
+    // Try to restore user from localStorage
+    try {
+      const savedUser = localStorage.getItem('farm2market_user');
+      return savedUser ? JSON.parse(savedUser) : null;
+    } catch {
+      return null;
+    }
+  });
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
-  const [liffUser, setLiffUser] = useState<LiffUser | null>(null);
+  const [liffUser, setLiffUser] = useState<LiffUser | null>(() => {
+    // Try to restore liffUser from localStorage
+    try {
+      const savedLiffUser = localStorage.getItem('farm2market_liff_user');
+      return savedLiffUser ? JSON.parse(savedLiffUser) : null;
+    } catch {
+      return null;
+    }
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [isLiffReady, setIsLiffReady] = useState(false);
   const [isInLineApp, setIsInLineApp] = useState(false);
@@ -48,17 +64,60 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [userStores, setUserStores] = useState<any[]>([]);
   const [userMarketingMaterials, setUserMarketingMaterials] = useState<any[]>([]);
 
+  // Persist user state to localStorage
+  useEffect(() => {
+    if (user) {
+      localStorage.setItem('farm2market_user', JSON.stringify(user));
+    } else {
+      localStorage.removeItem('farm2market_user');
+    }
+  }, [user]);
+
+  // Persist liffUser state to localStorage
+  useEffect(() => {
+    if (liffUser) {
+      localStorage.setItem('farm2market_liff_user', JSON.stringify(liffUser));
+    } else {
+      localStorage.removeItem('farm2market_liff_user');
+    }
+  }, [liffUser]);
+
   // Initialize LIFF
   useEffect(() => {
     const initializeLiff = async () => {
       try {
         console.log('Initializing LIFF...');
+        console.log('Firebase auth available:', !!auth);
+        console.log('Firebase db available:', !!db);
         
         // Check if we're in LINE app environment
         const userAgent = navigator.userAgent.toLowerCase();
         const isInLine = userAgent.includes('line');
         console.log('User agent:', userAgent, 'Is in LINE:', isInLine);
         setIsInLineApp(isInLine);
+
+        // If we have a saved user, check if we should restore it
+        if (user && liffUser) {
+          console.log('Found saved user, checking if still valid...');
+          // Check if we have LINE redirect parameters that might override saved user
+          const urlParams = new URLSearchParams(window.location.search);
+          const lineUserId = urlParams.get('userId');
+          
+          if (lineUserId && lineUserId !== liffUser.userId) {
+            console.log('Different user in URL params, will authenticate new user');
+          } else {
+            console.log('Using saved user, loading data...');
+            setIsLiffReady(true);
+            setIsLoading(false);
+            try {
+              await loadUserData(liffUser.userId);
+            } catch (error) {
+              console.error('Failed to load saved user data:', error);
+              setIsLoading(false);
+            }
+            return; // Skip normal initialization
+          }
+        }
 
         // Check for LINE Bot redirect parameters
         const urlParams = new URLSearchParams(window.location.search);
@@ -69,34 +128,66 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
         if (isInLine) {
           console.log('In LINE app, initializing LIFF...');
-          // Dynamic import of LIFF SDK
-          const liff = (await import('@line/liff')).default;
-          
-          await liff.init({
-            liffId: import.meta.env.VITE_LIFF_ID || 'your-liff-id'
-          });
-
-          setIsLiffReady(true);
-          console.log('LIFF initialized');
-
-          if (liff.isLoggedIn()) {
-            console.log('User is logged in to LIFF');
-            const profile = await liff.getProfile();
-            setLiffUser({
-              userId: profile.userId,
-              displayName: profile.displayName,
-              pictureUrl: profile.pictureUrl,
-              statusMessage: profile.statusMessage
-            });
+          try {
+            // Dynamic import of LIFF SDK
+            const liff = (await import('@line/liff')).default;
             
-            // Get ID token for Firebase authentication
-            const idToken = liff.getIDToken();
-            if (idToken) {
-              await authenticateWithFirebase(idToken, profile);
+            const liffId = import.meta.env.VITE_LIFF_ID;
+            if (!liffId || liffId === 'your-liff-id') {
+              console.warn('LIFF ID not configured, using fallback authentication');
+              setIsLiffReady(true);
+              // Fallback: treat as web user with LINE redirect params
+              if (lineUserId && lineDisplayName) {
+                const profile = {
+                  userId: lineUserId,
+                  displayName: decodeURIComponent(lineDisplayName),
+                  pictureUrl: linePictureUrl ? decodeURIComponent(linePictureUrl) : undefined,
+                  statusMessage: undefined
+                };
+                
+                setLiffUser(profile);
+                await authenticateWithFirebase('', profile);
+                
+                // Clean up URL parameters
+                window.history.replaceState({}, document.title, window.location.pathname);
+                return;
+              } else {
+                setIsLoading(false);
+                return;
+              }
             }
-          } else {
-            console.log('User is not logged in to LIFF');
-            // User is not logged in, show login button
+            
+            await liff.init({ liffId });
+            console.log('LIFF initialized with ID:', liffId);
+            setIsLiffReady(true);
+
+            if (liff.isLoggedIn()) {
+              console.log('User is logged in to LIFF');
+              const profile = await liff.getProfile();
+              setLiffUser({
+                userId: profile.userId,
+                displayName: profile.displayName,
+                pictureUrl: profile.pictureUrl,
+                statusMessage: profile.statusMessage
+              });
+              
+              // Get ID token for Firebase authentication
+              const idToken = liff.getIDToken();
+              if (idToken) {
+                await authenticateWithFirebase(idToken, profile);
+              } else {
+                console.log('No ID token available, setting loading to false');
+                setIsLoading(false);
+              }
+            } else {
+              console.log('User is not logged in to LIFF');
+              // User is not logged in, show login button
+              setIsLoading(false);
+            }
+          } catch (liffError) {
+            console.error('LIFF initialization failed:', liffError);
+            // Fallback to web authentication
+            setIsLiffReady(true);
             setIsLoading(false);
           }
         } else if (lineUserId && lineDisplayName) {
@@ -110,16 +201,126 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           };
           
           setLiffUser(profile);
-          await authenticateWithFirebase('', profile);
-          setIsLiffReady(true);
+          
+          if (db && auth) {
+            try {
+              await authenticateWithFirebase('', profile);
+              console.log('LINE Bot redirect authentication successful');
+            } catch (error) {
+              console.error('LINE Bot redirect authentication failed:', error);
+              // Create mock user for demo purposes
+              const mockUser: LineUser = {
+                id: profile.userId,
+                lineUserId: profile.userId,
+                displayName: profile.displayName,
+                pictureUrl: profile.pictureUrl,
+                statusMessage: profile.statusMessage,
+                createdAt: Timestamp.now(),
+                updatedAt: Timestamp.now(),
+                isActive: true,
+                subscriptionTier: 'free',
+                preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
+                metadata: { totalMessages: 0, lastInteraction: Timestamp.now(), favoriteFeatures: [] }
+              };
+              setUser(mockUser);
+              console.log('Created mock user for demo');
+              setIsLoading(false);
+            }
+          } else {
+            console.log('Firebase not available, creating mock user');
+            // Create mock user for demo purposes
+            const mockUser: LineUser = {
+              id: profile.userId,
+              lineUserId: profile.userId,
+              displayName: profile.displayName,
+              pictureUrl: profile.pictureUrl,
+              statusMessage: profile.statusMessage,
+              createdAt: Timestamp.now(),
+              updatedAt: Timestamp.now(),
+              isActive: true,
+              subscriptionTier: 'free',
+              preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
+              metadata: { totalMessages: 0, lastInteraction: Timestamp.now(), favoriteFeatures: [] }
+            };
+            setUser(mockUser);
+            console.log('Created mock user for demo');
+            setIsLoading(false);
+          }
           
           // Clean up URL parameters
           window.history.replaceState({}, document.title, window.location.pathname);
+          setIsLiffReady(true);
+          setIsLoading(false);
         } else {
           console.log('Not in LINE app, setting up for web access...');
           // Not in LINE app, check for existing Firebase auth
-          setIsLiffReady(true);
-          setIsLoading(false);
+          
+          // Check if we have LINE redirect parameters even outside LINE app
+          if (lineUserId && lineDisplayName) {
+            console.log('Found LINE redirect parameters in web environment');
+            const profile = {
+              userId: lineUserId,
+              displayName: decodeURIComponent(lineDisplayName),
+              pictureUrl: linePictureUrl ? decodeURIComponent(linePictureUrl) : undefined,
+              statusMessage: undefined
+            };
+            
+            setLiffUser(profile);
+            
+            if (db && auth) {
+              try {
+                await authenticateWithFirebase('', profile);
+                console.log('Web environment LINE redirect authentication successful');
+              } catch (error) {
+                console.error('Web environment LINE redirect authentication failed:', error);
+                // Create mock user for demo purposes
+                const mockUser: LineUser = {
+                  id: profile.userId,
+                  lineUserId: profile.userId,
+                  displayName: profile.displayName,
+                  pictureUrl: profile.pictureUrl,
+                  statusMessage: profile.statusMessage,
+                  createdAt: Timestamp.now(),
+                  updatedAt: Timestamp.now(),
+                  isActive: true,
+                  subscriptionTier: 'free',
+                  preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
+                  metadata: { totalMessages: 0, lastInteraction: Timestamp.now(), favoriteFeatures: [] }
+                };
+                setUser(mockUser);
+                console.log('Created mock user for demo');
+                setIsLoading(false);
+              }
+            } else {
+              console.log('Firebase not available, creating mock user');
+              // Create mock user for demo purposes
+              const mockUser: LineUser = {
+                id: profile.userId,
+                lineUserId: profile.userId,
+                displayName: profile.displayName,
+                pictureUrl: profile.pictureUrl,
+                statusMessage: profile.statusMessage,
+                createdAt: Timestamp.now(),
+                updatedAt: Timestamp.now(),
+                isActive: true,
+                subscriptionTier: 'free',
+                preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
+                metadata: { totalMessages: 0, lastInteraction: Timestamp.now(), favoriteFeatures: [] }
+              };
+              setUser(mockUser);
+              console.log('Created mock user for demo');
+              setIsLoading(false);
+            }
+            
+            // Clean up URL parameters
+            window.history.replaceState({}, document.title, window.location.pathname);
+            setIsLiffReady(true);
+            setIsLoading(false);
+          } else {
+            console.log('No LINE redirect parameters found, setting up for regular web access');
+            setIsLiffReady(true);
+            setIsLoading(false);
+          }
         }
       } catch (error) {
         console.error('LIFF initialization failed:', error);
@@ -129,13 +330,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     };
 
     initializeLiff();
+    
+    // Fallback timeout to ensure loading state is always set
+    const timeout = setTimeout(() => {
+      console.log('Authentication timeout - setting loading to false');
+      setIsLiffReady(true);
+      setIsLoading(false);
+    }, 5000); // 5 second timeout
+    
+    return () => clearTimeout(timeout);
   }, []);
 
   // Listen to Firebase auth state changes
   useEffect(() => {
     if (!auth) {
       console.log('Firebase auth not available, skipping auth state listener');
-      setIsLoading(false);
       return;
     }
 
@@ -143,46 +352,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       console.log('Firebase auth state changed:', firebaseUser);
       setFirebaseUser(firebaseUser);
       
-      if (firebaseUser && liffUser) {
+      // Only handle Firebase auth changes if we don't already have a user from LIFF
+      if (firebaseUser && liffUser && !user) {
         // Load user data from Firestore
         await loadUserData(liffUser.userId);
-      } else {
+      } else if (!firebaseUser && !liffUser) {
+        // Only clear user if we don't have LIFF user
         setUser(null);
-        setIsLoading(false);
       }
     });
 
     return () => unsubscribe();
-  }, [liffUser]);
+  }, [liffUser, user]);
 
   const authenticateWithFirebase = async (idToken: string, profile: any) => {
     try {
+      console.log('Authenticating user:', profile.userId, profile.displayName);
+      
       if (!db) {
-        console.log('Firebase database not available, creating mock user');
-        // Create a mock user for development
-        const mockUser: LineUser = {
-          id: profile.userId,
-          lineUserId: profile.userId,
-          displayName: profile.displayName,
-          pictureUrl: profile.pictureUrl,
-          statusMessage: profile.statusMessage,
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now(),
-          isActive: true,
-          subscriptionTier: 'free',
-          preferences: {
-            language: 'zh-TW',
-            notifications: true,
-            marketingOptIn: false
-          },
-          metadata: {
-            totalMessages: 0,
-            lastInteraction: Timestamp.now(),
-            favoriteFeatures: []
-          }
-        };
-        
-        setUser(mockUser);
+        console.error('Firebase database not available');
         setIsLoading(false);
         return;
       }
@@ -195,6 +383,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const userSnap = await getDoc(userRef);
       
       if (!userSnap.exists()) {
+        console.log('Creating new user profile...');
         // Create new user
         const newUser: LineUser = {
           id: profile.userId,
@@ -222,8 +411,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setUser(newUser);
         
         // Create sample data for new users
-        await createSampleDataForUser(profile.userId);
+        console.log('Creating sample data for new user...');
+        try {
+          await createSampleDataForUser(profile.userId);
+        } catch (sampleError) {
+          console.error('Failed to create sample data:', sampleError);
+        }
+        
+        // Load user data (now includes sample data)
+        try {
+          await loadUserData(profile.userId);
+        } catch (loadError) {
+          console.error('Failed to load user data:', loadError);
+        }
       } else {
+        console.log('Updating existing user profile...');
         // Update existing user
         const existingUser = userSnap.data() as LineUser;
         await updateDoc(userRef, {
@@ -241,44 +443,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           statusMessage: profile.statusMessage,
           updatedAt: Timestamp.now()
         });
+        
+        // Load existing user data
+        try {
+          await loadUserData(profile.userId);
+        } catch (loadError) {
+          console.error('Failed to load user data:', loadError);
+        }
       }
       
+      console.log('Firebase authentication completed successfully');
       setIsLoading(false);
     } catch (error) {
       console.error('Firebase authentication failed:', error);
       setIsLoading(false);
+      // Don't re-throw error to prevent breaking the flow
+      console.log('Continuing with authentication flow despite error');
     }
   };
 
   const loadUserData = async (userId: string) => {
     try {
+      console.log('Loading user data for:', userId);
+      
       if (!db) {
-        console.log('Firebase database not available, using mock data');
-        // Set mock data for development
-        setUserStats({
-          totalProducts: 3,
-          totalStores: 2,
-          totalConversations: 5,
-          totalMarketingMaterials: 2,
-          lastActivity: Timestamp.now(),
-          activeProducts: 3,
-          lowStockProducts: 1,
-          totalRevenue: 5000,
-          monthlyGrowth: 15
-        });
-        setUserProducts([
-          { id: '1', name: '農場新鮮 A 級雞蛋', price: 180, stock: 45, category: '雞蛋' },
-          { id: '2', name: '有機放養雞蛋', price: 280, stock: 8, category: '雞蛋' },
-          { id: '3', name: '優質鴨蛋', price: 320, stock: 22, category: '鴨蛋' }
-        ]);
-        setUserStores([
-          { id: '1', name: '綠色有機超市', location: '新竹市中心', status: 'customer' },
-          { id: '2', name: '新鮮便利超商', location: '竹北區', status: 'customer' }
-        ]);
-        setUserMarketingMaterials([
-          { id: '1', title: '農場新鮮雞蛋傳單', type: 'flyer', usage: { timesUsed: 12 } },
-          { id: '2', title: '有機雞蛋食譜卡', type: 'recipe_card', usage: { timesUsed: 8 } }
-        ]);
+        console.error('Firebase database not available');
         setIsLoading(false);
         return;
       }
@@ -288,10 +477,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const userSnap = await getDoc(userRef);
       
       if (userSnap.exists()) {
-        setUser(userSnap.data() as LineUser);
+        const userData = userSnap.data() as LineUser;
+        console.log('Loaded user profile:', userData.displayName);
+        setUser(userData);
+      } else {
+        console.log('User profile not found, will be created during authentication');
       }
       
       // Load user statistics and data
+      console.log('Loading user statistics and data...');
       const [stats, products, stores, marketingMaterials] = await Promise.all([
         UserDataService.getUserStats(userId),
         UserDataService.getUserProducts(userId, 10),
@@ -299,10 +493,37 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         UserDataService.getMarketingMaterials(userId, 10)
       ]);
       
+      console.log('Loaded data:', {
+        stats: stats,
+        productsCount: products.length,
+        storesCount: stores.length,
+        materialsCount: marketingMaterials.length
+      });
+      
+      // Set the loaded data (empty arrays if no data exists)
       setUserStats(stats);
       setUserProducts(products);
       setUserStores(stores);
       setUserMarketingMaterials(marketingMaterials);
+      
+      // Check if user has no data and create sample data
+      const hasData = stats.totalProducts > 0 || stats.totalStores > 0;
+      if (!hasData && user) {
+        console.log('User has no data, creating sample data...');
+        await createSampleDataForUser(userId);
+        // Reload data after creating sample data
+        const [newStats, newProducts, newStores, newMaterials] = await Promise.all([
+          UserDataService.getUserStats(userId),
+          UserDataService.getUserProducts(userId, 10),
+          UserDataService.getUserStores(userId, 10),
+          UserDataService.getMarketingMaterials(userId, 10)
+        ]);
+        
+        setUserStats(newStats);
+        setUserProducts(newProducts);
+        setUserStores(newStores);
+        setUserMarketingMaterials(newMaterials);
+      }
       
       setIsLoading(false);
     } catch (error) {
@@ -315,9 +536,81 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     if (isInLineApp && isLiffReady) {
       try {
         const liff = (await import('@line/liff')).default;
+        const liffId = import.meta.env.VITE_LIFF_ID;
+        
+        if (!liffId || liffId === 'your-liff-id') {
+          console.warn('LIFF ID not configured, using demo mode');
+          // Demo mode: create a fake user for testing
+          const demoProfile = {
+            userId: 'demo-user-' + Date.now(),
+            displayName: 'Demo User',
+            pictureUrl: undefined,
+            statusMessage: 'Demo Account'
+          };
+          
+          setLiffUser(demoProfile);
+          try {
+            await authenticateWithFirebase('', demoProfile);
+          } catch (error) {
+            console.error('Demo authentication failed:', error);
+            // Create mock user for demo purposes
+            const mockUser: LineUser = {
+              id: demoProfile.userId,
+              lineUserId: demoProfile.userId,
+              displayName: demoProfile.displayName,
+              pictureUrl: demoProfile.pictureUrl,
+              statusMessage: demoProfile.statusMessage,
+              createdAt: Timestamp.now(),
+              updatedAt: Timestamp.now(),
+              isActive: true,
+              subscriptionTier: 'free',
+              preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
+              metadata: { totalMessages: 0, lastInteraction: Timestamp.now(), favoriteFeatures: [] }
+            };
+            setUser(mockUser);
+            console.log('Created demo mock user');
+            setIsLoading(false);
+          }
+          return;
+        }
+        
         liff.login();
       } catch (error) {
         console.error('LIFF login failed:', error);
+        alert('LINE login failed. Please try again.');
+      }
+    } else {
+      console.log('Not in LINE app, using demo mode');
+      // Demo mode: create a fake user for testing
+      const demoProfile = {
+        userId: 'demo-user-' + Date.now(),
+        displayName: 'Demo User',
+        pictureUrl: undefined,
+        statusMessage: 'Demo Account'
+      };
+      
+      setLiffUser(demoProfile);
+      try {
+        await authenticateWithFirebase('', demoProfile);
+      } catch (error) {
+        console.error('Demo authentication failed:', error);
+        // Create mock user for demo purposes
+        const mockUser: LineUser = {
+          id: demoProfile.userId,
+          lineUserId: demoProfile.userId,
+          displayName: demoProfile.displayName,
+          pictureUrl: demoProfile.pictureUrl,
+          statusMessage: demoProfile.statusMessage,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+          isActive: true,
+          subscriptionTier: 'free',
+          preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
+          metadata: { totalMessages: 0, lastInteraction: Timestamp.now(), favoriteFeatures: [] }
+        };
+        setUser(mockUser);
+        console.log('Created demo mock user');
+        setIsLoading(false);
       }
     }
   };
@@ -332,8 +625,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (auth) {
         await signOut(auth);
       }
+      
+      // Clear all state and localStorage
       setUser(null);
       setLiffUser(null);
+      setUserStats(null);
+      setUserProducts([]);
+      setUserStores([]);
+      setUserMarketingMaterials([]);
+      localStorage.removeItem('farm2market_user');
+      localStorage.removeItem('farm2market_liff_user');
     } catch (error) {
       console.error('Logout failed:', error);
     }

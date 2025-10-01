@@ -4,10 +4,13 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/contexts/AuthContext';
-import { User, LogOut, Settings, Calendar, MessageSquare } from 'lucide-react';
+import { User, LogOut, Settings, Calendar, MessageSquare, Database } from 'lucide-react';
+import { createSampleDataForUser } from '@/utils/sampleData';
+import { useToast } from '@/hooks/use-toast';
 
 const UserProfile: React.FC = () => {
-  const { user, logout, isInLineApp } = useAuth();
+  const { user, logout, isInLineApp, refreshUserData } = useAuth();
+  const { toast } = useToast();
 
   if (!user) return null;
 
@@ -38,6 +41,27 @@ const UserProfile: React.FC = () => {
         return <Badge variant="default" className="bg-purple-500">Pro</Badge>;
       default:
         return <Badge variant="secondary">Free</Badge>;
+    }
+  };
+
+  const handleCreateSampleData = async () => {
+    try {
+      if (!user) return;
+      
+      await createSampleDataForUser(user.id);
+      await refreshUserData();
+      
+      toast({
+        title: "樣本資料已建立！ 🎉",
+        description: "您的農場現在有範例產品和商店資料。",
+      });
+    } catch (error) {
+      console.error('Failed to create sample data:', error);
+      toast({
+        title: "建立失敗",
+        description: "請稍後再試。",
+        variant: "destructive"
+      });
     }
   };
 
@@ -106,8 +130,17 @@ const UserProfile: React.FC = () => {
           </div>
         </div>
 
-        {isInLineApp && (
-          <div className="pt-4 border-t">
+        <div className="pt-4 border-t space-y-2">
+          <Button 
+            onClick={handleCreateSampleData} 
+            variant="outline" 
+            className="w-full"
+          >
+            <Database className="w-4 h-4 mr-2" />
+            建立樣本資料
+          </Button>
+          
+          {isInLineApp && (
             <Button 
               onClick={logout} 
               variant="outline" 
@@ -116,8 +149,8 @@ const UserProfile: React.FC = () => {
               <LogOut className="w-4 h-4 mr-2" />
               登出
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </CardContent>
     </Card>
   );

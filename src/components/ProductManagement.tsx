@@ -81,7 +81,9 @@ const ProductManagement = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">產品管理</h1>
-          <p className="text-muted-foreground mt-1">管理您的農場產品和庫存</p>
+          <p className="text-muted-foreground mt-1">
+            {products.length > 0 ? "管理您的農場產品和庫存" : "開始新增您的第一個產品"}
+          </p>
         </div>
         <Dialog open={showAddProduct} onOpenChange={setShowAddProduct}>
           <DialogTrigger asChild>
@@ -174,7 +176,8 @@ const ProductManagement = () => {
       </div>
 
       {/* Products Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {products.length > 0 ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {products.map((product) => (
           <Card key={product.id} className="bg-gradient-card shadow-soft hover:shadow-medium transition-all">
             <CardHeader className="pb-3">
@@ -255,7 +258,20 @@ const ProductManagement = () => {
             </CardContent>
           </Card>
         ))}
-      </div>
+        </div>
+      ) : (
+        <div className="text-center py-12">
+          <div className="w-24 h-24 mx-auto mb-6 bg-gradient-primary/10 rounded-full flex items-center justify-center">
+            <Package className="w-12 h-12 text-primary" />
+          </div>
+          <h3 className="text-xl font-semibold text-foreground mb-2">還沒有產品</h3>
+          <p className="text-muted-foreground mb-6">開始新增您的第一個農產品來管理庫存和銷售</p>
+          <Button onClick={() => setShowAddProduct(true)} className="gap-2">
+            <Plus className="w-4 h-4" />
+            新增第一個產品
+          </Button>
+        </div>
+      )}
 
       {/* AI Insights Card */}
       <Card className="bg-gradient-card shadow-soft">

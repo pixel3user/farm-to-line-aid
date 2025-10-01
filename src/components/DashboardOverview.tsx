@@ -20,40 +20,43 @@ import aiAssistantIcon from "@/assets/ai-assistant-icon.png";
 const DashboardOverview = () => {
   const { user, userStats, userProducts, userStores } = useAuth();
 
+  // Handle empty data states
+  const hasData = userStats && (userStats.totalProducts > 0 || userStats.totalStores > 0);
+
   // Calculate stats from real data
   const stats = [
     {
       title: "活躍產品",
       value: userStats?.activeProducts?.toString() || "0",
-      change: `+${userProducts.length} 總產品`,
+      change: hasData ? `${userProducts.length} 總產品` : "開始新增產品",
       icon: Package,
       color: "text-primary"
     },
     {
       title: "合作商店",
       value: userStats?.totalStores?.toString() || "0",
-      change: `${userStores.filter(s => s.status === 'customer').length} 客戶`,
+      change: hasData ? `${userStores.filter(s => s.status === 'customer').length} 客戶` : "尋找合作夥伴",
       icon: Store,
       color: "text-accent"
     },
     {
       title: "總營業額",
       value: `NT$${userStats?.totalRevenue?.toLocaleString() || "0"}`,
-      change: `+${userStats?.monthlyGrowth || 0}% 月成長`,
+      change: hasData ? `+${userStats?.monthlyGrowth || 0}% 月成長` : "開始銷售",
       icon: DollarSign,
       color: "text-success"
     },
     {
       title: "行銷素材",
       value: userStats?.totalMarketingMaterials?.toString() || "0",
-      change: "AI 生成",
+      change: hasData ? "AI 生成" : "創建素材",
       icon: TrendingUp,
       color: "text-secondary-dark"
     }
   ];
 
   // Generate recent activity from real data
-  const recentActivity = [
+  const recentActivity = hasData ? [
     ...(userProducts.filter(p => p.stock <= 10).map(product => ({
       type: "alert",
       message: `${product.name} 庫存不足 - 建議補貨`,
@@ -78,7 +81,14 @@ const DashboardOverview = () => {
       time: "1 天前",
       status: "success" as const
     }
-  ].slice(0, 4);
+  ].slice(0, 4) : [
+    {
+      type: "welcome",
+      message: "歡迎使用 Farm2Market AI！開始新增您的第一個產品",
+      time: "現在",
+      status: "info" as const
+    }
+  ];
 
   const quickActions = [
     {
@@ -117,7 +127,9 @@ const DashboardOverview = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-foreground">早安！ 🌅</h1>
-          <p className="text-muted-foreground mt-1">這是您今天的農場業務概覽</p>
+          <p className="text-muted-foreground mt-1">
+            {hasData ? "這是您今天的農場業務概覽" : "開始建立您的農場管理系統"}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <img src={aiAssistantIcon} alt="AI 助理" className="w-12 h-12 rounded-lg shadow-medium" />

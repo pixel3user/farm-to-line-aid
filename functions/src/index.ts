@@ -671,6 +671,8 @@ class LineBotAPI {
 // Gemini AI Service
 class GeminiService {
   private client: GoogleGenerativeAI;
+  private cache: Map<string, { response: string; timestamp: number }> = new Map();
+  private readonly CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
   constructor() {
     this.client = genAI;
@@ -678,6 +680,16 @@ class GeminiService {
 
   async generateText(prompt: string): Promise<string> {
     try {
+      // Create cache key from prompt hash
+      const cacheKey = this.createCacheKey(prompt);
+      
+      // Check cache first
+      const cached = this.cache.get(cacheKey);
+      if (cached && (Date.now() - cached.timestamp) < this.CACHE_DURATION) {
+        console.log('Using cached Gemini response for prompt length:', prompt.length);
+        return cached.response;
+      }
+
       console.log('Calling Gemini API with prompt length:', prompt.length);
       
       const model = this.client.getGenerativeModel({ 
@@ -692,12 +704,41 @@ class GeminiService {
       const response = await result.response;
       const text = response.text();
       
+      // Cache the response
+      this.cache.set(cacheKey, {
+        response: text || '抱歉，AI 服務暫時無法回應。',
+        timestamp: Date.now()
+      });
+
+      // Clean old cache entries
+      this.cleanCache();
+      
       console.log('Gemini API response length:', text?.length || 0);
       return text || '抱歉，AI 服務暫時無法回應。';
     } catch (error) {
       console.error('Gemini API Error:', error);
       console.error('Error details:', JSON.stringify(error, null, 2));
       return '抱歉，AI 服務暫時無法回應。';
+    }
+  }
+
+  private createCacheKey(prompt: string): string {
+    // Create a simple hash of the prompt for caching
+    let hash = 0;
+    for (let i = 0; i < prompt.length; i++) {
+      const char = prompt.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    return hash.toString();
+  }
+
+  private cleanCache(): void {
+    const now = Date.now();
+    for (const [key, value] of this.cache.entries()) {
+      if (now - value.timestamp > this.CACHE_DURATION) {
+        this.cache.delete(key);
+      }
     }
   }
 
@@ -848,11 +889,17 @@ class WebhookHandler {
   private lineBot: LineBotAPI;
   private geminiService: GeminiService;
   private databaseService: DatabaseService;
+  private processedEvents: Set<string> = new Set();
 
   constructor() {
     this.lineBot = new LineBotAPI();
     this.geminiService = new GeminiService();
     this.databaseService = new DatabaseService();
+    
+    // Clean processed events cache periodically
+    setInterval(() => {
+      this.cleanProcessedEvents();
+    }, 5 * 60 * 1000); // Every 5 minutes
   }
 
   async handleEvents(events: LineEvent[]): Promise<void> {
@@ -861,7 +908,19 @@ class WebhookHandler {
   }
 
   private async handleSingleEvent(event: LineEvent): Promise<void> {
-    console.log('Processing event:', event.type);
+    // Create unique event ID for deduplication
+    const eventId = this.createEventId(event);
+    
+    // Check if we've already processed this event
+    if (this.processedEvents.has(eventId)) {
+      console.log('Skipping duplicate event:', event.type, eventId);
+      return;
+    }
+
+    // Mark event as processed
+    this.processedEvents.add(eventId);
+    
+    console.log('Processing event:', event.type, eventId);
 
     try {
       switch (event.type) {
@@ -879,6 +938,26 @@ class WebhookHandler {
       }
     } catch (error) {
       console.error('Error handling event:', error);
+      // Remove from processed events on error so it can be retried
+      this.processedEvents.delete(eventId);
+    }
+  }
+
+  private createEventId(event: LineEvent): string {
+    // Create a unique ID based on event properties
+    const timestamp = event.replyToken ? 'reply' : 'no-reply';
+    const source = `${event.source.type}-${event.source.userId}`;
+    const content = event.message?.text || event.postback?.data || 'empty';
+    return `${event.type}-${source}-${timestamp}-${content}`.substring(0, 100);
+  }
+
+  private cleanProcessedEvents(): void {
+    // In a real implementation, you might want to use a more sophisticated
+    // cache with timestamps. For now, we'll just clear the set periodically
+    // to prevent memory leaks
+    if (this.processedEvents.size > 1000) {
+      console.log('Cleaning processed events cache, size was:', this.processedEvents.size);
+      this.processedEvents.clear();
     }
   }
 
@@ -950,17 +1029,25 @@ class WebhookHandler {
     try {
       const lowerText = text.toLowerCase();
 
-      // Command recognition
+      // Command recognition - avoid AI calls for simple commands
       if (lowerText.includes('產品') || lowerText.includes('product')) {
         await this.handleProductInquiry(replyToken);
+        return;
       } else if (lowerText.includes('店家') || lowerText.includes('store')) {
         await this.handleStoreInquiry(replyToken);
+        return;
       } else if (lowerText.includes('行銷') || lowerText.includes('marketing')) {
         await this.handleMarketingInquiry(replyToken);
+        return;
       } else if (lowerText.includes('報告') || lowerText.includes('analytics')) {
         await this.handleAnalyticsInquiry(replyToken);
+        return;
       } else if (lowerText.includes('幫助') || lowerText.includes('help')) {
         await this.handleHelpInquiry(replyToken);
+        return;
+      } else if (lowerText.includes('管理') || lowerText.includes('dashboard') || lowerText.includes('網站') || lowerText.includes('website') || lowerText.includes('管理介面') || lowerText.includes('後台') || lowerText.includes('admin') || lowerText.includes('網頁') || lowerText.includes('web')) {
+        await this.handleWebsiteAccessRequest(replyToken, userId);
+        return;
       } else {
         // Get user context for personalized AI response
         let user, recentConversations;
@@ -985,7 +1072,7 @@ class WebhookHandler {
           }))
         };
 
-        // AI-powered response with user context
+        // AI-powered response with user context (only for non-command messages)
         const aiResponse = await this.geminiService.handleConversation(text, userId, userContext);
         
         // Only store conversation if AI response is successful
@@ -1426,6 +1513,9 @@ class WebhookHandler {
           break;
         case 'help':
           await this.handleHelpInquiry(event.replyToken);
+          break;
+        case 'website_access':
+          await this.handleWebsiteAccessRequest(event.replyToken, event.source.userId);
           break;
         default:
           console.log('Unhandled postback data:', data);
@@ -2026,9 +2116,10 @@ class WebhookHandler {
                 style: 'secondary',
                 height: 'sm',
                 action: {
-                  type: 'uri',
+                  type: 'postback',
                   label: '🌐 開啟網站工具',
-                  uri: 'https://farm2market-99.web.app'
+                  data: 'website_access',
+                  displayText: '🌐 開啟網站工具'
                 }
               }
             ]
@@ -2651,6 +2742,91 @@ class WebhookHandler {
       await this.lineBot.replyMessage(replyToken, [message]);
     } catch (error) {
       console.error('Error handling price tag design:', error);
+    }
+  }
+
+  private async handleWebsiteAccessRequest(replyToken: string, userId: string): Promise<void> {
+    try {
+      // Get user profile from LINE
+      const userProfile = await this.lineBot.getUserProfile(userId);
+      
+      // Create web app URL with user parameters
+      const webAppUrl = `https://farm2market-99.web.app?userId=${userProfile.userId}&displayName=${encodeURIComponent(userProfile.displayName)}&pictureUrl=${encodeURIComponent(userProfile.pictureUrl || '')}`;
+      
+      const websiteAccessMessage = {
+        type: 'flex' as const,
+        altText: '開啟管理介面',
+        contents: {
+          type: 'bubble',
+          header: {
+            type: 'box',
+            layout: 'vertical',
+            contents: [
+              {
+                type: 'text',
+                text: '🌐 管理介面',
+                weight: 'bold',
+                size: 'xl',
+                color: '#FF6B35'
+              },
+              {
+                type: 'text',
+                text: '正在為您開啟 Farm2Market AI 管理介面...',
+                size: 'sm',
+                color: '#666666'
+              }
+            ]
+          },
+          body: {
+            type: 'box',
+            layout: 'vertical',
+            contents: [
+              {
+                type: 'text',
+                text: '點擊下方連結進入您的專屬管理面板：',
+                size: 'sm',
+                color: '#333333'
+              },
+              {
+                type: 'separator',
+                margin: 'md'
+              },
+              {
+                type: 'text',
+                text: '• 產品管理\n• 交易追蹤\n• 市場分析\n• 行銷工具\n• 數據報表',
+                size: 'sm',
+                color: '#666666',
+                wrap: true
+              }
+            ]
+          },
+          footer: {
+            type: 'box',
+            layout: 'vertical',
+            contents: [
+              {
+                type: 'button',
+                style: 'primary',
+                height: 'sm',
+                action: {
+                  type: 'uri',
+                  label: '🚀 開啟管理介面',
+                  uri: webAppUrl
+                }
+              }
+            ]
+          }
+        }
+      };
+
+      await this.lineBot.replyMessage(replyToken, [websiteAccessMessage]);
+    } catch (error) {
+      console.error('Error handling website access request:', error);
+      const errorMessage = {
+        type: 'text' as const,
+        text: '抱歉，無法開啟管理介面。請稍後再試或聯繫客服。'
+      };
+      await this.lineBot.replyMessage(replyToken, [errorMessage]);
     }
   }
 
