@@ -3,6 +3,7 @@ import express from 'express';
 import { WebhookHandler } from '../api/webhookHandler';
 import { DatabaseService } from '../lib/database-server';
 import crypto from 'crypto';
+import admin from '../lib/firebaseAdmin';
 
 const router = express.Router();
 
@@ -216,7 +217,6 @@ router.post('/auth/line', async (req: any, res: any) => {
     console.log('LINE user verified:', lineUser.sub);
 
     // Create Firebase custom token
-    const admin = require('firebase-admin');
     const customToken = await admin.auth().createCustomToken(lineUser.sub, {
       lineUserId: lineUser.sub,
       displayName: lineUser.name,
