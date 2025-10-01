@@ -31,7 +31,23 @@ const admin = __importStar(require("firebase-admin"));
 const generative_ai_1 = require("@google/generative-ai");
 const crypto = __importStar(require("crypto"));
 // Initialize Firebase Admin
-admin.initializeApp();
+const serviceAccount = {
+    type: "service_account",
+    project_id: "farm2market-99",
+    private_key_id: "c333b4e691a0c0a1ed3081998aa1baefbc284f7f",
+    private_key: "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDYfUd0WqqdQpD9\nzEFeHuby0GY3UDm4n7kD1VszenSu8PuimuZyTOj6unnDzcntNV2iM7oaBCWPdLfY\nB0erqYhJi/Yhi0A/uns/Kn+zpPxNH8RNWaGXEjlTER6D2U70LCcwFCYyUpmkiAK5\n4s+XIpBkynOG/7ZSPjdOgpHpI5k5KAad4svTsji5t6d5CQbosfCa/0q+0dvYk90+\n07D+q/8NbnL1AoqaJb3KE2JFr9p4fiFsacE2A4qt+gaeRoBV/P0BOQG9ZZ7aMhJy\n+HK/sv3+lshfpyjL/7xdSQ3hBfmeBETiD15n/jGaz3XhDg26++gInNAUA5jZ3nuI\nfy3ppedtAgMBAAECggEAIWDbegCaqql/QmpSL8lS8WAZSnD3nVQfCgzExYCdafWk\nzpLUcg4So8nJiVt6xTSDrcUM7gLyqZYk3E1vCvQWG8TVG6HlM440f241h0SqU9fQ\ng96McAbyyLBshIamSjZeimao5vxeTQRdazyhphtBqRCf1FIr0a1fCJ9QEOKYtruA\n2dH7hp+2kLGYnWHt1RyUwj+rmpTF/sPFYvcvMQsQre6at8Nh5e4ZLIXAyPvlmvpp\npCG5wSiF+Ripe29s5Ff9NKKDdKHnkielQnb4FReqS2WCPYbTk0IbXTQ6qGR1+u5b\nugMa1Y9VFteUHgvDU8UCs43cdVT/nsmxVXfZ9pizQQKBgQD8HrEFwnsoSeejSWfn\nMdpVyBwkpx9S8ExlqlwlDxwwIQUqh7WbvAmQWOrsglb5twkvP14DSePNg2Z/q4qq\n/O1DkDVGGckYEsO98KCoIu3XisIxQJdVVTrEpPVjz5EchmkhXqx1C2V4KX9m3wjn\nYv8tNIv/5SM6JlDznIco7/klDQKBgQDb0jWnZW+iDa9gceSCm/0xYf7H1s3lGfEy\nXugOdQvyA0tiLv+k0UPjS5zxlUU6a5hf02aFXUbdqxx5jlhb4ke2ynFEglMP0Nzl\nMinruVeNg8I0xN3cwoRlznRtIkNwE89QCw+WfGaYRj0SJXRZca5oGDDJNgWm5kqa\n1JelWUXz4QKBgHclHe0l4kPA4UnGN+cHJTIitkIQBHqSetgUsSUGRgDsqd9WcNme\n/DoN+z83vViXSizc2lXdhl0purec3pQ9oPar4LE3IFRTEdPiMloi35lbxre12Y6H\nD5W8iwbXIbGER4xwjDln4FTv73gy8KdAnmzDh2Gv7HzffKQTlcAf3/LFAoGBAIHV\nIoOAUfLxCkh4fHL4Fw93xbfakzlhnSgXDhCb6TZD495VzABY6TPykPvPIlhi/Fh8\nz+ytLxH14peZD28Vsy2vXD8OimipAA8PFdt4WNHopGfubuvYp8JJslJTDmnACY5J\nOiezyhTeR2vUW2gI0O4Ce64cDjKJij7wmbC7jamBAoGBAK0fZWcv0d74GwD90M+6\nZTpJ//ZaBzqYEa7ukT6kCiCJWVychWZGxwcQERSi6lGWFNIiCbtALq3AOI/uP3r3\nlfyLF1Pj3nrbUA/CaIT8Q6gAn9Bhdf5ichib6HgzGZHb4nc2D7qcVNj44hR3hKxk\nOSdpzmlCcTutIt91ha5XFi+j\n-----END PRIVATE KEY-----\n",
+    client_email: "firebase-adminsdk-fbsvc@farm2market-99.iam.gserviceaccount.com",
+    client_id: "108614495138611466373",
+    auth_uri: "https://accounts.google.com/o/oauth2/auth",
+    token_uri: "https://oauth2.googleapis.com/token",
+    auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+    client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40farm2market-99.iam.gserviceaccount.com",
+    universe_domain: "googleapis.com"
+};
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    projectId: "farm2market-99"
+});
 // Initialize Gemini AI
 const genAI = new generative_ai_1.GoogleGenerativeAI(((_a = functions.config().gemini) === null || _a === void 0 ? void 0 : _a.api_key) || '');
 // LINE Bot Configuration
