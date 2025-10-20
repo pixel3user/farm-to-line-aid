@@ -14,7 +14,8 @@ import {
   Timestamp,
   DocumentReference,
   WriteResult,
-  FirestoreError
+  FirestoreError,
+  QueryConstraint
 } from 'firebase/firestore';
 import { db } from './firebase';
 
@@ -25,6 +26,9 @@ export interface LineUser {
   displayName: string;
   pictureUrl?: string;
   statusMessage?: string;
+  email?: string;
+  role?: 'farmer' | 'market';
+  roleSelectedAt?: Timestamp | string;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   isActive: boolean;
@@ -238,7 +242,7 @@ export class DatabaseService {
   static async createStore(userId: string, storeData: Partial<Store>): Promise<{ id: string }> {
     const storeRef = doc(collection(db, 'stores'));
     const now = Timestamp.now();
-    
+
     const storeDoc = {
       id: storeRef.id,
       userId,
@@ -264,6 +268,16 @@ export class DatabaseService {
     return { id: storeRef.id };
   }
 
+  static async updateStore(storeId: string, updates: Partial<Store>): Promise<void> {
+    const storeRef = doc(db, 'stores', storeId);
+    const updateData = {
+      ...updates,
+      updatedAt: Timestamp.now()
+    };
+
+    await updateDoc(storeRef, updateData);
+  }
+
   static async getStoresByUser(userId: string): Promise<Store[]> {
     const q = query(
       collection(db, 'stores'),
@@ -274,6 +288,39 @@ export class DatabaseService {
     
     const querySnapshot = await getDocs(q);
     return querySnapshot.docs.map(doc => doc.data() as Store);
+  }
+
+  static async getAllStores(limitCount: number = 20): Promise<Store[]> {
+    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
+    if (limitCount > 0) {
+      constraints.push(limit(limitCount));
+    }
+
+    const q = query(collection(db, 'stores'), ...constraints);
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => doc.data() as Store);
+  }
+
+  static async getFarmers(limitCount: number = 20): Promise<LineUser[]> {
+    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
+    if (limitCount > 0) {
+      constraints.push(limit(limitCount));
+    }
+
+    const q = query(collection(db, 'line_users'), ...constraints);
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => doc.data() as LineUser);
+  }
+
+  static async getAllProducts(limitCount: number = 20): Promise<Product[]> {
+    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
+    if (limitCount > 0) {
+      constraints.push(limit(limitCount));
+    }
+
+    const q = query(collection(db, 'products'), ...constraints);
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => doc.data() as Product);
   }
 
   // Conversation operations

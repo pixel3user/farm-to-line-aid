@@ -128,3 +128,5 @@ open https://farm2market-99.web.app/test-line-redirect
 
 **The main issue is that the LIFF app needs to be created in LINE Developer Console and the LIFF ID needs to be configured in the environment variables.**
 
+
+

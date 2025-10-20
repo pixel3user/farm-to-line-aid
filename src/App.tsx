@@ -1,82 +1,84 @@
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { AuthProvider, useAuth } from "@/contexts/AuthContext";
-import Index from "./pages/Index";
+import AppLayout from "./components/layouts/AppLayout";
+import FarmerLayout from "./components/layouts/FarmerLayout";
+import MarketLayout from "./components/layouts/MarketLayout";
+import ProtectedRoute from "./components/ProtectedRoute";
+import Home from "./pages/Home";
+import SignIn from "./pages/auth/SignIn";
+import SignUp from "./pages/auth/SignUp";
+import LineCallback from "./pages/auth/LineCallback";
+import RoleSelection from "./pages/auth/RoleSelection";
 import NotFound from "./pages/NotFound";
-import LoginButton from "@/components/LoginButton";
-import SimpleTest from "./pages/SimpleTest";
 
-const queryClient = new QueryClient();
+// Farmer pages
+import FarmerDashboard from "./pages/farmer/Dashboard";
+import FarmerProducts from "./pages/farmer/Products";
+import FarmerStores from "./pages/farmer/Stores";
+import FarmerMarketing from "./pages/farmer/Marketing";
+import FarmerAnalytics from "./pages/farmer/Analytics";
+import FarmerReferences from "./pages/farmer/References";
 
-const AppContent = () => {
-  try {
-    const { user, isLoading, isLiffReady } = useAuth();
+// Market pages
+import MarketDashboard from "./pages/market/Dashboard";
+import MarketFarms from "./pages/market/Farms";
+import MarketProducts from "./pages/market/Products";
+import MarketSchedule from "./pages/market/Schedule";
+import MarketRatings from "./pages/market/Ratings";
 
-    console.log('AppContent render:', { user, isLoading, isLiffReady });
+// Demo pages
+import LineDemo from "./pages/demo/LineDemo";
 
-    if (isLoading || !isLiffReady) {
-      return (
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">正在載入...</p>
-            <p className="text-xs text-muted-foreground mt-2">
-              Loading: {isLoading ? 'true' : 'false'}, LIFF Ready: {isLiffReady ? 'true' : 'false'}
-            </p>
-          </div>
-        </div>
-      );
-    }
-
-    if (!user) {
-      return <LoginButton />;
-    }
-
-    return (
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/test" element={<SimpleTest />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    );
-  } catch (error) {
-    console.error('Error in AppContent:', error);
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-red-500 mb-4">Error Loading App</h1>
-          <p className="text-muted-foreground mb-4">There was an error loading the application.</p>
-          <details className="text-left bg-gray-100 p-4 rounded">
-            <summary className="cursor-pointer font-medium">Error Details</summary>
-            <pre className="mt-2 text-sm text-red-600">{error?.toString()}</pre>
-          </details>
-        </div>
-      </div>
-    );
-  }
-};
+// Settings page
+import Settings from "./pages/Settings";
 
 const App = () => {
-  console.log('App component rendering...');
-  
   return (
-    <div className="min-h-screen bg-background pt-safe-top pb-safe-bottom">
-      <QueryClientProvider client={queryClient}>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <AuthProvider>
-            <AppContent />
-          </AuthProvider>
-        </TooltipProvider>
-      </QueryClientProvider>
-    </div>
+    <BrowserRouter>
+      <Routes>
+            {/* Public routes */}
+            <Route path="/" element={<AppLayout><Home /></AppLayout>} />
+            <Route path="/auth/signin" element={<AppLayout><SignIn /></AppLayout>} />
+            <Route path="/auth/signup" element={<AppLayout><SignUp /></AppLayout>} />
+            <Route path="/auth/line/callback" element={<AppLayout><LineCallback /></AppLayout>} />
+            <Route path="/auth/role-selection" element={<AppLayout><RoleSelection /></AppLayout>} />
+        
+        {/* Farmer routes */}
+        <Route path="/farmer" element={
+          <ProtectedRoute requiredRole="farmer">
+            <FarmerLayout />
+          </ProtectedRoute>
+        }>
+          <Route index element={<FarmerDashboard />} />
+          <Route path="products" element={<FarmerProducts />} />
+          <Route path="stores" element={<FarmerStores />} />
+          <Route path="marketing" element={<FarmerMarketing />} />
+          <Route path="analytics" element={<FarmerAnalytics />} />
+          <Route path="references" element={<FarmerReferences />} />
+        </Route>
+
+        {/* Market routes */}
+        <Route path="/market" element={
+          <ProtectedRoute requiredRole="market">
+            <MarketLayout />
+          </ProtectedRoute>
+        }>
+          <Route index element={<MarketDashboard />} />
+          <Route path="farms" element={<MarketFarms />} />
+          <Route path="products" element={<MarketProducts />} />
+          <Route path="schedule" element={<MarketSchedule />} />
+          <Route path="ratings" element={<MarketRatings />} />
+        </Route>
+        
+        {/* Demo routes */}
+        <Route path="/demo/line" element={<AppLayout><LineDemo /></AppLayout>} />
+        
+        {/* Settings route */}
+        <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
+        
+        {/* Catch-all route */}
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </BrowserRouter>
   );
 };
 

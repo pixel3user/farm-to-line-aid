@@ -279,10 +279,16 @@ export class UserDataService {
   static async updateUserProfile(userId: string, updates: Partial<LineUser>): Promise<void> {
     try {
       const userRef = doc(db, 'line_users', userId);
-      await updateDoc(userRef, {
-        ...updates,
-        updatedAt: Timestamp.now()
+      // sanitize undefined fields (Firestore rejects undefined)
+      const sanitized: Record<string, any> = {};
+      Object.entries(updates).forEach(([k, v]) => {
+        if (v !== undefined) sanitized[k] = v;
       });
+      sanitized.updatedAt = Timestamp.now();
+
+      // Use setDoc with merge to upsert the document when it doesn't exist
+      const { setDoc } = await import('firebase/firestore');
+      await setDoc(userRef, sanitized, { merge: true });
     } catch (error) {
       console.error('Error updating user profile:', error);
       throw error;

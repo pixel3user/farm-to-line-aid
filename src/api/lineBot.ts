@@ -524,7 +524,7 @@ export class MessageTemplates {
   }
 }
 
-// Rich Menu Configuration
+// Enhanced Rich Menu Configuration
 export const RICH_MENU_CONFIG = {
   size: {
     width: 2500,
@@ -543,7 +543,8 @@ export const RICH_MENU_CONFIG = {
       },
       action: {
         type: 'uri',
-        uri: `${LINE_CONFIG.LIFF_URL}?tab=dashboard`
+        uri: `${LINE_CONFIG.LIFF_URL}?tab=dashboard`,
+        label: 'Dashboard'
       }
     },
     {
@@ -555,7 +556,8 @@ export const RICH_MENU_CONFIG = {
       },
       action: {
         type: 'uri',
-        uri: `${LINE_CONFIG.LIFF_URL}?tab=products`
+        uri: `${LINE_CONFIG.LIFF_URL}?tab=products`,
+        label: 'Products'
       }
     },
     {
@@ -567,7 +569,8 @@ export const RICH_MENU_CONFIG = {
       },
       action: {
         type: 'uri',
-        uri: `${LINE_CONFIG.LIFF_URL}?tab=stores`
+        uri: `${LINE_CONFIG.LIFF_URL}?tab=stores`,
+        label: 'Stores'
       }
     },
     {
@@ -579,7 +582,8 @@ export const RICH_MENU_CONFIG = {
       },
       action: {
         type: 'uri',
-        uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing`
+        uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing`,
+        label: 'Marketing'
       }
     },
     {
@@ -591,7 +595,8 @@ export const RICH_MENU_CONFIG = {
       },
       action: {
         type: 'uri',
-        uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics`
+        uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics`,
+        label: 'Analytics'
       }
     },
     {
@@ -602,9 +607,464 @@ export const RICH_MENU_CONFIG = {
         height: 843
       },
       action: {
-        type: 'text',
-        text: '幫助'
+        type: 'postback',
+        data: 'action=help',
+        label: 'Help'
       }
     }
   ]
 };
+
+// Rich Menu Management Functions
+export class RichMenuManager {
+  private accessToken: string;
+  private baseUrl: string;
+
+  constructor(accessToken: string = LINE_CONFIG.CHANNEL_ACCESS_TOKEN) {
+    this.accessToken = accessToken;
+    this.baseUrl = LINE_CONFIG.MESSAGING_API_URL;
+  }
+
+  // Create rich menu
+  async createRichMenu(richMenuConfig: any): Promise<string> {
+    const url = `${this.baseUrl}/richmenu`;
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${this.accessToken}`,
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(richMenuConfig),
+      });
+
+      if (!response.ok) {
+        throw new Error(`LINE API Error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      return result.richMenuId;
+    } catch (error) {
+      console.error('Failed to create rich menu:', error);
+      throw error;
+    }
+  }
+
+  // Upload rich menu image
+  async uploadRichMenuImage(richMenuId: string, imageBuffer: ArrayBuffer): Promise<void> {
+    const url = `${this.baseUrl}/richmenu/${richMenuId}/content`;
+    const headers = {
+      'Content-Type': 'image/png',
+      'Authorization': `Bearer ${this.accessToken}`,
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: imageBuffer,
+      });
+
+      if (!response.ok) {
+        throw new Error(`LINE API Error: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Failed to upload rich menu image:', error);
+      throw error;
+    }
+  }
+
+  // Set default rich menu
+  async setDefaultRichMenu(richMenuId: string): Promise<void> {
+    const url = `${this.baseUrl}/user/all/richmenu/${richMenuId}`;
+    const headers = {
+      'Authorization': `Bearer ${this.accessToken}`,
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+      });
+
+      if (!response.ok) {
+        throw new Error(`LINE API Error: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Failed to set default rich menu:', error);
+      throw error;
+    }
+  }
+
+  // Delete rich menu
+  async deleteRichMenu(richMenuId: string): Promise<void> {
+    const url = `${this.baseUrl}/richmenu/${richMenuId}`;
+    const headers = {
+      'Authorization': `Bearer ${this.accessToken}`,
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers,
+      });
+
+      if (!response.ok) {
+        throw new Error(`LINE API Error: ${response.status}`);
+      }
+    } catch (error) {
+      console.error('Failed to delete rich menu:', error);
+      throw error;
+    }
+  }
+}
+
+// Enhanced Message Templates with LIFF Integration
+export class EnhancedMessageTemplates {
+  // Quick action template for farmers
+  static quickActions(): LineMessage {
+    return {
+      type: 'flex',
+      altText: '快速操作選單',
+      contents: {
+        type: 'bubble',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'text',
+              text: '🚀 快速操作',
+              weight: 'bold',
+              color: '#ffffff',
+              size: 'lg'
+            }
+          ],
+          backgroundColor: '#1DB446'
+        },
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'button',
+              style: 'primary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '📦 新增產品',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=add`
+              }
+            },
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '🏪 尋找店家',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&action=search`
+              }
+            },
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '📊 查看數據',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics`
+              }
+            }
+          ]
+        }
+      }
+    };
+  }
+
+  // Product form template with LIFF integration
+  static productFormTemplate(): LineMessage {
+    return {
+      type: 'flex',
+      altText: '產品管理表單',
+      contents: {
+        type: 'bubble',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'text',
+              text: '📦 產品管理',
+              weight: 'bold',
+              color: '#ffffff',
+              size: 'lg'
+            }
+          ],
+          backgroundColor: '#1DB446'
+        },
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'text',
+              text: '選擇您要進行的操作：',
+              size: 'md',
+              margin: 'md'
+            },
+            {
+              type: 'separator',
+              margin: 'md'
+            },
+            {
+              type: 'button',
+              style: 'primary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '➕ 新增產品',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=create`
+              }
+            },
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '✏️ 編輯產品',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=edit`
+              }
+            },
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '📊 庫存管理',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=inventory`
+              }
+            }
+          ]
+        }
+      }
+    };
+  }
+
+  // Store discovery template
+  static storeDiscoveryTemplate(): LineMessage {
+    return {
+      type: 'flex',
+      altText: '店家探索',
+      contents: {
+        type: 'bubble',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'text',
+              text: '🏪 店家探索',
+              weight: 'bold',
+              color: '#ffffff',
+              size: 'lg'
+            }
+          ],
+          backgroundColor: '#1DB446'
+        },
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'text',
+              text: '發現新的合作機會：',
+              size: 'md',
+              margin: 'md'
+            },
+            {
+              type: 'separator',
+              margin: 'md'
+            },
+            {
+              type: 'button',
+              style: 'primary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '🔍 搜尋店家',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&action=search`
+              }
+            },
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '📍 附近店家',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&action=nearby`
+              }
+            },
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '⭐ 推薦店家',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&action=recommended`
+              }
+            }
+          ]
+        }
+      }
+    };
+  }
+
+  // Marketing tools template
+  static marketingToolsTemplate(): LineMessage {
+    return {
+      type: 'flex',
+      altText: '行銷工具',
+      contents: {
+        type: 'bubble',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'text',
+              text: '📱 行銷工具',
+              weight: 'bold',
+              color: '#ffffff',
+              size: 'lg'
+            }
+          ],
+          backgroundColor: '#1DB446'
+        },
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'text',
+              text: 'AI 驅動的行銷解決方案：',
+              size: 'md',
+              margin: 'md'
+            },
+            {
+              type: 'separator',
+              margin: 'md'
+            },
+            {
+              type: 'button',
+              style: 'primary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '🎨 生成海報',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing&action=generate`
+              }
+            },
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '📝 文案助手',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing&action=copywriting`
+              }
+            },
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '📊 行銷分析',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing&action=analytics`
+              }
+            }
+          ]
+        }
+      }
+    };
+  }
+
+  // Analytics dashboard template
+  static analyticsTemplate(): LineMessage {
+    return {
+      type: 'flex',
+      altText: '數據分析',
+      contents: {
+        type: 'bubble',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'text',
+              text: '📊 數據分析',
+              weight: 'bold',
+              color: '#ffffff',
+              size: 'lg'
+            }
+          ],
+          backgroundColor: '#1DB446'
+        },
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            {
+              type: 'text',
+              text: '深入了解您的業務表現：',
+              size: 'md',
+              margin: 'md'
+            },
+            {
+              type: 'separator',
+              margin: 'md'
+            },
+            {
+              type: 'button',
+              style: 'primary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '📈 銷售報告',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics&action=sales`
+              }
+            },
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '🔮 需求預測',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics&action=forecast`
+              }
+            },
+            {
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: {
+                type: 'uri',
+                label: '💡 智能建議',
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics&action=insights`
+              }
+            }
+          ]
+        }
+      }
+    };
+  }
+}

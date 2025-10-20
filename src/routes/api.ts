@@ -4,6 +4,12 @@ import { WebhookHandler } from '../api/webhookHandler';
 import { DatabaseService } from '../lib/database-server';
 import crypto from 'crypto';
 import admin from '../lib/firebaseAdmin';
+import { 
+  exchangeCodeForToken, 
+  getUserProfile,
+  mockExchangeCodeForToken,
+  mockGetUserProfile
+} from './lineAuth';
 
 const router = express.Router();
 
@@ -187,7 +193,11 @@ router.get('/user/:userId/marketing-materials', async (req: any, res: any) => {
   }
 });
 
-// POST: LINE authentication endpoint
+// LINE Login endpoints
+router.post('/auth/line/token', mockExchangeCodeForToken);
+router.post('/auth/line/profile', mockGetUserProfile);
+
+// POST: LINE authentication endpoint (LIFF)
 router.post('/auth/line', async (req: any, res: any) => {
   try {
     const { idToken } = req.body;

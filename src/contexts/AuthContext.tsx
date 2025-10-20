@@ -1,10 +1,9 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { User as FirebaseUser, onAuthStateChanged, signInWithCustomToken, signOut } from 'firebase/auth';
 import { auth, db } from '@/lib/firebase';
 import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { LineUser, DatabaseService } from '@/lib/database';
 import { UserDataService } from '@/services/userDataService';
-import { createSampleDataForUser } from '@/utils/sampleData';
 
 // LINE LIFF types
 interface LiffUser {
@@ -21,9 +20,14 @@ interface AuthContextType {
   isLoading: boolean;
   isLiffReady: boolean;
   isInLineApp: boolean;
-  login: () => Promise<void>;
+  login: (profileOverride?: LiffUser) => Promise<void>;
+  loginWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string, displayName?: string, role?: 'farmer' | 'market') => Promise<void>;
   logout: () => Promise<void>;
   refreshUserData: () => Promise<void>;
+  setLiffProfile: (profile: LiffUser) => void;
+  updateUserProfile: (updates: Partial<LineUser>) => Promise<void>;
+  updateUserPreferences: (preferences: Partial<LineUser['preferences']>) => Promise<void>;
   userStats: any;
   userProducts: any[];
   userStores: any[];
@@ -63,6 +67,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [userProducts, setUserProducts] = useState<any[]>([]);
   const [userStores, setUserStores] = useState<any[]>([]);
   const [userMarketingMaterials, setUserMarketingMaterials] = useState<any[]>([]);
+  const loginInProgressRef = useRef(false);
 
   // Persist user state to localStorage
   useEffect(() => {
@@ -434,8 +439,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           id: profile.userId,
           lineUserId: profile.userId,
           displayName: profile.displayName,
-          pictureUrl: profile.pictureUrl,
-          statusMessage: profile.statusMessage,
+          pictureUrl: profile.pictureUrl || null,
+          statusMessage: profile.statusMessage || null,
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
           isActive: true,
@@ -451,19 +456,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             favoriteFeatures: []
           }
         };
+        // Only add email if present
+        if (profile.email) {
+          (newUser as any).email = profile.email;
+        }
         
         await setDoc(userRef, newUser);
         setUser(newUser);
         
-        // Create sample data for new users
-        console.log('Creating sample data for new user...');
-        try {
-          await createSampleDataForUser(profile.userId);
-        } catch (sampleError) {
-          console.error('Failed to create sample data:', sampleError);
-        }
-        
-        // Load user data (now includes sample data)
+        // Load user data
         try {
           await loadUserData(profile.userId);
         } catch (loadError) {
@@ -473,13 +474,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.log('Updating existing user profile...');
         // Update existing user
         const existingUser = userSnap.data() as LineUser;
-        await updateDoc(userRef, {
+        const updates: any = {
           displayName: profile.displayName,
           pictureUrl: profile.pictureUrl,
           statusMessage: profile.statusMessage,
           updatedAt: Timestamp.now(),
           'metadata.lastInteraction': Timestamp.now()
-        });
+        };
+        if (profile.email) {
+          updates.email = profile.email;
+        }
+        await updateDoc(userRef, updates);
         
         setUser({
           ...existingUser,
@@ -508,8 +513,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         id: profile.userId,
         lineUserId: profile.userId,
         displayName: profile.displayName,
-        pictureUrl: profile.pictureUrl,
-        statusMessage: profile.statusMessage,
+        pictureUrl: profile.pictureUrl || null,
+        statusMessage: profile.statusMessage || null,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
         isActive: true,
@@ -530,6 +535,81 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setIsLoading(false);
       console.log('Fallback user created, app can proceed in demo mode');
     }
+  };
+
+  const loginWithEmail = async (email: string, password: string) => {
+    if (!auth || !db) throw new Error('Firebase not initialized');
+    try {
+      const { signInWithEmailAndPassword } = await import('firebase/auth');
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const uid = cred.user.uid;
+
+      // Ensure unified profile exists keyed by LINE userId if present, else Firebase UID
+      // We will use a mapping: line_users doc id == uid for email-only accounts
+      const userRef = doc(db, 'line_users', uid);
+      const snap = await getDoc(userRef);
+      if (!snap.exists()) {
+        const now = Timestamp.now();
+        const newUser: LineUser = {
+          id: uid,
+          lineUserId: uid,
+          displayName: cred.user.displayName || email.split('@')[0],
+          pictureUrl: cred.user.photoURL || null,
+          statusMessage: null,
+          email,
+          createdAt: now,
+          updatedAt: now,
+          isActive: true,
+          subscriptionTier: 'free',
+          preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
+          metadata: { totalMessages: 0, lastInteraction: now, favoriteFeatures: [] }
+        };
+        await setDoc(userRef, newUser);
+        setUser(newUser);
+      } else {
+        setUser(snap.data() as LineUser);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const signUpWithEmail = async (
+    email: string,
+    password: string,
+    displayName?: string,
+    role?: 'farmer' | 'market'
+  ) => {
+    if (!auth || !db) throw new Error('Firebase not initialized');
+    const { createUserWithEmailAndPassword, updateProfile } = await import('firebase/auth');
+    const cred = await createUserWithEmailAndPassword(auth, email, password);
+    if (displayName) {
+      await updateProfile(cred.user, { displayName });
+    }
+    // Create unified profile
+    const uid = cred.user.uid;
+    const now = Timestamp.now();
+    const userRef = doc(db, 'line_users', uid);
+    const newUser: LineUser = {
+      id: uid,
+      lineUserId: uid,
+      displayName: displayName || email.split('@')[0],
+      pictureUrl: cred.user.photoURL || null,
+      statusMessage: null,
+      email,
+      createdAt: now,
+      updatedAt: now,
+      isActive: true,
+      subscriptionTier: 'free',
+      preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
+      metadata: { totalMessages: 0, lastInteraction: now, favoriteFeatures: [] }
+    };
+    if (role) {
+      newUser.role = role;
+      newUser.roleSelectedAt = now;
+    }
+    await setDoc(userRef, newUser);
+    setUser(newUser);
   };
 
   const loadUserData = async (userId: string) => {
@@ -593,23 +673,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUserStores(stores);
       setUserMarketingMaterials(marketingMaterials);
       
-      // Check if user has no data and create sample data
+      // Check if user has no data - don't create demo data for real users
       const hasData = stats.totalProducts > 0 || stats.totalStores > 0;
-      if (!hasData && user) {
-        console.log('User has no data, creating sample data...');
-        await createSampleDataForUser(userId);
-        // Reload data after creating sample data
-        const [newStats, newProducts, newStores, newMaterials] = await Promise.all([
-          UserDataService.getUserStats(userId),
-          UserDataService.getUserProducts(userId, 10),
-          UserDataService.getUserStores(userId, 10),
-          UserDataService.getMarketingMaterials(userId, 10)
-        ]);
-        
-        setUserStats(newStats);
-        setUserProducts(newProducts);
-        setUserStores(newStores);
-        setUserMarketingMaterials(newMaterials);
+      if (!hasData) {
+        console.log('No data found for user, leaving datasets empty.');
       }
       
       setIsLoading(false);
@@ -619,46 +686,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const login = async () => {
-    if (isInLineApp && isLiffReady) {
+  const login = async (profileOverride?: LiffUser) => {
+    // Prevent re-entrancy/infinite loops
+    if (loginInProgressRef.current || isLoading) {
+      console.log('Login already in progress, skipping...');
+      return;
+    }
+
+    // If we already have a user session, do not re-login
+    if (user) {
+      console.log('User already authenticated, skipping login');
+      return;
+    }
+
+    loginInProgressRef.current = true;
+    setIsLoading(true);
+
+    try {
+      if (isInLineApp && isLiffReady) {
       try {
         const liff = (await import('@line/liff')).default;
         const liffId = import.meta.env.VITE_LIFF_ID;
         
         if (!liffId || liffId === 'your-liff-id') {
-          console.warn('LIFF ID not configured, using demo mode');
-          // Demo mode: create a fake user for testing
-          const demoProfile = {
-            userId: 'demo-user-' + Date.now(),
-            displayName: 'Demo User',
-            pictureUrl: undefined,
-            statusMessage: 'Demo Account'
-          };
-          
-          setLiffUser(demoProfile);
-          try {
-            await authenticateWithFirebase('', demoProfile);
-          } catch (error) {
-            console.error('Demo authentication failed:', error);
-            // Create mock user for demo purposes
-            const mockUser: LineUser = {
-              id: demoProfile.userId,
-              lineUserId: demoProfile.userId,
-              displayName: demoProfile.displayName,
-              pictureUrl: demoProfile.pictureUrl,
-              statusMessage: demoProfile.statusMessage,
-              createdAt: Timestamp.now(),
-              updatedAt: Timestamp.now(),
-              isActive: true,
-              subscriptionTier: 'free',
-              preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
-              metadata: { totalMessages: 0, lastInteraction: Timestamp.now(), favoriteFeatures: [] }
-            };
-            setUser(mockUser);
-            console.log('Created demo mock user');
-            setIsLoading(false);
-          }
-          return;
+          console.error('LIFF ID not configured. Please configure VITE_LIFF_ID in your environment variables.');
+          throw new Error('LINE Login not configured. Please contact administrator.');
         }
         
         liff.login();
@@ -667,38 +719,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         alert('LINE login failed. Please try again.');
       }
     } else {
-      console.log('Not in LINE app, using demo mode');
-      // Demo mode: create a fake user for testing
-      const demoProfile = {
-        userId: 'demo-user-' + Date.now(),
-        displayName: 'Demo User',
-        pictureUrl: undefined,
-        statusMessage: 'Demo Account'
-      };
-      
-      setLiffUser(demoProfile);
-      try {
-        await authenticateWithFirebase('', demoProfile);
-      } catch (error) {
-        console.error('Demo authentication failed:', error);
-        // Create mock user for demo purposes
-        const mockUser: LineUser = {
-          id: demoProfile.userId,
-          lineUserId: demoProfile.userId,
-          displayName: demoProfile.displayName,
-          pictureUrl: demoProfile.pictureUrl,
-          statusMessage: demoProfile.statusMessage,
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now(),
-          isActive: true,
-          subscriptionTier: 'free',
-          preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
-          metadata: { totalMessages: 0, lastInteraction: Timestamp.now(), favoriteFeatures: [] }
-        };
-        setUser(mockUser);
-        console.log('Created demo mock user');
-        setIsLoading(false);
+      const profileToUse = profileOverride ?? liffUser;
+      if (profileToUse) {
+        console.log('Not in LINE app, using LINE profile from callback');
+        try {
+          await authenticateWithFirebase('', profileToUse);
+          return;
+        } catch (error) {
+          console.error('Authentication with existing LINE profile failed:', error);
+          throw new Error('Authentication failed. Please try again.');
+        }
       }
+
+      console.log('No LINE profile available. Please use LINE Login.');
+      throw new Error('Please use LINE Login to access your account.');
+    }
+    } finally {
+      loginInProgressRef.current = false;
+      setIsLoading(false);
     }
   };
 
@@ -728,8 +766,56 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const refreshUserData = async () => {
-    if (liffUser) {
-      await loadUserData(liffUser.userId);
+    const targetUserId = liffUser?.userId || user?.id;
+    if (targetUserId) {
+      await loadUserData(targetUserId);
+    }
+  };
+
+  const updateUserProfile = async (updates: Partial<LineUser>) => {
+    if (!user || !db) throw new Error('User not authenticated or database not available');
+
+    try {
+      const userRef = doc(db, 'line_users', user.id);
+      const updateData = {
+        ...updates,
+        updatedAt: Timestamp.now()
+      };
+      
+      await updateDoc(userRef, updateData);
+      
+      // Update local user state
+      setUser(prev => prev ? { ...prev, ...updateData } : null);
+    } catch (error) {
+      console.error('Failed to update user profile:', error);
+      throw error;
+    }
+  };
+
+  const updateUserPreferences = async (preferences: Partial<LineUser['preferences']>) => {
+    if (!user || !db) throw new Error('User not authenticated or database not available');
+
+    try {
+      const userRef = doc(db, 'line_users', user.id);
+      const updateData = {
+        preferences: {
+          ...user.preferences,
+          ...preferences
+        },
+        updatedAt: Timestamp.now()
+      };
+      
+      await updateDoc(userRef, updateData);
+      
+      // Update local user state
+      setUser(prev => prev ? { 
+        ...prev, 
+        preferences: { ...prev.preferences, ...preferences },
+        updatedAt: Timestamp.now()
+      } : null);
+    } catch (error) {
+      console.error('Failed to update user preferences:', error);
+      throw error;
     }
   };
 
@@ -742,8 +828,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     isLiffReady,
     isInLineApp,
     login,
+    loginWithEmail,
+    signUpWithEmail,
     logout,
     refreshUserData,
+    setLiffProfile: (profile: LiffUser) => setLiffUser(profile),
+    updateUserProfile,
+    updateUserPreferences,
     userStats,
     userProducts,
     userStores,
