@@ -18,9 +18,10 @@ interface AuthContextType {
   firebaseUser: FirebaseUser | null;
   liffUser: LiffUser | null;
   isLoading: boolean;
+  isRefreshingData: boolean;
   isLiffReady: boolean;
   isInLineApp: boolean;
-  login: (profileOverride?: LiffUser) => Promise<void>;
+  login: (profileOverride?: LiffUser, idToken?: string) => Promise<void>;
   loginWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string, displayName?: string, role?: 'farmer' | 'market') => Promise<void>;
   logout: () => Promise<void>;
@@ -61,6 +62,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshingData, setIsRefreshingData] = useState(false);
   const [isLiffReady, setIsLiffReady] = useState(false);
   const [isInLineApp, setIsInLineApp] = useState(false);
   const [userStats, setUserStats] = useState<any>(null);
@@ -68,6 +70,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [userStores, setUserStores] = useState<any[]>([]);
   const [userMarketingMaterials, setUserMarketingMaterials] = useState<any[]>([]);
   const loginInProgressRef = useRef(false);
+  const dataLoadingRef = useRef(false);
+  const lastLoadTimeRef = useRef(0);
+  const liffUserRef = useRef<LiffUser | null>(liffUser);
+  const userRef = useRef<LineUser | null>(user);
+
+  useEffect(() => {
+    liffUserRef.current = liffUser;
+  }, [liffUser]);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   // Persist user state to localStorage
   useEffect(() => {
@@ -356,19 +370,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log('Firebase auth state changed:', firebaseUser);
       setFirebaseUser(firebaseUser);
+      const currentLiffUser = liffUserRef.current;
+      const currentUser = userRef.current;
       
       // Only handle Firebase auth changes if we don't already have a user from LIFF
-      if (firebaseUser && liffUser && !user) {
+      if (firebaseUser && currentLiffUser && !currentUser) {
         // Load user data from Firestore
-        await loadUserData(liffUser.userId);
-      } else if (!firebaseUser && !liffUser) {
+        await loadUserData(currentLiffUser.userId);
+      } else if (!firebaseUser && !currentLiffUser) {
         // Only clear user if we don't have LIFF user
         setUser(null);
       }
     });
 
     return () => unsubscribe();
-  }, [liffUser, user]);
+  }, []); // Removed dependencies to prevent infinite loops
 
   const authenticateWithFirebase = async (idToken: string, profile: any) => {
     try {
@@ -613,8 +629,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const loadUserData = async (userId: string) => {
+    const now = Date.now();
+    const timeSinceLastLoad = now - lastLoadTimeRef.current;
+    
+    if (dataLoadingRef.current) {
+      console.log('Data loading already in progress, skipping...');
+      return;
+    }
+    
+    if (timeSinceLastLoad < 1000) { // Prevent loading more than once per second
+      console.log('Data loaded recently, skipping to prevent rapid calls...');
+      return;
+    }
+    
     try {
+      dataLoadingRef.current = true;
+      lastLoadTimeRef.current = now;
+      setIsRefreshingData(true);
       console.log('Loading user data for:', userId);
+      console.log('Database connection status:', db ? 'Connected' : 'Not connected');
       
       if (!db) {
         console.warn('Firebase database not available during load, using demo data');
@@ -636,6 +669,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setUserStores([]);
         setUserMarketingMaterials([]);
         setIsLoading(false);
+        setIsRefreshingData(false);
         return;
       }
 
@@ -651,12 +685,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.log('User profile not found, will be created during authentication');
       }
       
+      // Debug database first
+      await UserDataService.debugDatabase(userId);
+      
       // Load user statistics and data
       console.log('Loading user statistics and data...');
       const [stats, products, stores, marketingMaterials] = await Promise.all([
         UserDataService.getUserStats(userId),
-        UserDataService.getUserProducts(userId, 10),
-        UserDataService.getUserStores(userId, 10),
+        UserDataService.getUserProducts(userId), // Increased limit to get more products
+        UserDataService.getUserStores(userId), // Increased limit to get more stores
         UserDataService.getMarketingMaterials(userId, 10)
       ]);
       
@@ -664,14 +701,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         stats: stats,
         productsCount: products.length,
         storesCount: stores.length,
-        materialsCount: marketingMaterials.length
+        materialsCount: marketingMaterials.length,
+        products: products,
+        stores: stores
       });
       
       // Set the loaded data (empty arrays if no data exists)
+      console.log('AuthContext: Setting state with loaded data');
+      console.log('AuthContext: Setting userStats:', stats);
+      console.log('AuthContext: Setting userProducts:', products);
+      console.log('AuthContext: Setting userStores:', stores);
+      console.log('AuthContext: Setting userMarketingMaterials:', marketingMaterials);
+      
       setUserStats(stats);
       setUserProducts(products);
       setUserStores(stores);
       setUserMarketingMaterials(marketingMaterials);
+      
+      console.log('AuthContext: State set successfully');
       
       // Check if user has no data - don't create demo data for real users
       const hasData = stats.totalProducts > 0 || stats.totalStores > 0;
@@ -683,10 +730,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } catch (error) {
       console.error('Failed to load user data:', error);
       setIsLoading(false);
+    } finally {
+      dataLoadingRef.current = false;
+      setIsRefreshingData(false);
     }
   };
 
-  const login = async (profileOverride?: LiffUser) => {
+  const login = async (profileOverride?: LiffUser, lineIdToken?: string) => {
     // Prevent re-entrancy/infinite loops
     if (loginInProgressRef.current || isLoading) {
       console.log('Login already in progress, skipping...');
@@ -765,12 +815,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const refreshUserData = async () => {
+  const refreshUserData = React.useCallback(async () => {
     const targetUserId = liffUser?.userId || user?.id;
-    if (targetUserId) {
-      await loadUserData(targetUserId);
+    if (targetUserId && !dataLoadingRef.current) {
+      console.log('Refreshing user data for:', targetUserId);
+      try {
+        await loadUserData(targetUserId);
+      } catch (error) {
+        console.error('Error refreshing user data:', error);
+      }
+    } else if (dataLoadingRef.current) {
+      console.log('Data loading already in progress, skipping refresh...');
+    } else {
+      console.warn('No user ID available for refresh');
     }
-  };
+  }, [liffUser?.userId, user?.id]);
 
   const updateUserProfile = async (updates: Partial<LineUser>) => {
     if (!user || !db) throw new Error('User not authenticated or database not available');
@@ -825,6 +884,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     firebaseUser,
     liffUser,
     isLoading,
+    isRefreshingData,
     isLiffReady,
     isInLineApp,
     login,
@@ -857,3 +917,4 @@ export const useAuth = (): AuthContextType => {
 };
 
 export default AuthContext;
+

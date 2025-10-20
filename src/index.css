@@ -169,3 +169,34 @@ html, body {
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  /* Scroll reveal helpers */
+  .reveal {
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity 700ms ease, transform 700ms ease;
+    will-change: opacity, transform;
+  }
+  .reveal.is-visible {
+    opacity: 1;
+    transform: none;
+  }
+  .reveal-up {
+    transform: translateY(24px);
+  }
+  .reveal-down {
+    transform: translateY(-24px);
+  }
+  .reveal-left {
+    transform: translateX(-24px);
+  }
+  .reveal-right {
+    transform: translateX(24px);
+  }
+  .reveal-delay-100 { transition-delay: 100ms; }
+  .reveal-delay-200 { transition-delay: 200ms; }
+  .reveal-delay-300 { transition-delay: 300ms; }
+  .reveal-delay-400 { transition-delay: 400ms; }
+  .reveal-delay-500 { transition-delay: 500ms; }
+}

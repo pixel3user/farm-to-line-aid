@@ -1,0 +1,37 @@
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import apiRoutes from './routes/api';
+
+const app = express();
+
+app.use(helmet());
+app.use(cors());
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      (req as any).rawBody = buf;
+    },
+  })
+);
+app.use(express.urlencoded({ extended: true }));
+
+app.use('/api', apiRoutes);
+
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    service: 'Farm2Market AI Webhook Server',
+  });
+});
+
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('Server error:', err);
+  res.status(500).json({
+    error: 'Internal Server Error',
+    message: err.message,
+  });
+});
+
+export default app;

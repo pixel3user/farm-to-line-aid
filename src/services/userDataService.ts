@@ -35,6 +35,44 @@ export interface DashboardData {
 }
 
 export class UserDataService {
+  // Debug function to check what's in the database
+  static async debugDatabase(userId: string): Promise<void> {
+    try {
+      if (!db) {
+        console.warn('Firestore unavailable for debug');
+        return;
+      }
+
+      console.log('=== DATABASE DEBUG ===');
+      console.log('User ID:', userId);
+      
+      // Check all collections
+      const collections = ['line_users', 'products', 'stores', 'conversations', 'marketing_materials'];
+      
+      for (const collectionName of collections) {
+        try {
+          const snapshot = await getDocs(collection(db, collectionName));
+          console.log(`${collectionName}: ${snapshot.size} documents`);
+          
+          if (collectionName === 'products' || collectionName === 'stores') {
+            const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            console.log(`${collectionName} data:`, docs);
+            
+            // Check for documents with this userId
+            const userDocs = docs.filter(doc => doc.userId === userId);
+            console.log(`${collectionName} for user ${userId}:`, userDocs.length, 'documents');
+          }
+        } catch (error) {
+          console.error(`Error checking ${collectionName}:`, error);
+        }
+      }
+      
+      console.log('=== END DEBUG ===');
+    } catch (error) {
+      console.error('Debug function error:', error);
+    }
+  }
+
   // Get user statistics
   static async getUserStats(userId: string): Promise<UserStats> {
     try {
@@ -89,46 +127,75 @@ export class UserDataService {
   }
 
   // Get user products
-  static async getUserProducts(userId: string, limitCount: number = 10): Promise<Product[]> {
+  static async getUserProducts(userId: string, limitCount?: number): Promise<Product[]> {
     try {
       if (!db) {
         console.warn('Firestore unavailable, returning empty product list');
         return [];
       }
 
-      const q = query(
-        collection(db, 'products'),
-        where('userId', '==', userId),
-        where('isActive', '==', true),
-        orderBy('createdAt', 'desc'),
-        limit(limitCount)
-      );
+      console.log('UserDataService: Fetching products for user:', userId);
       
-      const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => doc.data() as Product);
+      // Use the most reliable approach: get all products and filter manually
+      const allProductsSnapshot = await getDocs(collection(db, 'products'));
+      console.log('UserDataService: Total products in database:', allProductsSnapshot.size);
+      
+      const userProducts = allProductsSnapshot.docs
+        .filter(doc => {
+          const data = doc.data();
+          const matches = data.userId === userId;
+          if (matches) {
+            console.log('UserDataService: Found matching product:', { id: doc.id, userId: data.userId, name: data.name });
+          }
+          return matches;
+        })
+        .map(doc => {
+          const data = doc.data();
+          console.log('UserDataService: Processing product:', { id: doc.id, ...data });
+          return {
+            ...data as Product,
+            id: doc.id
+          };
+        })
+        .sort((a, b) => {
+          // Sort by createdAt descending
+          const aTime = a.createdAt?.toMillis?.() || 0;
+          const bTime = b.createdAt?.toMillis?.() || 0;
+          return bTime - aTime;
+        })
+        .slice(0, limitCount || 50);
+      
+      console.log('UserDataService: Final products array for user:', userProducts.length, userProducts);
+      return userProducts;
     } catch (error) {
-      console.error('Error fetching user products:', error);
+      console.error('UserDataService: Error fetching user products:', error);
       return [];
     }
   }
 
   // Get user stores
-  static async getUserStores(userId: string, limitCount: number = 10): Promise<Store[]> {
+  static async getUserStores(userId: string, limitCount?: number): Promise<Store[]> {
     try {
       if (!db) {
         console.warn('Firestore unavailable, returning empty store list');
         return [];
       }
 
-      const q = query(
+      let baseQuery = query(
         collection(db, 'stores'),
         where('userId', '==', userId),
-        orderBy('createdAt', 'desc'),
-        limit(limitCount)
+        orderBy('createdAt', 'desc')
       );
-      
-      const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => doc.data() as Store);
+
+      if (limitCount && Number.isFinite(limitCount)) {
+        baseQuery = query(baseQuery, limit(limitCount));
+      }
+
+      const querySnapshot = await getDocs(baseQuery);
+      return querySnapshot.docs.map(doc => ({
+        ...doc.data() as Store,
+        id: doc.id
+      }));
     } catch (error) {
       console.error('Error fetching user stores:', error);
       return [];

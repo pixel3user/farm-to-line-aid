@@ -40,6 +40,8 @@ import {
   Calendar
 } from 'lucide-react';
 import { Product } from '@/types';
+import { db } from '@/lib/firebase';
+import { collection, getDocs, query, where, orderBy, limit } from 'firebase/firestore';
 
 const MarketProducts: React.FC = () => {
   const { t } = useLanguage();
@@ -56,10 +58,43 @@ const MarketProducts: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       try {
-        // TODO: Replace with real backend query for market-visible products
-        setProducts([]);
+        if (!db) {
+          setProducts([]);
+          return;
+        }
+
+        const q = query(
+          collection(db, 'products'),
+          where('isActive', '==', true),
+          orderBy('updatedAt', 'desc'),
+          limit(50)
+        );
+
+        const snap = await getDocs(q);
+        const items: Product[] = snap.docs.map((doc) => {
+          const d = doc.data() as any;
+          const updatedAt = d?.updatedAt?.toMillis ? d.updatedAt.toMillis() : (typeof d?.updatedAt === 'number' ? d.updatedAt : Date.now());
+          return {
+            id: d?.id || doc.id,
+            name: d?.name || 'Unnamed Product',
+            description: d?.description || '',
+            category: d?.category || 'other',
+            grade: d?.grade || 'A',
+            pack: d?.pack || 1,
+            unit: d?.unit || 'unit',
+            price: typeof d?.price === 'number' ? d.price : 0,
+            stock: typeof d?.stock === 'number' ? d.stock : 0,
+            farmName: d?.farmName || d?.userDisplayName || 'Unknown Farm',
+            farmLocation: d?.farmLocation || d?.location || '—',
+            farmRating: typeof d?.farmRating === 'number' ? d.farmRating : 4.5,
+            updatedAt,
+          } as Product;
+        });
+
+        setProducts(items);
       } catch (error) {
         console.error('Failed to load data:', error);
+        setProducts([]);
       } finally {
         setIsLoading(false);
       }
@@ -178,7 +213,7 @@ const MarketProducts: React.FC = () => {
                 <SelectContent>
                   <SelectItem value="all">{t('catalog.allGrades')}</SelectItem>
                   {grades.map(grade => (
-                    <SelectItem key={grade} value={grade}>{t('catalog.gradeLabel').replace('{grade}', grade)}</SelectItem>
+                    <SelectItem key={grade} value={grade}>{t('catalog.gradeValue').replace('{grade}', grade)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -249,7 +284,7 @@ const MarketProducts: React.FC = () => {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{t('catalog.gradeLabel').replace('{grade}', product.grade)}</Badge>
+                        <Badge variant="outline">{t('catalog.gradeValue').replace('{grade}', product.grade)}</Badge>
                       </TableCell>
                       <TableCell>{product.pack} {product.unit}</TableCell>
                       <TableCell>
@@ -314,7 +349,7 @@ const MarketProducts: React.FC = () => {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">{t('catalog.gradeLabel')}</span>
-                      <span>{t('catalog.gradeLabel').replace('{grade}', selectedProduct.grade)}</span>
+                      <span>{t('catalog.gradeValue').replace('{grade}', selectedProduct.grade)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">{t('catalog.packSize')}</span>
@@ -359,7 +394,7 @@ const MarketProducts: React.FC = () => {
               
               {selectedProduct.description && (
                 <div>
-                  <h4 className="font-medium mb-2">{t('catalog.description')}</h4>
+                  <h4 className="font-medium mb-2">{t('catalog.descriptionLabel')}</h4>
                   <p className="text-sm text-gray-600">{selectedProduct.description}</p>
                 </div>
               )}

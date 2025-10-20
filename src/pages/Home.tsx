@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Button } from '@/components/ui/button';
@@ -19,12 +19,23 @@ import {
   Bot
 } from 'lucide-react';
 import heroImage from '@/assets/hero-farm-tech.jpg';
+import slide2 from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (1).png';
+import slide3 from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (2).png';
 import { useMobileOptimization } from '@/utils/mobileOptimization';
+import { useScrollReveal } from '@/hooks/useScrollReveal';
 
 const Home: React.FC = () => {
   const { t, language, changeLanguage } = useLanguage();
   const mobileConfig = useMobileOptimization();
   const [isLiffApp, setIsLiffApp] = useState(false);
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const revealContainerRef = useScrollReveal({ selector: '.reveal' });
+
+  const slides = useMemo(() => [
+    { src: heroImage, alt: 'Smart farming technology' },
+    { src: slide2, alt: 'Farm to market logistics' },
+    { src: slide3, alt: 'AI assistant for agriculture' },
+  ], []);
 
   useEffect(() => {
     // Check if running inside LINE LIFF
@@ -32,6 +43,13 @@ const Home: React.FC = () => {
     const isInLine = userAgent.includes('line');
     setIsLiffApp(isInLine);
   }, []);
+  
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % slides.length);
+    }, 6000);
+    return () => window.clearInterval(id);
+  }, [slides.length]);
   
   const features = [
     {
@@ -62,32 +80,40 @@ const Home: React.FC = () => {
   ];
 
   return (
-    <div className="min-h-screen">
+    <div ref={revealContainerRef as any} className="min-h-screen">
       {/* Hero Section */}
       <section className={`relative overflow-hidden ${
         mobileConfig.isMobile ? 'min-h-[500px]' : 'min-h-[600px]'
       }`}>
-        <img 
-          src={heroImage} 
-          alt="Farm to LINE - Agricultural Technology"
-          className="w-full h-full object-cover"
-        />
+        {/* Background slideshow */}
+        <div className="absolute inset-0">
+          {slides.map((slide, idx) => (
+            <img
+              key={idx}
+              src={slide.src}
+              alt={slide.alt}
+              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${
+                idx === currentSlide ? 'opacity-100' : 'opacity-0'
+              }`}
+            />
+          ))}
+        </div>
         <div className={`absolute inset-0 bg-gradient-to-r from-green-900/80 via-green-800/70 to-blue-900/80 flex items-center justify-center ${
           mobileConfig.isLiffApp ? 'pt-16 pb-8' : ''
         }`}>
           <div className={`text-center text-white space-y-6 sm:space-y-8 max-w-5xl px-4 sm:px-6`}>
             <div className="space-y-3 sm:space-y-4">
-              <h1 className={`font-bold bg-gradient-to-r from-white to-green-100 bg-clip-text text-transparent ${
+              <h1 className={`reveal reveal-up font-bold bg-gradient-to-r from-white to-green-100 bg-clip-text text-transparent ${
                 mobileConfig.isMobile ? 'text-3xl sm:text-4xl' : 'text-5xl md:text-7xl'
               }`}>
                 {t('home.title')}
               </h1>
-              <p className={`font-light opacity-95 ${
+              <p className={`reveal reveal-up reveal-delay-100 font-light opacity-95 ${
                 mobileConfig.isMobile ? 'text-lg sm:text-xl' : 'text-2xl md:text-3xl'
               }`}>
                 {t('home.subtitle')}
               </p>
-              <p className={`opacity-90 max-w-3xl mx-auto leading-relaxed ${
+              <p className={`reveal reveal-up reveal-delay-200 opacity-90 max-w-3xl mx-auto leading-relaxed ${
                 mobileConfig.isMobile ? 'text-sm sm:text-base' : 'text-lg md:text-xl'
               }`}>
                 {t('home.description')}
@@ -98,7 +124,7 @@ const Home: React.FC = () => {
             <div className={`grid gap-4 sm:gap-6 mt-8 sm:mt-12 max-w-4xl mx-auto ${
               mobileConfig.isMobile ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-3'
             }`}>
-              <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 sm:p-6 border border-white/20">
+              <div className="reveal reveal-up bg-white/10 backdrop-blur-sm rounded-lg p-4 sm:p-6 border border-white/20">
                 <div className={`bg-green-500 rounded-lg flex items-center justify-center mx-auto mb-3 sm:mb-4 ${
                   mobileConfig.isMobile ? 'w-10 h-10' : 'w-12 h-12'
                 }`}>
@@ -107,7 +133,7 @@ const Home: React.FC = () => {
                 <h3 className={`font-semibold mb-2 ${mobileConfig.isMobile ? 'text-base' : 'text-lg'}`}>{t('home.smartSales')}</h3>
                 <p className="text-sm opacity-90">{t('home.smartSalesDesc')}</p>
               </div>
-              <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 sm:p-6 border border-white/20">
+              <div className="reveal reveal-up reveal-delay-100 bg-white/10 backdrop-blur-sm rounded-lg p-4 sm:p-6 border border-white/20">
                 <div className={`bg-blue-500 rounded-lg flex items-center justify-center mx-auto mb-3 sm:mb-4 ${
                   mobileConfig.isMobile ? 'w-10 h-10' : 'w-12 h-12'
                 }`}>
@@ -116,7 +142,7 @@ const Home: React.FC = () => {
                 <h3 className={`font-semibold mb-2 ${mobileConfig.isMobile ? 'text-base' : 'text-lg'}`}>{t('home.lineIntegration')}</h3>
                 <p className="text-sm opacity-90">{t('home.lineIntegrationDesc')}</p>
               </div>
-              <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 sm:p-6 border border-white/20">
+              <div className="reveal reveal-up reveal-delay-200 bg-white/10 backdrop-blur-sm rounded-lg p-4 sm:p-6 border border-white/20">
                 <div className={`bg-purple-500 rounded-lg flex items-center justify-center mx-auto mb-3 sm:mb-4 ${
                   mobileConfig.isMobile ? 'w-10 h-10' : 'w-12 h-12'
                 }`}>
@@ -129,7 +155,7 @@ const Home: React.FC = () => {
 
             {/* LINE Integration Badge */}
             {isLiffApp && (
-              <div className="mt-6 flex items-center justify-center gap-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2 border border-white/20">
+              <div className="reveal reveal-up reveal-delay-300 mt-6 flex items-center justify-center gap-2 bg-white/10 backdrop-blur-sm rounded-full px-4 py-2 border border-white/20">
                 <Bot className="w-4 h-4 text-green-300" />
                 <span className="text-sm text-green-100">{t('home.runningInLine')}</span>
               </div>
@@ -142,12 +168,12 @@ const Home: React.FC = () => {
       <section className={`bg-white ${mobileConfig.isMobile ? 'py-8' : 'py-16'}`}>
         <div className={`max-w-6xl mx-auto ${mobileConfig.isMobile ? 'px-4' : 'px-4 sm:px-6 lg:px-8'}`}>
           <div className={`text-center ${mobileConfig.isMobile ? 'mb-8' : 'mb-12'}`}>
-            <h2 className={`font-bold text-gray-900 mb-4 ${
+            <h2 className={`reveal reveal-up font-bold text-gray-900 mb-4 ${
               mobileConfig.isMobile ? 'text-2xl' : 'text-3xl'
             }`}>
               {t('home.role.heading')}
             </h2>
-            <p className={`text-gray-600 max-w-2xl mx-auto ${
+            <p className={`reveal reveal-up reveal-delay-100 text-gray-600 max-w-2xl mx-auto ${
               mobileConfig.isMobile ? 'text-base' : 'text-lg'
             }`}>
               {t('home.role.description')}
@@ -158,7 +184,7 @@ const Home: React.FC = () => {
             mobileConfig.isMobile ? 'grid-cols-1' : 'md:grid-cols-2'
           }`}>
             {/* Farmers Card */}
-            <Card className="group hover:shadow-2xl transition-all duration-500 border-2 hover:border-green-300 bg-gradient-to-br from-green-50 to-white overflow-hidden relative">
+            <Card className="reveal reveal-left group hover:shadow-2xl transition-all duration-500 border-2 hover:border-green-300 bg-gradient-to-br from-green-50 to-white overflow-hidden relative">
               <div className="absolute top-0 right-0 w-32 h-32 bg-green-100 rounded-full -translate-y-16 translate-x-16 opacity-50 group-hover:opacity-70 transition-opacity"></div>
               <CardHeader className={`text-center relative z-10 ${mobileConfig.isMobile ? 'pb-4' : 'pb-6'}`}>
                 <div className={`bg-gradient-to-br from-green-500 to-green-600 rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6 group-hover:scale-110 transition-transform shadow-lg ${
@@ -214,7 +240,7 @@ const Home: React.FC = () => {
             </Card>
 
             {/* Markets Card */}
-            <Card className="group hover:shadow-2xl transition-all duration-500 border-2 hover:border-blue-300 bg-gradient-to-br from-blue-50 to-white overflow-hidden relative">
+            <Card className="reveal reveal-right reveal-delay-100 group hover:shadow-2xl transition-all duration-500 border-2 hover:border-blue-300 bg-gradient-to-br from-blue-50 to-white overflow-hidden relative">
               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-100 rounded-full -translate-y-16 translate-x-16 opacity-50 group-hover:opacity-70 transition-opacity"></div>
               <CardHeader className="text-center pb-6 relative z-10">
                 <div className="w-20 h-20 bg-gradient-to-br from-blue-500 to-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform shadow-lg">
@@ -257,13 +283,13 @@ const Home: React.FC = () => {
       </section>
 
       {/* Features Section */}
-      <section className="py-20 bg-gradient-to-br from-gray-50 to-green-50">
+      <section id="features" className="py-20 bg-gradient-to-br from-gray-50 to-green-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold text-gray-900 mb-6">
+            <h2 className="reveal reveal-up text-4xl font-bold text-gray-900 mb-6">
               {t('home.features.title')}
             </h2>
-            <p className="text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed">
+            <p className="reveal reveal-up reveal-delay-100 text-xl text-gray-600 max-w-3xl mx-auto leading-relaxed">
               {t('home.features.description')}
             </p>
           </div>
@@ -272,7 +298,7 @@ const Home: React.FC = () => {
             {features.map((feature, index) => {
               const Icon = feature.icon;
               return (
-                <div key={index} className="group">
+                <div key={index} className="group reveal reveal-up" style={{ transitionDelay: `${100 * (index % 3)}ms` }}>
                   <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-2xl transition-all duration-300 border border-gray-100 hover:border-green-200 h-full">
                     <div className="w-16 h-16 bg-gradient-to-br from-green-500 to-green-600 rounded-2xl flex items-center justify-center mx-auto mb-6 group-hover:scale-110 transition-transform shadow-lg">
                       <Icon className="w-8 h-8 text-white" />
@@ -296,21 +322,21 @@ const Home: React.FC = () => {
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <div className="space-y-8">
             <div className="space-y-4">
-              <h2 className="text-4xl font-bold text-white">
+              <h2 className="reveal reveal-up text-4xl font-bold text-white">
                 {t('home.cta.title')}
               </h2>
-              <p className="text-xl text-green-100 max-w-2xl mx-auto">
+              <p className="reveal reveal-up reveal-delay-100 text-xl text-green-100 max-w-2xl mx-auto">
                 {t('home.cta.description')}
               </p>
             </div>
             <div className="flex flex-col sm:flex-row gap-6 justify-center">
-              <Button asChild size="lg" className="bg-white text-green-600 hover:bg-green-50 font-semibold px-8 py-4 text-lg shadow-lg hover:shadow-xl transition-all">
+              <Button asChild size="lg" className="reveal reveal-up bg-white text-green-600 hover:bg-green-50 font-semibold px-8 py-4 text-lg shadow-lg hover:shadow-xl transition-all">
                 <Link to="/demo/line">
                   <Smartphone className="w-6 h-6 mr-3" />
                   {t('home.cta.line')}
                 </Link>
               </Button>
-              <Button asChild variant="outline" size="lg" className="border-2 border-white text-white hover:bg-white hover:text-green-600 font-semibold px-8 py-4 text-lg transition-all">
+              <Button asChild variant="outline" size="lg" className="reveal reveal-up reveal-delay-100 border-2 border-white text-white hover:bg-white hover:text-green-600 font-semibold px-8 py-4 text-lg transition-all">
                 <Link to="#features">
                   {t('home.cta.learn')}
                 </Link>
@@ -324,7 +350,7 @@ const Home: React.FC = () => {
       <footer className="bg-gray-900 text-white py-12">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid md:grid-cols-4 gap-8">
-            <div>
+            <div className="reveal reveal-up">
               <div className="flex items-center space-x-2 mb-4">
                 <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center">
                   <span className="text-white font-bold text-sm">F</span>
@@ -336,7 +362,7 @@ const Home: React.FC = () => {
               </p>
             </div>
             
-            <div>
+            <div className="reveal reveal-up reveal-delay-100">
               <h3 className="font-semibold mb-4">{t('home.footer.product')}</h3>
               <ul className="space-y-2 text-sm text-gray-400">
                 <li><Link to="/farmer" className="hover:text-white transition-colors">{t('home.footer.forFarmers')}</Link></li>
@@ -345,7 +371,7 @@ const Home: React.FC = () => {
               </ul>
             </div>
             
-            <div>
+            <div className="reveal reveal-up reveal-delay-200">
               <h3 className="font-semibold mb-4">{t('home.footer.support')}</h3>
               <ul className="space-y-2 text-sm text-gray-400">
                 <li><Link to="#" className="hover:text-white transition-colors">{t('home.footer.privacyPolicy')}</Link></li>
@@ -354,7 +380,7 @@ const Home: React.FC = () => {
               </ul>
             </div>
             
-            <div>
+            <div className="reveal reveal-up reveal-delay-300">
               <h3 className="font-semibold mb-4">{t('home.footer.language')}</h3>
               <div className="flex bg-gray-800 rounded-lg p-1 w-fit">
                 <button 

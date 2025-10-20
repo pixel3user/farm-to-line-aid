@@ -1,4 +1,3 @@
-// LINE Login integration for web authentication
 import { User as FirebaseUser } from 'firebase/auth';
 
 export interface LineLoginUser {
@@ -8,13 +7,28 @@ export interface LineLoginUser {
   statusMessage?: string;
 }
 
-export interface LineLoginConfig {
-  channelId: string;
-  redirectUri: string;
-  state?: string;
-  scope?: string;
-  prompt?: 'consent' | 'none';
+export interface LineLoginResult {
+  profile: LineLoginUser;
+  idToken?: string;
+  accessToken: string;
 }
+
+const resolveApiBaseUrl = (): string => {
+  // In development, use relative URLs so Vite can proxy /api to the backend
+  if (import.meta.env.DEV) {
+    return '';
+  }
+
+  const envBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  if (envBaseUrl) {
+    // If someone accidentally configured a localhost base URL for production, fall back to current origin
+    if (import.meta.env.PROD && envBaseUrl.includes('localhost')) {
+      return typeof window !== 'undefined' ? window.location.origin : '';
+    }
+    return envBaseUrl;
+  }
+  return typeof window !== 'undefined' ? window.location.origin : '';
+};
 
 class LineAuthService {
   private channelId: string;
@@ -25,9 +39,6 @@ class LineAuthService {
     this.redirectUri = `${window.location.origin}/auth/line/callback`;
   }
 
-  /**
-   * Initiate LINE Login flow
-   */
   async login(): Promise<void> {
     const state = this.generateState();
     localStorage.setItem('line_login_state', state);
@@ -36,28 +47,22 @@ class LineAuthService {
       response_type: 'code',
       client_id: this.channelId,
       redirect_uri: this.redirectUri,
-      state: state,
+      state,
       scope: 'profile openid',
-      prompt: 'consent'
+      prompt: 'consent',
     });
 
     const lineLoginUrl = `https://access.line.me/oauth2/v2.1/authorize?${params.toString()}`;
-    
-    // Redirect to LINE Login
     window.location.href = lineLoginUrl;
   }
 
-  /**
-   * Handle LINE Login callback
-   */
-  async handleCallback(): Promise<LineLoginUser | null> {
+  async handleCallback(): Promise<LineLoginResult | null> {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get('code');
     const state = urlParams.get('state');
     const error = urlParams.get('error');
 
     if (error) {
-      console.error('LINE Login error:', error);
       throw new Error(`LINE Login failed: ${error}`);
     }
 
@@ -65,68 +70,50 @@ class LineAuthService {
       throw new Error('Missing authorization code or state');
     }
 
-    // Verify state parameter (more lenient for development)
     const savedState = localStorage.getItem('line_login_state');
     if (savedState && state !== savedState) {
-      console.warn('State parameter mismatch, but continuing for development');
+      console.warn('State parameter mismatch, continuing for development');
     }
 
-    // Clean up state
     if (savedState) {
       localStorage.removeItem('line_login_state');
     }
 
-    try {
-      // Exchange code for access token
-      const tokenResponse = await this.exchangeCodeForToken(code);
-      
-      // Get user profile
-      const userProfile = await this.getUserProfile(tokenResponse.access_token);
-      
-      return userProfile;
-    } catch (error) {
-      console.error('LINE Login callback error:', error);
-      throw error;
-    }
+    const tokenResponse = await this.exchangeCodeForToken(code);
+    const profile = await this.getUserProfile(tokenResponse.access_token);
+
+    return {
+      profile,
+      idToken: tokenResponse.id_token,
+      accessToken: tokenResponse.access_token,
+    };
   }
 
-  /**
-   * Exchange authorization code for access token
-   */
   private async exchangeCodeForToken(code: string): Promise<{ access_token: string; id_token?: string }> {
-    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const apiBaseUrl = resolveApiBaseUrl();
     const response = await fetch(`${apiBaseUrl}/api/auth/line/token`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         code,
         redirect_uri: this.redirectUri,
-        client_id: this.channelId
-      })
+        client_id: this.channelId,
+      }),
     });
 
     if (!response.ok) {
       throw new Error('Failed to exchange code for token');
     }
 
-    return await response.json();
+    return response.json();
   }
 
-  /**
-   * Get user profile from LINE
-   */
   private async getUserProfile(accessToken: string): Promise<LineLoginUser> {
-    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+    const apiBaseUrl = resolveApiBaseUrl();
     const response = await fetch(`${apiBaseUrl}/api/auth/line/profile`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        access_token: accessToken
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ access_token: accessToken }),
     });
 
     if (!response.ok) {
@@ -134,34 +121,24 @@ class LineAuthService {
     }
 
     const profile = await response.json();
-    
     return {
       userId: profile.userId,
       displayName: profile.displayName,
       pictureUrl: profile.pictureUrl,
-      statusMessage: profile.statusMessage
+      statusMessage: profile.statusMessage,
     };
   }
 
-  /**
-   * Generate random state parameter for security
-   */
   private generateState(): string {
     const array = new Uint8Array(32);
     crypto.getRandomValues(array);
-    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+    return Array.from(array, (byte) => byte.toString(16).padStart(2, '0')).join('');
   }
 
-  /**
-   * Check if current URL is a LINE Login callback
-   */
   isCallback(): boolean {
     return window.location.pathname === '/auth/line/callback';
   }
 
-  /**
-   * Get LINE Login URL for manual redirect
-   */
   getLoginUrl(): string {
     const state = this.generateState();
     localStorage.setItem('line_login_state', state);
@@ -170,9 +147,9 @@ class LineAuthService {
       response_type: 'code',
       client_id: this.channelId,
       redirect_uri: this.redirectUri,
-      state: state,
+      state,
       scope: 'profile openid',
-      prompt: 'consent'
+      prompt: 'consent',
     });
 
     return `https://access.line.me/oauth2/v2.1/authorize?${params.toString()}`;

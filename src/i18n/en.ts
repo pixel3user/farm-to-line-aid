@@ -7,7 +7,6 @@ export const en = {
   'nav.signin': 'Sign In',
   'nav.signout': 'Sign Out',
   'nav.settings': 'Settings',
-
   // Home Page
   'home.title': 'Farm to LINE',
   'home.subtitle': 'Smart, simple sales for Taiwan farms',
@@ -56,7 +55,6 @@ export const en = {
   'home.footer.english': 'English',
   'home.footer.traditionalChinese': '繁體中文',
   'home.footer.copyright': '© 2025 Farm to LINE. All rights reserved.',
-
   // Common
   'common.loading': 'Loading...',
   'common.error': 'Error',
@@ -83,7 +81,6 @@ export const en = {
   'common.offline': 'Offline',
   'common.empty': 'No data available yet',
   'common.step': 'Step',
-
   // Dashboard
   'dashboard.welcome': 'Welcome back',
   'dashboard.overview': 'Overview',
@@ -123,7 +120,6 @@ export const en = {
   'dashboard.quickActions.findStores.desc': 'Discover new market opportunities',
   'dashboard.quickActions.openDemo.title': 'Open LINE demo',
   'dashboard.quickActions.openDemo.desc': 'Try the LINE bot experience',
-
   // Products
   'products.title': 'Products',
   'products.description': 'Manage your farm products and inventory',
@@ -145,7 +141,6 @@ export const en = {
   'products.form.save': 'Save Product',
   'products.form.cancel': 'Cancel',
   'products.form.saving': 'Saving...',
-
   // Stores
   'stores.title': 'Store Relationships',
   'stores.description': 'Manage leads and buyers synced from Firestore.',
@@ -174,7 +169,6 @@ export const en = {
   'stores.status.former_customer': 'Former customer',
   'stores.status.unknown': 'Unknown',
   'stores.refresh': 'Refresh',
-
   // Marketing
   'marketing.title': 'Marketing Tools',
   'marketing.description': 'Create promotional materials and marketing assets',
@@ -186,7 +180,6 @@ export const en = {
   'marketing.demoHeader': 'What you can do',
   'marketing.demoOne': 'Generate AI-assisted flyers',
   'marketing.demoTwo': 'Reuse proven outreach messages',
-
   // Analytics
   'analytics.title': 'Analytics',
   'analytics.description': 'Track your farm business performance and get insights',
@@ -201,14 +194,12 @@ export const en = {
   'analytics.lowStock': 'Low Stock Alerts',
   'analytics.averagePrice': 'Average Price',
   'analytics.awaitingFollowUp': 'Awaiting follow-up',
-
   // References
   'references.title': 'References',
   'references.description': 'Helpful guides and resources for using Farm to LINE',
   'references.quietHours': 'What counts as "quiet hours" and consent?',
   'references.leadScoring': 'How lead scoring works (demo)',
   'references.lineBot': 'LINE bot quick start',
-
   // Market
   'market.title': 'Market Dashboard',
   'market.description': 'Discover local farms and fresh products in your area',
@@ -261,7 +252,6 @@ export const en = {
   'market.exploreNewCategories': 'Explore new product categories',
   'market.exploreNewCategoriesDesc': 'Discover trending products and expand your inventory',
   'market.explore': 'Explore',
-
   // Farm Discovery
   'farms.title': 'Farm Discovery',
   'farms.description': 'Profiles synced from the line_users collection',
@@ -279,7 +269,6 @@ export const en = {
   'farms.summaryDescription': 'How your supplier network is shaping up',
   'farms.prioritizeFarmers': 'Prioritise farmers without recent engagement.',
   'farms.askLocationDetails': 'Ask for location details to plan logistics.',
-
   // Product Catalog
   'catalog.title': 'Product Catalog',
   'catalog.description': 'Browse and compare products from local farms',
@@ -292,7 +281,7 @@ export const en = {
   'catalog.allCategories': 'All Categories',
   'catalog.grade': 'Grade',
   'catalog.allGrades': 'All Grades',
-  'catalog.gradeLabel': 'Grade {grade}',
+  'catalog.gradeValue': 'Grade {grade}',
   'catalog.sortBy': 'Sort by',
   'catalog.noSort': 'No Sort',
   'catalog.priceLowToHigh': 'Price: Low to High',
@@ -320,10 +309,9 @@ export const en = {
   'catalog.location': 'Location:',
   'catalog.rating': 'Rating:',
   'catalog.lastUpdatedLabel': 'Last Updated:',
-  'catalog.description': 'Description',
+  'catalog.descriptionLabel': 'Description',
   'catalog.contactFarm': 'Contact Farm',
   'catalog.scheduleDelivery': 'Schedule Delivery',
-
   // Schedule
   'schedule.title': 'Delivery Schedule',
   'schedule.description': 'Next recommended contact dates derived from Firestore store data',
@@ -353,7 +341,6 @@ export const en = {
   'schedule.route': 'Route',
   'schedule.confirmDelivery': 'Confirm delivery windows when scheduling follow-ups.',
   'schedule.requestGeolocation': 'Request geolocation details for new stores to optimise routing.',
-
   // Ratings
   'ratings.title': 'Store Feedback',
   'ratings.description': 'Performance indicators derived from Firestore store metadata',
@@ -375,7 +362,6 @@ export const en = {
   'ratings.congratulateTopStores': 'Congratulate top-performing stores and explore upsell opportunities.',
   'ratings.reengageLowStores': 'Re-engage stores with low or zero orders to understand blockers.',
   'ratings.captureFeedback': 'Capture qualitative feedback (taste, quality, logistics) for future releases.',
-
   // LINE Demo
   'demo.title': 'LINE Bot Experience',
   'demo.subtitle': 'See how farmers use Farm to LINE through LINE integration',
@@ -429,7 +415,6 @@ export const en = {
   'demo.gdprCompliant': 'GDPR compliant data handling',
   'demo.secureAuth': 'Secure API authentication',
   'demo.securityAudits': 'Regular security audits',
-
   // Auth
   'auth.signin': 'Sign In',
   'auth.signup': 'Create Account',
@@ -456,11 +441,9 @@ export const en = {
   'auth.roleSelection.chooseMarket': 'Choose as Market',
   'auth.roleSelection.settingUp': 'Setting up...',
   'auth.roleSelection.reminder': 'You can change your role later in your profile settings',
-
   // Language selector
   'language.english': 'English',
   'language.traditionalChinese': 'Traditional Chinese',
-
   // Role cards
   'role.farmer.title': "I'm a Farmer",
   'role.farmer.subtitle': 'I grow and sell agricultural products',
@@ -536,10 +519,10 @@ export const en = {
   'farmer.stores.pipelineDescription': 'Your outreach progress by status',
   'farmer.stores.noStoresRecorded': 'No stores recorded yet',
   'farmer.stores.startAdding': 'Start by adding your first store to begin building relationships',
-  'farmer.stores.prospects': 'Prospects',
-  'farmer.stores.contacted': 'Contacted',
-  'farmer.stores.customers': 'Customers',
-  'farmer.stores.former': 'Former',
+  'farmer.stores.prospectsTitle': 'Prospects',
+  'farmer.stores.contactedTitle': 'Contacted',
+  'farmer.stores.customersTitle': 'Customers',
+  'farmer.stores.formerTitle': 'Former',
   'farmer.stores.searchPlaceholder': 'Search stores by name or location...',
   'farmer.stores.filterByStatus': 'Filter by status',
   'farmer.stores.allStatus': 'All Status',
@@ -550,7 +533,36 @@ export const en = {
   'farmer.stores.totalOrders': 'Total Orders:',
   'farmer.stores.revenue': 'Revenue:',
   'farmer.stores.notes': 'Notes',
-  
+  'farmer.stores.createNew': 'Create New Store',
+  'farmer.stores.createDescription': 'Add a new store to your relationship management system',
+  'farmer.stores.storeName': 'Store Name',
+  'farmer.stores.storeNamePlaceholder': 'Enter store name',
+  'farmer.stores.storeType': 'Store Type',
+  'farmer.stores.selectType': 'Select store type',
+  'farmer.stores.restaurant': 'Restaurant',
+  'farmer.stores.supermarket': 'Supermarket',
+  'farmer.stores.farmersMarket': 'Farmers Market',
+  'farmer.stores.onlineStore': 'Online Store',
+  'farmer.stores.other': 'Other',
+  'farmer.stores.location': 'Location',
+  'farmer.stores.locationPlaceholder': 'Enter store location/address',
+  'farmer.stores.contactInfo': 'Contact Information',
+  'farmer.stores.contactName': 'Contact Name',
+  'farmer.stores.contactNamePlaceholder': 'Enter contact person name',
+  'farmer.stores.contactPhone': 'Phone Number',
+  'farmer.stores.contactPhonePlaceholder': 'Enter phone number',
+  'farmer.stores.contactEmail': 'Email Address',
+  'farmer.stores.contactEmailPlaceholder': 'Enter email address',
+  'farmer.stores.contactWebsite': 'Website',
+  'farmer.stores.contactWebsitePlaceholder': 'Enter website URL',
+  'farmer.stores.notesPlaceholder': 'Add any additional notes about this store...',
+  'farmer.stores.cancel': 'Cancel',
+  'farmer.stores.saving': 'Saving...',
+  'farmer.stores.saveStore': 'Save Store',
+  'farmer.stores.validation.nameRequired': 'Store name is required',
+  'farmer.stores.validation.locationRequired': 'Store location is required',
+  'farmer.stores.validation.invalidEmail': 'Please enter a valid email address',
+  'farmer.stores.validation.invalidWebsite': 'Please enter a valid website URL (starting with http:// or https://)',
   // Farmer Marketing
   'farmer.marketing.title': 'AI Marketing Tools',
   'farmer.marketing.subtitle': 'Create professional marketing materials with AI-powered design',
@@ -561,66 +573,52 @@ export const en = {
   'farmer.marketing.useAiDescription': 'Use AI to create professional marketing materials',
   'farmer.marketing.startCreating': 'Start creating your first marketing material',
   'farmer.marketing.generateMaterial': 'Generate Marketing Material',
-  'farmer.marketing.aiGenerator': 'AI 行銷生成器',
-  'farmer.marketing.uploadPhotos': '上傳產品照片，讓 AI 創建專業行銷材料',
-  'farmer.marketing.selectTemplate': '選擇模板',
-  'farmer.marketing.uploadPhotos': '上傳照片',
-  'farmer.marketing.customize': '自訂',
-  'farmer.marketing.productPhotos': '產品照片',
-  'farmer.marketing.dragDropPhotos': '將產品照片拖放到此處',
-  'farmer.marketing.selectFile': '選擇檔案',
-  'farmer.marketing.selectProduct': '選擇產品',
-  'farmer.marketing.marketingTitle': '行銷標題',
-  'farmer.marketing.fromFarmToTable': '從我們農場新鮮到您餐桌',
-  'farmer.marketing.description': '描述',
-  'farmer.marketing.describeSpecial': '描述您產品的特殊之處...',
-  'farmer.marketing.price': '價格',
-  'farmer.marketing.unit': '單位',
-  'farmer.marketing.per30Pack': '每 30 顆裝',
-  'farmer.marketing.colors': '顏色',
-  'farmer.marketing.fonts': '字型',
-  'farmer.marketing.fontStyle': '字型樣式',
-  'farmer.marketing.modernSans': '現代無襯線',
-  'farmer.marketing.classicSerif': '經典有襯線',
-  'farmer.marketing.friendlyRounded': '友善圓體',
-  'farmer.marketing.layout': '佈局',
-  'farmer.marketing.layoutStyle': '佈局樣式',
-  'farmer.marketing.minimal': '簡約',
-  'farmer.marketing.detailed': '詳細',
-  'farmer.marketing.bold': '粗體鮮明',
-  'farmer.marketing.aiPreview': 'AI 預覽',
-  'farmer.marketing.willGenerate': '您的 {templateName} 將使用以下特點生成：',
-  'farmer.marketing.professionalEnhancement': '專業產品攝影增強',
-  'farmer.marketing.bilingualOptimization': '雙語文字（中文/英文）優化',
-  'farmer.marketing.brandConsistent': '品牌一致的配色方案',
-  'farmer.marketing.printReady': '印刷就緒的高解析度輸出',
-  'farmer.marketing.cancel': '取消',
-  'farmer.marketing.generateWithAi': '使用 AI 生成',
-  'farmer.marketing.yourMaterials': 'Your Marketing Materials',
-  'farmer.marketing.recentlyGenerated': 'Recently generated materials ready for use',
+  'farmer.marketing.aiGenerator': 'AI generator',
+  'farmer.marketing.uploadPhotosDescription': 'Upload product photos so AI can create professional marketing assets',
+  'farmer.marketing.selectTemplate': 'Select template',
+  'farmer.marketing.uploadPhotosTab': 'Upload photos',
+  'farmer.marketing.customize': 'Customize',
+  'farmer.marketing.productPhotos': 'Product photos',
+  'farmer.marketing.dragDropPhotos': 'Drag and drop photos here',
+  'farmer.marketing.selectFile': 'Select file',
+  'farmer.marketing.selectProduct': 'Select product',
+  'farmer.marketing.marketingTitle': 'Marketing title',
+  'farmer.marketing.fromFarmToTable': 'From farm to table',
+  'farmer.marketing.description': 'Description',
+  'farmer.marketing.describeSpecial': 'Describe what makes this product special...',
+  'farmer.marketing.price': 'Price',
+  'farmer.marketing.unit': 'Unit',
+  'farmer.marketing.per30Pack': 'Per 30 pack',
+  'farmer.marketing.colors': 'Colors',
+  'farmer.marketing.fonts': 'Fonts',
+  'farmer.marketing.preview': 'Preview',
   'farmer.marketing.ready': 'Ready',
   'farmer.marketing.created': 'Created:',
-  'farmer.marketing.downloads': 'Downloads:',
+  'farmer.marketing.downloadsLabel': 'Downloads:',
   'farmer.marketing.download': 'Download',
   'farmer.marketing.share': 'Share',
-  'farmer.marketing.noMaterialsYet': 'No marketing materials yet',
-  'farmer.marketing.useAiToGenerate': 'Use AI to generate professional marketing materials to promote your products and grow your business',
-  'farmer.marketing.generateFirst': 'Generate Your First Material',
-  'farmer.marketing.aiInsights': 'AI Marketing Insights',
-  'farmer.marketing.personalizedRecommendations': 'Personalized recommendations to boost your marketing effectiveness',
-  'farmer.marketing.topPerformingContent': 'Top Performing Content',
-  'farmer.marketing.recipeCardsEngagement': 'Recipe cards have 73% higher engagement than standard flyers. Consider creating more recipe content.',
-  'farmer.marketing.createRecipeCard': 'Create Recipe Card',
-  'farmer.marketing.seasonalOpportunity': 'Seasonal Opportunity',
-  'farmer.marketing.holidayBakingSeason': 'Holiday baking season is approaching. Create festive-themed recipe cards featuring your eggs.',
-  'farmer.marketing.generateHolidayContent': 'Generate Holiday Content',
-  'farmer.marketing.languageOptimization': 'Language Optimization',
-  'farmer.marketing.englishTranslations': 'Adding English translations increases store interest by 45%. Ensure all materials are bilingual.',
-  'farmer.marketing.updateMaterials': 'Update Materials',
-  'farmer.marketing.photographyQuality': 'Photography Quality',
-  'farmer.marketing.naturalLightPhotos': 'Natural light photos perform 2x better. Shoot during golden hour for best results.',
-  'farmer.marketing.photographyGuide': 'Photography Guide',
-  
+  'farmer.marketing.validation.productRequired': 'Please select a product',
+  'farmer.marketing.validation.titleRequired': 'Marketing title is required',
+  'farmer.marketing.validation.descriptionRequired': 'Product description is required',
+  'farmer.marketing.generationComplete': 'Content Generated Successfully! 🎨',
+  'farmer.marketing.contentReady': 'Your AI-generated marketing content is ready',
+  'farmer.marketing.generationFailed': 'Generation Failed',
+  'farmer.marketing.tryAgain': 'Please try again later',
+  'farmer.marketing.generating': 'Generating...',
+  'farmer.marketing.contentGenerated': 'Content Generated',
+  'farmer.marketing.reviewAndEdit': 'Review and edit your generated content',
+  'farmer.marketing.generatedContent': 'Generated Content',
+  'farmer.marketing.copied': 'Copied!',
+  'farmer.marketing.contentCopied': 'Content copied to clipboard',
+  'farmer.marketing.regenerated': 'Content Regenerated',
+  'farmer.marketing.newContentReady': 'New content is ready',
+  'farmer.marketing.regenerationFailed': 'Regeneration Failed',
+  'farmer.marketing.close': 'Close',
+  'farmer.marketing.tone': 'Tone',
+  'farmer.marketing.selectTone': 'Select tone',
+  'farmer.marketing.professional': 'Professional',
+  'farmer.marketing.friendly': 'Friendly',
+  'farmer.marketing.casual': 'Casual',
   // Farmer Analytics
   'farmer.analytics.title': 'Analytics & Forecasting',
   'farmer.analytics.subtitle': 'Track performance and predict demand with AI-powered insights',
@@ -727,8 +725,6 @@ export const en = {
   'farmer.references.lineIntegration': 'LINE Integration',
   'farmer.references.connectFarmBusiness': 'Connect your farm business with LINE users',
   'farmer.references.quickActions': 'Quick Actions',
-  'farmer.references.openInLine': 'Open in LINE',
-  'farmer.references.generateQrCode': 'Generate QR Code',
   'farmer.references.viewBotSettings': 'View Bot Settings',
   'farmer.references.botStatus': 'Bot Status',
   'farmer.references.active': 'Active',
@@ -754,7 +750,6 @@ export const en = {
   'role.market.point2': 'Compare products and prices',
   'role.market.point3': 'Manage delivery schedules',
   'role.market.point4': 'Rate and review farms',
-
   // Alerts & Errors
   'error.profileSave': 'Failed to save profile. Please try again.',
   'error.roleUpdate': 'Failed to update user role. Please try again.',
@@ -763,11 +758,9 @@ export const en = {
   'error.passwordMismatch': 'Passwords do not match',
   'error.signupFailed': 'Sign up failed. Please try again.',
   'error.signinFailed': 'Sign in failed. Please try again.',
-
   // Success
   'success.profileSaved': 'Profile saved successfully',
   'success.roleSet': 'Role updated successfully',
-
   // Settings
   'settings.title': 'Settings',
   'settings.description': 'Manage your account settings and preferences',
@@ -818,5 +811,4 @@ export const en = {
   'settings.account.deleteAccountDesc': 'Permanently delete your account and all associated data',
   'settings.account.delete': 'Delete Account'
 } as const;
-
 export type TranslationKey = keyof typeof en;

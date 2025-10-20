@@ -9,7 +9,7 @@ import {
   Loader2,
   ArrowLeft
 } from 'lucide-react';
-import { lineAuthService, LineLoginUser } from '@/lib/lineAuth';
+import { lineAuthService, LineLoginResult } from '@/lib/lineAuth';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 
@@ -19,7 +19,7 @@ const LineCallback: React.FC = () => {
   const { t } = useLanguage();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [error, setError] = useState<string>('');
-  const [user, setUser] = useState<LineLoginUser | null>(null);
+  const [loginResult, setLoginResult] = useState<LineLoginResult | null>(null);
   const hasHandledRef = useRef(false);
   const loginRef = useRef(login);
   const setLiffProfileRef = useRef(setLiffProfile);
@@ -43,14 +43,14 @@ const LineCallback: React.FC = () => {
         hasHandledRef.current = true;
         setStatus('loading');
         
-        const lineUser = await lineAuthService.handleCallback();
+        const loginResult = await lineAuthService.handleCallback();
         if (!isMounted) return;
-        setUser(lineUser);
-        if (lineUser) {
-          setLiffProfileRef.current(lineUser);
+        setLoginResult(loginResult);
+        if (loginResult?.profile) {
+          setLiffProfileRef.current(loginResult.profile);
         }
-        
-        await loginRef.current(lineUser);
+
+        await loginRef.current(loginResult?.profile, loginResult?.idToken);
         if (!isMounted) return;
         
         setStatus('success');
@@ -129,13 +129,13 @@ const LineCallback: React.FC = () => {
                     Login Successful!
                   </h3>
                   <p className="text-sm text-gray-600 mt-2">
-                    Welcome back, {user?.displayName || 'User'}!
+                    Welcome back, {loginResult?.profile.displayName || 'User'}!
                   </p>
-                  {user?.pictureUrl && (
+                  {loginResult?.profile.pictureUrl && (
                     <div className="mt-4">
                       <img 
-                        src={user.pictureUrl} 
-                        alt={user.displayName}
+                        src={loginResult.profile.pictureUrl} 
+                        alt={loginResult.profile.displayName}
                         className="w-16 h-16 rounded-full mx-auto"
                       />
                     </div>

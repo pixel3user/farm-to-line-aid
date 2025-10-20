@@ -3,10 +3,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { db, auth } from '@/lib/firebase';
-import { collection, addDoc, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, getDocs, Timestamp, query, where } from 'firebase/firestore';
+import { useAuth } from '@/contexts/AuthContext';
 import { CheckCircle, XCircle, Loader2, Database, User } from 'lucide-react';
 
 const FirebaseTest: React.FC = () => {
+  const { user } = useAuth();
   const [firebaseStatus, setFirebaseStatus] = useState<{
     connected: boolean;
     error?: string;
@@ -95,10 +97,141 @@ const FirebaseTest: React.FC = () => {
       const snapshot = await getDocs(usersRef);
       const users = snapshot.docs.map(doc => doc.data());
       console.log('User test successful, found users:', users.length);
+      console.log('Users data:', users);
       setTestResults(prev => ({ ...prev, userTest: true }));
     } catch (error) {
       console.error('User test failed:', error);
       setTestResults(prev => ({ ...prev, userTest: false }));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const runProductsTest = async () => {
+    try {
+      setIsLoading(true);
+      // Test products collection access
+      const productsRef = collection(db, 'products');
+      const snapshot = await getDocs(productsRef);
+      const products = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log('Products test successful, found products:', products.length);
+      console.log('Products data:', products);
+    } catch (error) {
+      console.error('Products test failed:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const runStoresTest = async () => {
+    try {
+      setIsLoading(true);
+      // Test stores collection access
+      const storesRef = collection(db, 'stores');
+      const snapshot = await getDocs(storesRef);
+      const stores = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log('Stores test successful, found stores:', stores.length);
+      console.log('Stores data:', stores);
+    } catch (error) {
+      console.error('Stores test failed:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const createTestData = async () => {
+    try {
+      setIsLoading(true);
+      const testUserId = 'test_user_' + Date.now();
+      
+      // Create test product
+      const productData = {
+        userId: testUserId,
+        name: 'Test Product',
+        category: 'vegetables',
+        unit: 'kg',
+        price: 50,
+        stock: 100,
+        description: 'Test product created from website',
+        isActive: true,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
+      };
+      
+      // Create test store
+      const storeData = {
+        userId: testUserId,
+        name: 'Test Store',
+        type: 'supermarket',
+        location: 'Test Location',
+        contactName: 'Test Contact',
+        contactPhone: '123-456-7890',
+        contactEmail: 'test@example.com',
+        status: 'contacted',
+        notes: ['Test store'],
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
+      };
+      
+      // Save to Firestore
+      const productRef = await addDoc(collection(db, 'products'), productData);
+      const storeRef = await addDoc(collection(db, 'stores'), storeData);
+      
+      console.log('Test data created successfully:');
+      console.log('Product ID:', productRef.id);
+      console.log('Store ID:', storeRef.id);
+      console.log('User ID:', testUserId);
+      
+      // Now try to fetch the data
+      const productsSnapshot = await getDocs(query(collection(db, 'products'), where('userId', '==', testUserId)));
+      const storesSnapshot = await getDocs(query(collection(db, 'stores'), where('userId', '==', testUserId)));
+      
+      console.log('Fetched products for user:', productsSnapshot.size);
+      console.log('Fetched stores for user:', storesSnapshot.size);
+      
+    } catch (error) {
+      console.error('Create test data failed:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const checkCurrentUserData = async () => {
+    try {
+      setIsLoading(true);
+      
+      if (!user) {
+        console.log('No user logged in');
+        return;
+      }
+      
+      console.log('Current user:', user);
+      console.log('User ID:', user.id);
+      console.log('Line User ID:', user.lineUserId);
+      
+      // Check products for this user
+      const productsSnapshot = await getDocs(query(collection(db, 'products'), where('userId', '==', user.id)));
+      const products = productsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log('Products for current user:', products.length);
+      console.log('Products data:', products);
+      
+      // Check stores for this user
+      const storesSnapshot = await getDocs(query(collection(db, 'stores'), where('userId', '==', user.id)));
+      const stores = storesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      console.log('Stores for current user:', stores.length);
+      console.log('Stores data:', stores);
+      
+      // Also check with lineUserId
+      if (user.lineUserId && user.lineUserId !== user.id) {
+        console.log('Checking with lineUserId:', user.lineUserId);
+        const productsSnapshot2 = await getDocs(query(collection(db, 'products'), where('userId', '==', user.lineUserId)));
+        const storesSnapshot2 = await getDocs(query(collection(db, 'stores'), where('userId', '==', user.lineUserId)));
+        console.log('Products with lineUserId:', productsSnapshot2.size);
+        console.log('Stores with lineUserId:', storesSnapshot2.size);
+      }
+      
+    } catch (error) {
+      console.error('Check current user data failed:', error);
     } finally {
       setIsLoading(false);
     }
@@ -228,6 +361,34 @@ const FirebaseTest: React.FC = () => {
           variant="outline"
         >
           用戶數據測試
+        </Button>
+        <Button 
+          onClick={runProductsTest} 
+          disabled={isLoading || !firebaseStatus.connected}
+          variant="outline"
+        >
+          🔍 檢查產品數據
+        </Button>
+        <Button 
+          onClick={runStoresTest} 
+          disabled={isLoading || !firebaseStatus.connected}
+          variant="outline"
+        >
+          🏪 檢查商店數據
+        </Button>
+        <Button 
+          onClick={createTestData} 
+          disabled={isLoading || !firebaseStatus.connected}
+          variant="default"
+        >
+          ➕ 創建測試數據
+        </Button>
+        <Button 
+          onClick={checkCurrentUserData} 
+          disabled={isLoading || !firebaseStatus.connected || !user}
+          variant="secondary"
+        >
+          👤 檢查當前用戶數據
         </Button>
       </div>
 

@@ -192,10 +192,12 @@ export class DatabaseService {
 
   // Product operations
   static async createProduct(userId: string, productData: Partial<Product>): Promise<{ id: string }> {
+    console.log('DatabaseService: Creating product for user:', userId, 'with data:', productData);
+    
     const productRef = doc(collection(db, 'products'));
     const now = Timestamp.now();
     
-    const productDoc = {
+    const productDoc: any = {
       id: productRef.id,
       userId,
       name: productData.name || '',
@@ -208,24 +210,72 @@ export class DatabaseService {
       tags: productData.tags || [],
       isActive: true,
       createdAt: now,
-      updatedAt: now,
-      geminiData: productData.geminiData
+      updatedAt: now
     };
 
+    // Only include geminiData if it's not undefined
+    if (productData.geminiData !== undefined) {
+      productDoc.geminiData = productData.geminiData;
+    }
+
+    console.log('DatabaseService: Product document to save:', productDoc);
+    
     await setDoc(productRef, productDoc);
+    
+    console.log('DatabaseService: Product saved successfully with ID:', productRef.id);
+    
+    // Immediately try to fetch the created product to verify
+    try {
+      const createdProduct = await getDoc(productRef);
+      console.log('DatabaseService: Verification - created product exists:', createdProduct.exists());
+      if (createdProduct.exists()) {
+        console.log('DatabaseService: Verification - product data:', createdProduct.data());
+      }
+    } catch (verifyError) {
+      console.error('DatabaseService: Verification failed:', verifyError);
+    }
+    
     return { id: productRef.id };
   }
 
   static async getProductsByUser(userId: string): Promise<Product[]> {
-    const q = query(
-      collection(db, 'products'),
-      where('userId', '==', userId),
-      where('isActive', '==', true),
-      orderBy('createdAt', 'desc')
-    );
-    
-    const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => doc.data() as Product);
+    try {
+      console.log('DatabaseService: Fetching products for user:', userId);
+      
+      // Use the most reliable approach: get all products and filter manually
+      const allProductsSnapshot = await getDocs(collection(db, 'products'));
+      console.log('DatabaseService: Total products in database:', allProductsSnapshot.size);
+      
+      const userProducts = allProductsSnapshot.docs
+        .filter(doc => {
+          const data = doc.data();
+          const matches = data.userId === userId;
+          if (matches) {
+            console.log('DatabaseService: Found matching product:', { id: doc.id, userId: data.userId, name: data.name });
+          }
+          return matches;
+        })
+        .map(doc => {
+          const data = doc.data();
+          console.log('DatabaseService: Processing product:', { id: doc.id, ...data });
+          return {
+            ...data as Product,
+            id: doc.id
+          };
+        })
+        .sort((a, b) => {
+          // Sort by createdAt descending
+          const aTime = a.createdAt?.toMillis?.() || 0;
+          const bTime = b.createdAt?.toMillis?.() || 0;
+          return bTime - aTime;
+        });
+      
+      console.log('DatabaseService: Final products array for user:', userProducts.length, userProducts);
+      return userProducts;
+    } catch (error) {
+      console.error('DatabaseService: Error fetching user products:', error);
+      return [];
+    }
   }
 
   static async updateProduct(productId: string, updates: Partial<Product>): Promise<void> {
@@ -243,26 +293,38 @@ export class DatabaseService {
     const storeRef = doc(collection(db, 'stores'));
     const now = Timestamp.now();
 
-    const storeDoc = {
+    const storeDoc: any = {
       id: storeRef.id,
       userId,
       name: storeData.name || '',
       type: storeData.type || 'other',
       location: storeData.location || '',
-      contact: storeData.contact || {},
       status: 'potential',
       metadata: {
         firstContact: storeData.metadata?.firstContact || now,
-        lastOrder: storeData.metadata?.lastOrder,
         totalOrders: 0,
         totalRevenue: 0,
         notes: [],
         ...storeData.metadata
       },
-      geminiData: storeData.geminiData,
       createdAt: now,
       updatedAt: now
     };
+
+    // Only include contact if it's not undefined
+    if (storeData.contact !== undefined) {
+      storeDoc.contact = storeData.contact;
+    }
+
+    // Only include lastOrder if it's not undefined
+    if (storeData.metadata?.lastOrder !== undefined) {
+      storeDoc.metadata.lastOrder = storeData.metadata.lastOrder;
+    }
+
+    // Only include geminiData if it's not undefined
+    if (storeData.geminiData !== undefined) {
+      storeDoc.geminiData = storeData.geminiData;
+    }
 
     await setDoc(storeRef, storeDoc);
     return { id: storeRef.id };
@@ -282,12 +344,14 @@ export class DatabaseService {
     const q = query(
       collection(db, 'stores'),
       where('userId', '==', userId),
-      orderBy('status'),
       orderBy('createdAt', 'desc')
     );
     
     const querySnapshot = await getDocs(q);
-    return querySnapshot.docs.map(doc => doc.data() as Store);
+    return querySnapshot.docs.map(doc => ({
+      ...doc.data() as Store,
+      id: doc.id
+    }));
   }
 
   static async getAllStores(limitCount: number = 20): Promise<Store[]> {
@@ -327,15 +391,19 @@ export class DatabaseService {
   static async createConversation(userId: string, conversationData: Partial<Conversation>): Promise<{ id: string }> {
     const conversationRef = doc(collection(db, 'conversations'));
     
-    const conversationDoc = {
+    const conversationDoc: any = {
       id: conversationRef.id,
       userId,
       type: conversationData.type || 'text',
       content: conversationData.content || '',
-      geminiResponse: conversationData.geminiResponse,
       metadata: conversationData.metadata || {},
       timestamp: Timestamp.now()
     };
+
+    // Only include geminiResponse if it's not undefined
+    if (conversationData.geminiResponse !== undefined) {
+      conversationDoc.geminiResponse = conversationData.geminiResponse;
+    }
 
     await setDoc(conversationRef, conversationDoc);
     return { id: conversationRef.id };
@@ -357,22 +425,30 @@ export class DatabaseService {
   static async createMarketingMaterial(userId: string, materialData: Partial<MarketingMaterial>): Promise<{ id: string }> {
     const materialRef = doc(collection(db, 'marketing_materials'));
     
-    const materialDoc = {
+    const materialDoc: any = {
       id: materialRef.id,
       userId,
-      productId: materialData.productId,
       type: materialData.type || 'flyer',
       title: materialData.title || '',
       content: materialData.content || '',
-      imageUrl: materialData.imageUrl,
       generatedBy: materialData.generatedBy || 'gemini',
       isActive: true,
       createdAt: Timestamp.now(),
       usage: {
-        timesUsed: 0,
-        lastUsed: undefined
+        timesUsed: 0
       }
     };
+
+    // Only include optional fields if they're not undefined
+    if (materialData.productId !== undefined) {
+      materialDoc.productId = materialData.productId;
+    }
+    if (materialData.imageUrl !== undefined) {
+      materialDoc.imageUrl = materialData.imageUrl;
+    }
+    if (materialData.usage?.lastUsed !== undefined) {
+      materialDoc.usage.lastUsed = materialData.usage.lastUsed;
+    }
 
     await setDoc(materialRef, materialDoc);
     return { id: materialRef.id };

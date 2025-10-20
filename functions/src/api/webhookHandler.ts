@@ -1,5 +1,5 @@
 // LINE Bot Webhook Handler for Farm2Market AI
-import { LineBotAPI, MessageTemplates, WebhookEvent } from './lineBot';
+import { LineBotAPI, MessageTemplates, WebhookEvent, LineMessage } from './lineBot';
 
 export class WebhookHandler {
   private lineBot: LineBotAPI;
@@ -56,28 +56,21 @@ export class WebhookHandler {
       // Create web app URL with user parameters
       const webAppUrl = `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?userId=${userProfile.userId}&displayName=${encodeURIComponent(userProfile.displayName)}&pictureUrl=${encodeURIComponent(userProfile.pictureUrl || '')}`;
       
-      const messages = [{
+      const messages: LineMessage[] = [{
         type: 'text',
         text: '正在為您開啟 Farm2Market AI 管理介面...'
       }, {
         type: 'text',
-        text: '點擊下方連結進入您的專屬管理面板：',
-        quickReply: {
-          items: [{
-            type: 'action',
-            action: {
-              type: 'uri',
-              label: '開啟管理介面',
-              uri: webAppUrl
-            }
-          }]
-        }
+        text: `點擊下方連結進入您的專屬管理面板：\n\n${webAppUrl}`
       }];
 
       await this.lineBot.replyMessage(event.replyToken, messages);
     } catch (error) {
       console.error('Error handling web app access:', error);
-      const errorMessage = MessageTemplates.errorMessage('無法開啟管理介面，請稍後再試。');
+      const errorMessage = [{
+        type: 'text' as const,
+        text: '無法開啟管理介面，請稍後再試。'
+      }];
       await this.lineBot.replyMessage(event.replyToken, errorMessage);
     }
   }

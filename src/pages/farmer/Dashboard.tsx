@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -39,11 +39,34 @@ const FarmerDashboard: React.FC = () => {
     userStats,
     userProducts,
     userStores,
-    userMarketingMaterials
+    userMarketingMaterials,
+    refreshUserData,
+    isLoading: authLoading,
+    isRefreshingData
   } = useAuth();
   const { t } = useLanguage();
   const [recentConversations, setRecentConversations] = useState<Conversation[]>([]);
   const [isLoadingConversations, setIsLoadingConversations] = useState(false);
+  const hasRequestedDataRef = useRef(false);
+
+  useEffect(() => {
+    if (!user?.id) {
+      hasRequestedDataRef.current = false;
+      return;
+    }
+
+    const missingCoreData = !userStats || !userProducts || !userStores;
+
+    if (missingCoreData && !authLoading && !isRefreshingData && !hasRequestedDataRef.current) {
+      hasRequestedDataRef.current = true;
+      refreshUserData().catch((error) => {
+        console.error('FarmerDashboard: failed to refresh overview data', error);
+        hasRequestedDataRef.current = false;
+      });
+    } else if (!missingCoreData) {
+      hasRequestedDataRef.current = false;
+    }
+  }, [user?.id, userStats, userProducts, userStores, authLoading, isRefreshingData, refreshUserData]);
 
   useEffect(() => {
     const loadConversations = async () => {
@@ -66,7 +89,11 @@ const FarmerDashboard: React.FC = () => {
     loadConversations();
   }, [user?.id]);
 
-  const isLoading = (!userStats && !!user?.id) || isLoadingConversations;
+  const isLoading =
+    (!!user?.id && (!userStats || !userProducts || !userStores)) ||
+    isLoadingConversations ||
+    authLoading ||
+    isRefreshingData;
 
   const metricCards = useMemo(
     () => [

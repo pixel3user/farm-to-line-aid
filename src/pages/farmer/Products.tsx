@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,7 +22,7 @@ import {
   DialogTrigger
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Copy, Eye, EyeOff, Filter, MoreHorizontal, Plus, Search } from 'lucide-react';
+import { Copy, Eye, EyeOff, Filter, MoreHorizontal, Plus, RefreshCw, Search } from 'lucide-react';
 import { Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { DatabaseService, Product } from '@/lib/database';
@@ -39,13 +39,15 @@ const formatDate = (timestamp?: Timestamp) => {
 
 const FarmerProducts: React.FC = () => {
   const { t } = useLanguage();
-  const { user, userProducts, refreshUserData } = useAuth();
+  const { user, userProducts, refreshUserData, isLoading, isRefreshingData } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
+  const previousUserIdRef = useRef<string | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     category: 'general',
@@ -56,6 +58,44 @@ const FarmerProducts: React.FC = () => {
   });
 
   const products = (userProducts || []) as Product[];
+
+  const handleRefresh = async () => {
+    if (!user?.id || isRefreshingData) {
+      return;
+    }
+
+    try {
+      await refreshUserData();
+      setLastRefreshTime(new Date());
+    } catch (error) {
+      console.error('Failed to refresh products:', error);
+    }
+  };
+
+  React.useEffect(() => {
+    if (!user?.id) {
+      previousUserIdRef.current = null;
+      return;
+    }
+
+    if (previousUserIdRef.current === user.id) {
+      return;
+    }
+
+    previousUserIdRef.current = user.id;
+
+    refreshUserData()
+      .then(() => setLastRefreshTime(new Date()))
+      .catch((error) => {
+        console.error('Failed to refresh products:', error);
+      });
+  }, [user?.id, refreshUserData]);
+
+  React.useEffect(() => {
+    if (userProducts) {
+      setLastRefreshTime(new Date());
+    }
+  }, [userProducts]);
 
   const categories = useMemo(() => {
     const unique = new Set<string>();
@@ -92,7 +132,8 @@ const FarmerProducts: React.FC = () => {
     if (!user?.id) return;
     setIsSubmitting(true);
     try {
-      await DatabaseService.createProduct(user.id, {
+      console.log('Creating product for user:', user.id, 'with data:', formData);
+      const result = await DatabaseService.createProduct(user.id, {
         name: formData.name,
         category: formData.category,
         unit: formData.unit,
@@ -102,11 +143,15 @@ const FarmerProducts: React.FC = () => {
         images: [],
         tags: []
       });
+      console.log('Product created successfully:', result);
       await refreshUserData();
+      setLastRefreshTime(new Date());
+
       setIsDialogOpen(false);
       setFormData({ name: '', category: 'general', unit: '', price: 0, stock: 0, description: '' });
     } catch (error) {
       console.error('Failed to create product:', error);
+      alert('Failed to create product. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -116,6 +161,7 @@ const FarmerProducts: React.FC = () => {
     try {
       await DatabaseService.updateProduct(product.id, { isActive: !(product.isActive ?? true) });
       await refreshUserData();
+      setLastRefreshTime(new Date());
     } catch (error) {
       console.error('Failed to update product status:', error);
     }
@@ -156,15 +202,30 @@ const FarmerProducts: React.FC = () => {
         <div>
           <h2 className="text-xl font-semibold text-gray-900">{t('farmer.products.catalog')}</h2>
           <p className="text-gray-600">{t('farmer.products.catalogDescription')}</p>
+          {lastRefreshTime && (
+            <p className="text-sm text-gray-500 mt-1">
+              Last updated: {lastRefreshTime.toLocaleTimeString()}
+            </p>
+          )}
         </div>
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="lg" className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 shadow-lg">
-              <Plus className="w-5 h-5 mr-2" />
-              {t('farmer.products.addProduct')}
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={handleRefresh}
+            disabled={isLoading || isRefreshingData}
+          >
+            <RefreshCw className={`w-5 h-5 mr-2 ${(isLoading || isRefreshingData) ? 'animate-spin' : ''}`} />
+            {isLoading || isRefreshingData ? 'Refreshing...' : 'Refresh'}
+          </Button>
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button size="lg" className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 shadow-lg">
+                <Plus className="w-5 h-5 mr-2" />
+                {t('farmer.products.addProduct')}
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader className="pb-4">
               <DialogTitle className="text-2xl font-bold">{t('farmer.products.createNew')}</DialogTitle>
               <DialogDescription className="text-base">{t('farmer.products.createDescription')}</DialogDescription>
@@ -250,13 +311,25 @@ const FarmerProducts: React.FC = () => {
                 <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} className="px-6">
                   {t('farmer.products.cancel')}
                 </Button>
-                <Button type="submit" disabled={isSubmitting} className="px-6 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800">
-                  {isSubmitting ? t('farmer.products.saving') : t('farmer.products.saveProduct')}
+                <Button
+                  type="submit"
+                  disabled={isSubmitting || isLoading || isRefreshingData}
+                  className="px-6 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800"
+                >
+                  {isSubmitting ? (
+                    <div className="flex items-center">
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                      {t('farmer.products.saving')}
+                    </div>
+                  ) : (
+                    t('farmer.products.saveProduct')
+                  )}
                 </Button>
               </div>
             </form>
-          </DialogContent>
-        </Dialog>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       <Card className="shadow-lg border-0">
@@ -328,7 +401,17 @@ const FarmerProducts: React.FC = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredProducts.map((product) => (
+                {isLoading || isRefreshingData ? (
+                  <TableRow>
+                    <TableCell colSpan={8} className="text-center py-12">
+                      <div className="flex flex-col items-center space-y-3">
+                        <div className="w-8 h-8 border-4 border-green-200 border-t-green-600 rounded-full animate-spin"></div>
+                        <p className="text-gray-500 font-medium">Loading products...</p>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredProducts.map((product) => (
                   <TableRow key={product.id} className="hover:bg-gray-50 transition-colors">
                     <TableCell>
                       <div className="flex items-center space-x-3">
@@ -403,8 +486,9 @@ const FarmerProducts: React.FC = () => {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
-                {filteredProducts.length === 0 && (
+                  ))
+                )}
+                {!isLoading && !isRefreshingData && filteredProducts.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={8} className="text-center py-12">
                       <div className="flex flex-col items-center space-y-3">
