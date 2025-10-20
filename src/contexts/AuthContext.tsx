@@ -415,7 +415,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Exchange LIFF ID token for Firebase custom token
       let firebaseUser = null;
-      if (idToken) {
+      const shouldAttemptFirebaseSignIn = Boolean(
+        idToken &&
+        auth &&
+        // Mock tokens do not contain JWT segments, so skip the exchange in that case
+        idToken.includes('.')
+      );
+
+      if (shouldAttemptFirebaseSignIn) {
         try {
           console.log('Exchanging LIFF ID token for Firebase custom token...');
           const response = await fetch('/api/auth/line', {
@@ -437,12 +444,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             console.log('Firebase authentication successful:', firebaseUser.uid);
           } else {
             console.error('Failed to exchange LIFF token:', response.status);
-            throw new Error('Token exchange failed');
+            
           }
         } catch (authError) {
-          console.error('Firebase authentication failed:', authError);
-          throw authError;
+          console.error('Firebase authentication failed, continuing with local session:', authError);
         }
+      } else if (idToken) {
+        console.log('Skipping Firebase custom token exchange for mock LINE token.');
       }
       
       const userRef = doc(db, 'line_users', profile.userId);
@@ -738,7 +746,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = async (profileOverride?: LiffUser, lineIdToken?: string) => {
     // Prevent re-entrancy/infinite loops
-    if (loginInProgressRef.current || isLoading) {
+    if (loginInProgressRef.current) {
       console.log('Login already in progress, skipping...');
       return;
     }
@@ -749,44 +757,54 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       return;
     }
 
+    const shouldManageLoadingState = !isLoading;
+    if (shouldManageLoadingState) {
+      setIsLoading(true);
+    } else {
+      console.log('Login invoked while loading – proceeding with explicit authentication flow');
+    }
+
     loginInProgressRef.current = true;
-    setIsLoading(true);
+    
 
     try {
       if (isInLineApp && isLiffReady) {
-      try {
-        const liff = (await import('@line/liff')).default;
-        const liffId = import.meta.env.VITE_LIFF_ID;
-        
-        if (!liffId || liffId === 'your-liff-id') {
-          console.error('LIFF ID not configured. Please configure VITE_LIFF_ID in your environment variables.');
-          throw new Error('LINE Login not configured. Please contact administrator.');
-        }
-        
-        liff.login();
-      } catch (error) {
-        console.error('LIFF login failed:', error);
-        alert('LINE login failed. Please try again.');
-      }
-    } else {
-      const profileToUse = profileOverride ?? liffUser;
-      if (profileToUse) {
-        console.log('Not in LINE app, using LINE profile from callback');
+      
         try {
-          await authenticateWithFirebase('', profileToUse);
-          return;
-        } catch (error) {
-          console.error('Authentication with existing LINE profile failed:', error);
-          throw new Error('Authentication failed. Please try again.');
-        }
-      }
+          const liff = (await import('@line/liff')).default;
+          const liffId = import.meta.env.VITE_LIFF_ID;
 
-      console.log('No LINE profile available. Please use LINE Login.');
-      throw new Error('Please use LINE Login to access your account.');
-    }
+          if (!liffId || liffId === 'your-liff-id') {
+            console.error('LIFF ID not configured. Please configure VITE_LIFF_ID in your environment variables.');
+            throw new Error('LINE Login not configured. Please contact administrator.');
+          }
+
+          liff.login();
+        } catch (error) {
+          console.error('LIFF login failed:', error);
+          alert('LINE login failed. Please try again.');
+        }
+      } else {
+        const profileToUse = profileOverride ?? liffUser;
+        if (profileToUse) {
+          console.log('Not in LINE app, using LINE profile from callback');
+          try {
+            await authenticateWithFirebase(lineIdToken ?? '', profileToUse);
+            return;
+          } catch (error) {
+            console.error('Authentication with existing LINE profile failed:', error);
+            throw new Error('Authentication failed. Please try again.');
+          }
+        }
+
+        console.log('No LINE profile available. Please use LINE Login.');
+        throw new Error('Please use LINE Login to access your account.');
+      }
     } finally {
       loginInProgressRef.current = false;
-      setIsLoading(false);
+      if (shouldManageLoadingState) {
+        setIsLoading(false);
+      }
     }
   };
 

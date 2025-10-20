@@ -17,6 +17,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { DatabaseService, Store } from '@/lib/database';
 import { MapPin, Phone, RefreshCw, Users, Search, Plus, TrendingUp, Target, CheckCircle, Clock, XCircle, Mail, Globe } from 'lucide-react';
 import { Timestamp } from 'firebase/firestore';
+import StoresMap from '@/components/StoresMap';
 
 const storeStatuses: Store['status'][] = ['potential', 'contacted', 'customer', 'former_customer'];
 
@@ -458,6 +459,22 @@ const FarmerStores: React.FC = () => {
               ))}
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Stores Map Section */}
+      <Card className="shadow-lg border-0">
+        <CardHeader className="pb-4">
+          <CardTitle className="flex items-center text-xl">
+            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mr-3">
+              <MapPin className="w-5 h-5 text-green-600" />
+            </div>
+            {t('farmer.stores.map.title')}
+          </CardTitle>
+          <CardDescription className="text-base">{t('farmer.stores.map.subtitle')}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <StoresMap stores={stores} isLoading={isLoading || isRefreshingData} />
         </CardContent>
       </Card>
 
