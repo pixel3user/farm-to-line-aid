@@ -688,7 +688,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (userSnap.exists()) {
         const userData = userSnap.data() as LineUser;
         console.log('Loaded user profile:', userData.displayName);
-        setUser(userData);
+        setUser({
+          ...userData,
+          id: userData.id ?? userId,
+          lineUserId: userData.lineUserId ?? userId
+        });
       } else {
         console.log('User profile not found, will be created during authentication');
       }
@@ -834,7 +838,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const refreshUserData = React.useCallback(async () => {
-    const targetUserId = liffUser?.userId || user?.id;
+    const targetUserId = liffUserRef.current?.userId || userRef.current?.id;
     if (targetUserId && !dataLoadingRef.current) {
       console.log('Refreshing user data for:', targetUserId);
       try {
@@ -847,7 +851,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } else {
       console.warn('No user ID available for refresh');
     }
-  }, [liffUser?.userId, user?.id]);
+  }, []);
 
   const updateUserProfile = async (updates: Partial<LineUser>) => {
     if (!user || !db) throw new Error('User not authenticated or database not available');
