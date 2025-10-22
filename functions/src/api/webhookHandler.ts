@@ -1,5 +1,6 @@
 // LINE Bot Webhook Handler for Farm2Market AI
 import { LineBotAPI, MessageTemplates, WebhookEvent, LineMessage } from './lineBot';
+import { EventDeduper } from '../lib/idempotency';
 import { generateOutOfScopeAnswer, generateConversationPlan, analyzeImageWithGemini } from '../lib/gemini-client';
 import type { ConversationHistoryItem } from '../lib/gemini-client';
 import { ConversationStore } from '../lib/conversationStore';
@@ -58,6 +59,19 @@ export class WebhookHandler {
     this.debugEvent(event);
 
     try {
+      // Idempotency: ensure we only process each event once globally
+      const acquired = await EventDeduper.acquire({
+        type: event.type,
+        replyToken: event.replyToken,
+        source: event.source,
+        message: event.message,
+        timestamp: (event as any).timestamp,
+      });
+      if (!acquired) {
+        console.warn('[WebhookHandler] Duplicate event suppressed');
+        return;
+      }
+
       switch (event.type) {
         case 'follow':
           await this.handleFollow(event);
@@ -71,6 +85,13 @@ export class WebhookHandler {
         default:
           console.log('Unhandled event type:', event.type);
       }
+      await EventDeduper.markCompleted({
+        type: event.type,
+        replyToken: event.replyToken,
+        source: event.source,
+        message: event.message,
+        timestamp: (event as any).timestamp,
+      });
     } catch (error) {
       console.error('Error handling event:', error);
     }
