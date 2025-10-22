@@ -281,6 +281,18 @@ export class WebhookHandler {
         }
       }
 
+      if (plan.lineMessages && plan.lineMessages.length) {
+        console.debug('[WebhookHandler] Gemini returned structured LINE messages');
+        await this.lineBot.replyMessage(replyToken, plan.lineMessages);
+        replied = true;
+        try {
+          await this.persistConversation(context, plan.lineMessages);
+        } catch (persistError) {
+          console.warn('[WebhookHandler] Failed to persist conversation after structured reply:', persistError);
+        }
+        return true;
+      }
+
       if (plan.text) {
         console.debug('[WebhookHandler] Gemini returned direct answer text');
         const messages: LineMessage[] = [
