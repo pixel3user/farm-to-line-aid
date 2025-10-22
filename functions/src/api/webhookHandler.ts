@@ -1,5 +1,5 @@
 // LINE Bot Webhook Handler for Farm2Market AI
-import { LineBotAPI, MessageTemplates, EnhancedMessageTemplates, WebhookEvent, LineMessage } from './lineBot';
+import { LineBotAPI, MessageTemplates, WebhookEvent, LineMessage } from './lineBot';
 import { EventDeduper } from '../lib/idempotency';
 import { generateOutOfScopeAnswer, generateConversationPlan, analyzeImageWithGemini } from '../lib/gemini-client';
 import type { ConversationHistoryItem } from '../lib/gemini-client';
@@ -7,7 +7,6 @@ import { ConversationStore } from '../lib/conversationStore';
 import DatabaseService from '../lib/database-server';
 import admin from '../lib/firebaseAdmin';
 import sharp from 'sharp';
-import { EcomData, Orders, Support, type EcomCategory } from '../lib/ecommerce';
 
 interface TextContext {
   replyToken: string;
@@ -212,51 +211,6 @@ export class WebhookHandler {
       replyToken: `${context.replyToken.slice(0, 6)}...${context.replyToken.slice(-4)}`,
       text: textPreview,
     });
-
-    // Lightweight keyword routing before Gemini
-    const lower = context.text.toLowerCase();
-    if (/(^hi\b|^hello\b|^hey\b)/i.test(context.text)) {
-      await this.lineBot.replyMessage(context.replyToken, [
-        { type: 'text', text: `👋 Hi${context.userId ? '' : ''}! Welcome to NexStore.` },
-        EnhancedMessageTemplates.mainQuickMenu(),
-      ]);
-      await this.persistConversation(context, [EnhancedMessageTemplates.mainQuickMenu()]);
-      return;
-    }
-    if (/(browse|shop|products|catalog)/i.test(lower)) {
-      await this.lineBot.replyMessage(context.replyToken, [
-        { type: 'text', text: 'Choose a category!' },
-        EnhancedMessageTemplates.categoryQuickReplies(),
-      ]);
-      await this.persistConversation(context, [EnhancedMessageTemplates.categoryQuickReplies()]);
-      return;
-    }
-    const searchMatch = lower.match(/(?:search|find|show me)\s+(.{2,64})/);
-    if (searchMatch) {
-      const q = searchMatch[1];
-      const results = EcomData.search(q, 5);
-      if (results.length) {
-        const carousel = EnhancedMessageTemplates.productCarousel(results.map(r => ({ id: r.id, name: r.name, price: r.price, currency: r.currency, imageUrl: r.imageUrl })));
-        await this.lineBot.replyMessage(context.replyToken, [ { type: 'text', text: `Results for "${q}":` }, carousel ]);
-        await this.persistConversation(context, [carousel]);
-      } else {
-        await this.lineBot.replyMessage(context.replyToken, [ { type: 'text', text: `No results for "${q}". Try another keyword.` } ]);
-      }
-      return;
-    }
-    const trackMatch = lower.match(/(?:track|order)\s*#?\s*(\w{3,})/);
-    if (trackMatch) {
-      const id = trackMatch[1];
-      const status = Orders.getStatus(id);
-      if (status) {
-        const card = EnhancedMessageTemplates.orderStatusCard(status.orderId, status.status, status.eta);
-        await this.lineBot.replyMessage(context.replyToken, [ card ]);
-        await this.persistConversation(context, [card]);
-      } else {
-        await this.lineBot.replyMessage(context.replyToken, [ { type: 'text', text: 'Please provide a valid order number (e.g., 1123).' } ]);
-      }
-      return;
-    }
 
     const handled = await this.handleTextWithGemini(context);
 
@@ -727,49 +681,6 @@ Tips:
     const postbackData = this.parsePostbackData(event.postback.data);
 
     switch (postbackData.action) {
-      case 'browse_menu':
-        await this.lineBot.replyMessage(event.replyToken, [ { type: 'text' as const, text: 'Choose a category!' }, EnhancedMessageTemplates.categoryQuickReplies() ]);
-        return;
-      case 'browse_category': {
-        const cat = (postbackData.cat as EcomCategory) || 'shoes';
-        const items = EcomData.listByCategory(cat, 5);
-        const carousel = EnhancedMessageTemplates.productCarousel(items.map(r => ({ id: r.id, name: r.name, price: r.price, currency: r.currency, imageUrl: r.imageUrl })));
-        await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text' as const, text: `Top ${cat}:` }, carousel ]);
-        return;
-      }
-      case 'product_detail': {
-        const id = postbackData.id;
-        const p = id ? EcomData.getById(id) : undefined;
-        if (!p) {
-          await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text' as const, text: 'Product not found.' } ]);
-          return;
-        }
-        const bubble = EnhancedMessageTemplates.productCarousel([{ id: p.id, name: p.name, price: p.price, currency: p.currency, imageUrl: p.imageUrl }]);
-        await this.lineBot.replyMessage(event.replyToken!, [ bubble ]);
-        return;
-      }
-      case 'search_prompt': {
-        await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text' as const, text: 'Type a search like: "show me black hoodies"' } ]);
-        return;
-      }
-      case 'track_prompt': {
-        await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text' as const, text: 'Send your order number, e.g., "track 1123"' } ]);
-        return;
-      }
-      case 'support_menu': {
-        await this.lineBot.replyMessage(event.replyToken!, [ EnhancedMessageTemplates.supportMenu() ]);
-        return;
-      }
-      case 'support_faqs': {
-        const faqs = Support.faqs();
-        const text = faqs.map(f => `Q: ${f.q}\nA: ${f.a}`).join('\n\n');
-        await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text' as const, text } ]);
-        return;
-      }
-      case 'support_agent': {
-        await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text' as const, text: 'Connecting you to a live agent... Our team will reach out shortly.' } ]);
-        return;
-      }
       case 'send_intro':
         await this.handleSendIntro(event.replyToken, postbackData.store);
         break;

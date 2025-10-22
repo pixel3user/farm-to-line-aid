@@ -9,7 +9,6 @@ import {
   mockExchangeCodeForToken,
   mockGetUserProfile,
 } from "./lineAuth";
-import { EnhancedMessageTemplates } from "../api/lineBot";
 
 const router = express.Router();
 
@@ -185,28 +184,6 @@ router.get("/user/:userId/marketing-materials", async (req, res) => {
   } catch (error) {
     console.error("Marketing materials error:", error);
     res.status(500).json({ error: "Failed to fetch marketing materials" });
-  }
-});
-
-// Simple promotions push API
-router.post('/promotions/push', async (req, res) => {
-  try {
-    const { userId, title, message, ctaUrl } = req.body as { userId: string; title?: string; message: string; ctaUrl?: string };
-    if (!userId || !message) {
-      return res.status(400).json({ error: 'userId and message are required' });
-    }
-    const { LineBotAPI } = await import('../api/lineBot');
-    const bot = new LineBotAPI();
-    const payload: any[] = [];
-    payload.push({ type: 'text', text: title ? `${title}\n\n${message}` : message });
-    if (ctaUrl) {
-      payload.push({ type: 'template', altText: 'Promotion', template: { type: 'buttons', title: 'Offer', text: 'Tap to view details', actions: [{ type: 'uri', label: 'View offer', uri: ctaUrl }] } });
-    }
-    await bot.pushMessage(userId, payload);
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Promotion push error:', error);
-    res.status(500).json({ error: 'Failed to push promotion' });
   }
 });
 
