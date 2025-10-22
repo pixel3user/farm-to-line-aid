@@ -1,3 +1,4 @@
+import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import admin from './firebaseAdmin';
 
 const firestore = admin.firestore();
@@ -23,7 +24,7 @@ export class ConversationStore {
       .get();
 
     return snapshot.docs
-      .map(doc => doc.data() as ConversationTurn)
+      .map((doc: QueryDocumentSnapshot) => doc.data() as ConversationTurn)
       .reverse();
   }
 
@@ -62,7 +63,7 @@ export class ConversationStore {
     if (snapshot.empty) return;
 
     const batch = firestore.batch();
-    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+    snapshot.docs.forEach((doc: QueryDocumentSnapshot) => batch.delete(doc.ref));
     await batch.commit();
   }
 }
