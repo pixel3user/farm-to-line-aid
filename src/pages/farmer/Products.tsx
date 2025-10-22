@@ -82,14 +82,18 @@ const FarmerProducts: React.FC = () => {
       return;
     }
 
+    // Avoid triggering a refresh if one is already in progress
     previousUserIdRef.current = user.id;
+    if (isRefreshingData) {
+      return;
+    }
 
     refreshUserData()
       .then(() => setLastRefreshTime(new Date()))
       .catch((error) => {
         console.error('Failed to refresh products:', error);
       });
-  }, [user?.id, refreshUserData]);
+  }, [user?.id, refreshUserData, isRefreshingData]);
 
   React.useEffect(() => {
     if (userProducts) {

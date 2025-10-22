@@ -697,8 +697,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.log('User profile not found, will be created during authentication');
       }
       
-      // Debug database first
-      await UserDataService.debugDatabase(userId);
+      // Debug database first (development only)
+      if (import.meta.env.DEV) {
+        await UserDataService.debugDatabase(userId);
+      }
       
       // Load user statistics and data
       console.log('Loading user statistics and data...');

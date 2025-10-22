@@ -6,6 +6,7 @@ export interface LineMessage {
   text?: string;
   altText?: string;
   contents?: any;
+  template?: any;
 }
 
 export interface WebhookEvent {
@@ -43,25 +44,137 @@ export interface StoreInfo {
 }
 
 // LINE Bot API Configuration
+import runtimeConfig from '../lib/runtimeConfig';
+
 export const LINE_CONFIG = {
-  CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN || '',
-  CHANNEL_SECRET: process.env.LINE_CHANNEL_SECRET || '',
+  CHANNEL_ACCESS_TOKEN: runtimeConfig.lineAccessToken || '',
+  CHANNEL_SECRET: runtimeConfig.lineChannelSecret || '',
   MESSAGING_API_URL: 'https://api.line.me/v2/bot',
-  LIFF_URL: process.env.LIFF_URL || 'https://farm2market-99.web.app',
+  LIFF_URL: runtimeConfig.liffUrl || 'https://farm2market-99.web.app',
 };
 
 // LINE Bot API Functions
 export class LineBotAPI {
   private accessToken: string;
   private baseUrl: string;
+  private skipLineApi: boolean;
+  private static recentReplyTokens: Map<string, number> = new Map();
+  private static REPLY_TOKEN_TTL_MS = 90_000; // LINE reply tokens are valid ~1 min
 
   constructor(accessToken: string = LINE_CONFIG.CHANNEL_ACCESS_TOKEN) {
     this.accessToken = accessToken;
     this.baseUrl = LINE_CONFIG.MESSAGING_API_URL;
+    this.skipLineApi = this.shouldSkipLineApi();
+
+    if (this.skipLineApi) {
+      console.log('[LineBotAPI] SKIP_LINE_API active; LINE requests will be logged but not forwarded.');
+    } else if (!this.accessToken) {
+      console.warn('[LineBotAPI] Missing LINE channel access token. Replies will fail unless SKIP_LINE_API is enabled.');
+    }
+  }
+
+  private shouldSkipLineApi(): boolean {
+    const normalize = (value?: string) => (value || '').toLowerCase();
+
+    if (normalize(process.env.FORCE_LINE_API) === 'true') {
+      console.log('[LineBotAPI] FORCE_LINE_API override detected; LINE requests will be sent even in emulator mode.');
+      return false;
+    }
+
+    if (runtimeConfig.isEmulator) {
+      return true;
+    }
+
+    if (runtimeConfig.skipLineApi) {
+      return true;
+    }
+
+    if (runtimeConfig.useMockLine) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private maskToken(token?: string): string | undefined {
+    if (!token || token.length <= 10) {
+      return token;
+    }
+
+    return `${token.slice(0, 6)}...${token.slice(-4)}`;
+  }
+
+  private sanitisePayload(payload: Record<string, unknown>): Record<string, unknown> {
+    const clone = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>;
+
+    if (typeof clone.replyToken === 'string') {
+      clone.replyToken = this.maskToken(clone.replyToken);
+    }
+
+    if (typeof clone.to === 'string') {
+      clone.to = this.maskToken(clone.to);
+    }
+
+    return clone;
+  }
+
+  private logSkip(action: string, payload: Record<string, unknown>): void {
+    console.log(`[LineBotAPI] ${action} skipped (mock mode)`, this.sanitisePayload(payload));
+  }
+
+  private logRequest(action: string, payload: Record<string, unknown>): void {
+    console.debug(`[LineBotAPI] Sending ${action}`, this.sanitisePayload(payload));
+  }
+
+  private async logAndThrow(
+    context: string,
+    response: Response,
+    payload: Record<string, unknown>
+  ): Promise<never> {
+    let responseBody = '';
+
+    try {
+      responseBody = await response.text();
+    } catch (readError) {
+      responseBody = `[Failed to read response body: ${(readError as Error).message}]`;
+    }
+
+    console.error(`[LineBotAPI] ${context} rejected by LINE`, {
+      status: response.status,
+      statusText: response.statusText,
+      responseBody,
+      request: this.sanitisePayload(payload),
+    });
+
+    throw new Error(`LINE API Error: ${response.status}`);
   }
 
   // Send reply message
   async replyMessage(replyToken: string, messages: LineMessage[]): Promise<void> {
+    // basic dedupe: avoid re-sending with the same replyToken within TTL window
+    const now = Date.now();
+    const last = LineBotAPI.recentReplyTokens.get(replyToken);
+    // clean old entries opportunistically
+    for (const [token, ts] of LineBotAPI.recentReplyTokens) {
+      if (now - ts > LineBotAPI.REPLY_TOKEN_TTL_MS) {
+        LineBotAPI.recentReplyTokens.delete(token);
+      }
+    }
+
+    if (last && now - last < LineBotAPI.REPLY_TOKEN_TTL_MS) {
+      console.warn('[LineBotAPI] Duplicate replyMessage suppressed for replyToken', this.maskToken(replyToken));
+      return;
+    }
+    LineBotAPI.recentReplyTokens.set(replyToken, now);
+
+    if (this.skipLineApi) {
+      const body = {
+        replyToken,
+        messages: messages.slice(0, 5),
+      };
+      this.logSkip('replyMessage', body);
+      return;
+    }
     const url = `${this.baseUrl}/message/reply`;
     const headers = {
       'Content-Type': 'application/json',
@@ -70,8 +183,10 @@ export class LineBotAPI {
 
     const body = {
       replyToken,
-      messages: messages.slice(0, 5), // LINE限制最多5則訊息
+      messages: messages.slice(0, 5),
     };
+
+    this.logRequest('replyMessage', body);
 
     try {
       const response = await fetch(url, {
@@ -81,16 +196,27 @@ export class LineBotAPI {
       });
 
       if (!response.ok) {
-        throw new Error(`LINE API Error: ${response.status}`);
+        await this.logAndThrow('replyMessage', response, body);
       }
+
+      console.debug('[LineBotAPI] replyMessage sent successfully', { status: response.status });
+
     } catch (error) {
-      console.error('Failed to send reply message:', error);
+      console.error('[LineBotAPI] Failed to send reply message:', error);
       throw error;
     }
   }
 
   // Send push message
   async pushMessage(userId: string, messages: LineMessage[]): Promise<void> {
+    if (this.skipLineApi) {
+      const body = {
+        to: userId,
+        messages: messages.slice(0, 5),
+      };
+      this.logSkip('pushMessage', body);
+      return;
+    }
     const url = `${this.baseUrl}/message/push`;
     const headers = {
       'Content-Type': 'application/json',
@@ -102,6 +228,8 @@ export class LineBotAPI {
       messages: messages.slice(0, 5),
     };
 
+    this.logRequest('pushMessage', body);
+
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -110,19 +238,58 @@ export class LineBotAPI {
       });
 
       if (!response.ok) {
-        throw new Error(`LINE API Error: ${response.status}`);
+        await this.logAndThrow('pushMessage', response, body);
       }
+
+      console.debug('[LineBotAPI] pushMessage sent successfully', { status: response.status });
     } catch (error) {
-      console.error('Failed to send push message:', error);
+      console.error('[LineBotAPI] Failed to send push message:', error);
       throw error;
     }
   }
 
   // Get user profile
   async getUserProfile(userId: string): Promise<any> {
+    if (this.skipLineApi) {
+      const mock = { userId, displayName: 'Emulator User', pictureUrl: '' };
+      console.log('[LineBotAPI] getUserProfile skipped (mock mode)', mock);
+      return mock;
+    }
     const url = `${this.baseUrl}/profile/${userId}`;
     const headers = {
       'Authorization': `Bearer ${this.accessToken}`,
+    };
+
+    this.logRequest('getUserProfile', { userId });
+
+    try {
+      const response = await fetch(url, {
+        method: 'GET',
+        headers,
+      });
+
+      if (!response.ok) {
+        await this.logAndThrow('getUserProfile', response, { userId });
+      }
+
+      const profile = await response.json();
+      console.debug('[LineBotAPI] getUserProfile fetched', this.sanitisePayload({ userId, status: response.status }));
+      return profile;
+    } catch (error) {
+      console.error('[LineBotAPI] Failed to get user profile:', error);
+      throw error;
+    }
+  }
+
+  async getMessageContent(messageId: string): Promise<Buffer> {
+    if (this.skipLineApi) {
+      console.log('[LineBotAPI] getMessageContent skipped (mock mode)', { messageId });
+      return Buffer.alloc(0);
+    }
+
+    const url = `https://api-data.line.me/v2/bot/message/${messageId}/content`;
+    const headers = {
+      Authorization: `Bearer ${this.accessToken}`,
     };
 
     try {
@@ -132,12 +299,13 @@ export class LineBotAPI {
       });
 
       if (!response.ok) {
-        throw new Error(`LINE API Error: ${response.status}`);
+        await this.logAndThrow('getMessageContent', response, { messageId });
       }
 
-      return await response.json();
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer);
     } catch (error) {
-      console.error('Failed to get user profile:', error);
+      console.error('[LineBotAPI] Failed to get message content:', error);
       throw error;
     }
   }
@@ -155,7 +323,7 @@ export class MessageTemplates {
       {
         type: 'template',
         altText: 'Farm2Market AI 功能選單',
-        contents: {
+        template: {
           type: 'buttons',
           title: 'Farm2Market AI',
           text: '選擇您需要的功能',
@@ -372,7 +540,7 @@ export class MessageTemplates {
       {
         type: 'template',
         altText: '補貨提醒選項',
-        contents: {
+        template: {
           type: 'confirm',
           text: `發送補貨提醒給 ${storeName}？`,
           actions: [

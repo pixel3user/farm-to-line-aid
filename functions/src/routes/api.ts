@@ -1,5 +1,6 @@
 import express, { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
+import runtimeConfig from "../lib/runtimeConfig";
 // removed eager admin import to avoid startup crashes
 import { WebhookHandler } from "../api/webhookHandler";
 import {
@@ -16,7 +17,7 @@ const useMockLineApis =
   process.env.USE_MOCK_LINE !== "false";
 
 const verifyLineWebhook = (req: Request, res: Response, next: NextFunction) => {
-  const channelSecret = process.env.LINE_CHANNEL_SECRET || "";
+  const channelSecret = runtimeConfig.lineChannelSecret || "";
   const signature = req.headers["x-line-signature"] as string | undefined;
 
   if (!signature || !channelSecret) {

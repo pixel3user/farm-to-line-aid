@@ -1,11 +1,49 @@
 // LINE Bot Webhook Handler for Farm2Market AI
 import { LineBotAPI, MessageTemplates, WebhookEvent, LineMessage } from './lineBot';
+import { generateOutOfScopeAnswer, generateConversationPlan, analyzeImageWithGemini } from '../lib/gemini-client';
+import type { ConversationHistoryItem } from '../lib/gemini-client';
+import { ConversationStore } from '../lib/conversationStore';
+import DatabaseService from '../lib/database-server';
+import admin from '../lib/firebaseAdmin';
+import sharp from 'sharp';
+
+interface TextContext {
+  replyToken: string;
+  text: string;
+  userId: string;
+  rawEvent: WebhookEvent;
+  history?: ConversationHistoryItem[];
+}
+
+const HISTORY_TEXT_LIMIT = 2000;
+const IMAGE_COLLECTION = 'images';
 
 export class WebhookHandler {
   private lineBot: LineBotAPI;
 
   constructor() {
     this.lineBot = new LineBotAPI();
+  }
+
+  private debugEvent(event: WebhookEvent): void {
+    try {
+      const summary = {
+        type: event.type,
+        replyToken: event.replyToken ? `${event.replyToken.slice(0, 6)}...${event.replyToken.slice(-4)}` : undefined,
+        sourceType: event.source?.type,
+        userId: event.source?.userId,
+        messageType: event.message?.type,
+        textPreview:
+          event.message?.type === 'text' && event.message?.text
+            ? event.message.text.slice(0, 160)
+            : undefined,
+        postbackData: event.postback?.data,
+      };
+
+      console.debug('[WebhookHandler] Event payload summary', summary);
+    } catch (loggingError) {
+      console.warn('[WebhookHandler] Failed to log event summary', loggingError);
+    }
   }
 
   // Main webhook event handler
@@ -17,6 +55,7 @@ export class WebhookHandler {
   // Handle individual webhook event
   private async handleSingleEvent(event: WebhookEvent): Promise<void> {
     console.log('Processing event:', event.type);
+    this.debugEvent(event);
 
     try {
       switch (event.type) {
@@ -41,120 +80,585 @@ export class WebhookHandler {
   private async handleFollow(event: WebhookEvent): Promise<void> {
     if (!event.replyToken) return;
 
+    console.debug('[WebhookHandler] handleFollow triggered', {
+      userId: event.source?.userId,
+      replyToken: `${event.replyToken.slice(0, 6)}...${event.replyToken.slice(-4)}`,
+    });
+
+    // Upsert Firestore user profile using server-side admin SDK
+    try {
+      const userId = event.source?.userId;
+      if (userId) {
+        let displayName: string | undefined;
+        let pictureUrl: string | undefined;
+        try {
+          const profile = await this.lineBot.getUserProfile(userId);
+          displayName = profile?.displayName;
+          pictureUrl = profile?.pictureUrl;
+        } catch (profileErr) {
+          console.warn('[WebhookHandler] Failed to fetch LINE profile on follow', profileErr);
+        }
+
+        await DatabaseService.upsertLineUser({
+          lineUserId: userId,
+          displayName,
+          pictureUrl,
+        });
+      }
+    } catch (err) {
+      console.error('[WebhookHandler] Failed to upsert user on follow', err);
+    }
+
     const welcomeMessages = MessageTemplates.welcomeMessage();
     await this.lineBot.replyMessage(event.replyToken, welcomeMessages);
+    console.debug('[WebhookHandler] handleFollow welcome message queue complete');
   }
 
   // Handle web app access request
-  private async handleWebAppAccess(event: WebhookEvent): Promise<void> {
-    if (!event.replyToken || !event.source?.userId) return;
+  private async handleWebAppAccess(event: WebhookEvent, introMessage?: string): Promise<LineMessage[]> {
+    if (!event.replyToken || !event.source?.userId) return [];
 
     try {
-      // Get user profile from LINE
       const userProfile = await this.lineBot.getUserProfile(event.source.userId);
-      
-      // Create web app URL with user parameters
       const webAppUrl = `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?userId=${userProfile.userId}&displayName=${encodeURIComponent(userProfile.displayName)}&pictureUrl=${encodeURIComponent(userProfile.pictureUrl || '')}`;
-      
-      const messages: LineMessage[] = [{
-        type: 'text',
-        text: '正在為您開啟 Farm2Market AI 管理介面...'
-      }, {
-        type: 'text',
-        text: `點擊下方連結進入您的專屬管理面板：\n\n${webAppUrl}`
-      }];
+
+      const messages: LineMessage[] = [
+        ...(introMessage ? [{ type: 'text' as const, text: introMessage }] : []),
+        {
+          type: 'text' as const,
+          text: 'Launching your Farm2Market dashboard...',
+        },
+        {
+          type: 'text' as const,
+          text: `Tap the link below to open your Farm2Market control panel:\n\n${webAppUrl}`,
+        },
+      ];
 
       await this.lineBot.replyMessage(event.replyToken, messages);
+      return messages;
     } catch (error) {
       console.error('Error handling web app access:', error);
-      const errorMessage = [{
-        type: 'text' as const,
-        text: '無法開啟管理介面，請稍後再試。'
-      }];
+      const errorMessage: LineMessage[] = [
+        {
+          type: 'text' as const,
+          text: 'Unable to open the dashboard right now. Please try again shortly.',
+        },
+      ];
       await this.lineBot.replyMessage(event.replyToken, errorMessage);
+      return errorMessage;
     }
   }
-
   // Handle text/image messages
   private async handleMessage(event: WebhookEvent): Promise<void> {
     if (!event.replyToken || !event.message) return;
 
     const { message } = event;
+    const replyTokenPreview = `${event.replyToken.slice(0, 6)}...${event.replyToken.slice(-4)}`;
+    const messageSummary = {
+      type: message.type,
+      textPreview: message.type === 'text' ? message.text?.slice(0, 160) : undefined,
+      messageId: message.id,
+    };
+    console.debug('[WebhookHandler] handleMessage dispatched', {
+      replyToken: replyTokenPreview,
+      ...messageSummary,
+    });
 
-    if (message.type === 'text' && message.text) {
-      await this.handleTextMessage(event.replyToken, message.text, event.source.userId);
+    if (message.type === 'text') {
+      await this.handleTextMessage(event);
     } else if (message.type === 'image') {
-      await this.handleImageMessage(event.replyToken, message.id || '', event.source.userId);
+      await this.handleImageMessage(event);
     }
   }
 
-  // Handle text messages with AI processing
-  private async handleTextMessage(replyToken: string, text: string, userId: string): Promise<void> {
-    const lowerText = text.toLowerCase();
+  private async handleTextMessage(event: WebhookEvent): Promise<void> {
+    if (!event.replyToken || event.message?.type !== 'text' || !event.message.text || !event.source?.userId) {
+      return;
+    }
 
-    // Command recognition
-    if (lowerText.includes('產品') || lowerText.includes('product')) {
-      await this.handleProductInquiry(replyToken);
-    } else if (lowerText.includes('店家') || lowerText.includes('store')) {
-      await this.handleStoreInquiry(replyToken);
-    } else if (lowerText.includes('行銷') || lowerText.includes('marketing')) {
-      await this.handleMarketingInquiry(replyToken);
-    } else if (lowerText.includes('報告') || lowerText.includes('analytics')) {
-      await this.handleAnalyticsInquiry(replyToken);
-    } else if (lowerText.includes('管理') || lowerText.includes('dashboard') || lowerText.includes('管理介面')) {
-      await this.handleWebAppAccess({ replyToken, source: { userId } } as WebhookEvent);
-    } else if (lowerText.includes('幫助') || lowerText.includes('help')) {
-      await this.handleHelpInquiry(replyToken);
-    } else {
-      // Default AI response
-      await this.handleGeneralInquiry(replyToken, text);
+    const context: TextContext = {
+      replyToken: event.replyToken,
+      text: event.message.text,
+      userId: event.source.userId,
+      rawEvent: event,
+    };
+    context.history = await ConversationStore.getRecentTurns(context.userId);
+
+    const textPreview = context.text.length > 160 ? `${context.text.slice(0, 157)}...` : context.text;
+    console.debug('[WebhookHandler] handleTextMessage received', {
+      userId: context.userId,
+      replyToken: `${context.replyToken.slice(0, 6)}...${context.replyToken.slice(-4)}`,
+      text: textPreview,
+    });
+
+    const handled = await this.handleTextWithGemini(context);
+
+    if (!handled) {
+      console.debug('[WebhookHandler] Gemini returned no actionable plan, falling back to general inquiry handler');
+      const messages = await this.handleGeneralInquiry(context.replyToken, context.text.trim() || context.text, context.history);
+      await this.persistConversation(context, messages);
     }
   }
 
-  // Handle image messages (for product photos)
-  private async handleImageMessage(replyToken: string, messageId: string, userId: string): Promise<void> {
-    const responseMessages = [
+  private async handleTextWithGemini(context: TextContext): Promise<boolean> {
+    const { replyToken, text, userId, rawEvent } = context;
+    const trimmedText = text.trim();
+    if (!trimmedText) {
+      return false;
+    }
+
+    let replied = false;
+
+    try {
+      const history = context.history ?? (await ConversationStore.getRecentTurns(userId));
+      context.history = history;
+
+      const plan = await generateConversationPlan({ message: trimmedText, history });
+      let introMessage = plan.text;
+
+      if (plan.functionCalls.length) {
+        for (const call of plan.functionCalls) {
+          const callIntro = introMessage;
+          introMessage = undefined;
+
+          let responseMessages: LineMessage[] | undefined;
+
+          switch (call.name) {
+            case 'show_product_tools':
+              console.debug('[WebhookHandler] Gemini selected product tools');
+              responseMessages = await this.handleProductInquiry(replyToken, callIntro);
+              break;
+            case 'show_store_tools':
+              console.debug('[WebhookHandler] Gemini selected store tools');
+              responseMessages = await this.handleStoreInquiry(replyToken, callIntro);
+              break;
+            case 'show_marketing_tools':
+              console.debug('[WebhookHandler] Gemini selected marketing tools');
+              responseMessages = await this.handleMarketingInquiry(replyToken, callIntro);
+              break;
+            case 'show_analytics_tools':
+              console.debug('[WebhookHandler] Gemini selected analytics tools');
+              responseMessages = await this.handleAnalyticsInquiry(replyToken, callIntro);
+              break;
+            case 'open_dashboard':
+              console.debug('[WebhookHandler] Gemini selected dashboard access');
+              responseMessages = await this.handleWebAppAccess({ ...rawEvent, replyToken, source: { ...rawEvent.source, userId } } as WebhookEvent, callIntro);
+              break;
+            case 'show_help_options':
+              console.debug('[WebhookHandler] Gemini selected help options');
+              responseMessages = await this.handleHelpInquiry(replyToken, callIntro);
+              break;
+            default:
+              console.warn('[WebhookHandler] Gemini returned unknown function call', call.name);
+              break;
+          }
+
+          if (responseMessages && responseMessages.length) {
+            await this.persistConversation(context, responseMessages);
+            return true;
+          }
+        }
+      }
+
+      if (plan.text) {
+        console.debug('[WebhookHandler] Gemini returned direct answer text');
+        const messages: LineMessage[] = [
+          {
+            type: 'text',
+            text: plan.text,
+          },
+        ];
+        await this.lineBot.replyMessage(replyToken, messages);
+        replied = true;
+        try {
+          await this.persistConversation(context, messages);
+        } catch (persistError) {
+          console.warn('[WebhookHandler] Failed to persist conversation after reply:', persistError);
+        }
+        return true;
+      }
+    } catch (error) {
+      console.error('[WebhookHandler] Gemini conversation plan failed:', error);
+      if (replied) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private async handleImageMessage(event: WebhookEvent): Promise<void> {
+    if (!event.replyToken || event.message?.type !== 'image' || !event.message.id || !event.source?.userId) {
+      return;
+    }
+
+    const userId = event.source.userId;
+    const context: TextContext = {
+      replyToken: event.replyToken,
+      text: `[Image uploaded: ${event.message.id}]`,
+      userId,
+      rawEvent: event,
+    };
+
+    try {
+      const rawImage = await this.lineBot.getMessageContent(event.message.id);
+      if (!rawImage.length) {
+        throw new Error('Received empty image buffer from LINE API');
+      }
+
+      const optimizedImage = await sharp(rawImage).rotate().jpeg({ quality: 70 }).toBuffer();
+      const bucket = admin.storage().bucket();
+      const filePath = `line_user_images/${userId}/${Date.now()}-${event.message.id}.jpg`;
+      const file = bucket.file(filePath);
+
+      await file.save(optimizedImage, {
+        contentType: 'image/jpeg',
+        resumable: false,
+        metadata: { cacheControl: 'public,max-age=31536000' },
+      });
+
+      const [signedUrl] = await file.getSignedUrl({
+        action: 'read',
+        expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
+      });
+
+      await admin
+        .firestore()
+        .collection('line_users')
+        .doc(userId)
+        .collection(IMAGE_COLLECTION)
+        .add({
+          messageId: event.message.id,
+          storagePath: filePath,
+          downloadUrl: signedUrl,
+          size: optimizedImage.length,
+          contentType: 'image/jpeg',
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+      const history = await ConversationStore.getRecentTurns(userId);
+      context.history = history;
+
+      const analysis = await analyzeImageWithGemini({
+        base64Image: optimizedImage.toString('base64'),
+        history,
+        prompt: 'Describe this farm-related image and suggest how Farm2Market AI can help the user act on it.',
+      });
+
+      const responseMessages: LineMessage[] = [
+        { type: 'text', text: analysis },
+        {
+          type: 'template',
+          altText: 'Image actions',
+          template: {
+            type: 'buttons',
+            title: 'Use this image',
+            text: 'Choose what to do next with your image.',
+            actions: [
+              {
+                type: 'postback',
+                label: 'Create flyer',
+                data: `action=create_flyer&image=${encodeURIComponent(filePath)}`,
+              },
+              {
+                type: 'postback',
+                label: 'Shelf card',
+                data: `action=create_shelf_card&image=${encodeURIComponent(filePath)}`,
+              },
+              {
+                type: 'postback',
+                label: 'Recipe card',
+                data: `action=create_recipe_card&image=${encodeURIComponent(filePath)}`,
+              },
+            ],
+          },
+        },
+      ];
+
+      await this.lineBot.replyMessage(event.replyToken, responseMessages);
+      await this.persistConversation({ ...context, text: `[Image stored: ${filePath}]` }, responseMessages);
+    } catch (error) {
+      console.error('Failed to handle image message:', error);
+      const fallback: LineMessage[] = [
+        {
+          type: 'text' as const,
+          text: 'Sorry, I could not process that image. Please try again or send a different photo.',
+        },
+      ];
+      await this.lineBot.replyMessage(event.replyToken, fallback);
+      await this.persistConversation(context, fallback);
+    }
+  }
+
+  private getProductInquiryMessages(): LineMessage[] {
+    return [
       {
         type: 'text' as const,
-        text: '📸 收到您的產品照片！\n\nAI 正在分析照片內容...\n• 自動優化圖片品質\n• 生成產品描述\n• 建立行銷素材\n\n請稍候，處理完成後會通知您。'
+        text: `📦 Product tools overview
+
+• Add or edit products in seconds
+• Track live inventory and restock risk
+• Let AI schedule replenishment reminders
+• Improve product photos and descriptions
+
+Choose an option below to continue.`,
       },
       {
         type: 'template' as const,
-        altText: '照片處理選項',
+        altText: 'Product tools quick menu',
         contents: {
           type: 'buttons',
-          title: '照片處理選項',
-          text: '您想要建立什麼類型的行銷素材？',
+          title: 'Product tools',
+          text: 'What can I help you with?',
           actions: [
             {
-              type: 'postback',
-              label: '📄 產品傳單',
-              data: `action=create_flyer&image=${messageId}`
+              type: 'uri',
+              label: 'Manage products',
+              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=products`
             },
             {
               type: 'postback',
-              label: '🏷️ 貨架標籤',
-              data: `action=create_shelf_card&image=${messageId}`
-            },
-            {
-              type: 'postback',
-              label: '👨‍🍳 食譜卡片',
-              data: `action=create_recipe_card&image=${messageId}`
+              label: 'Inventory insights',
+              data: 'action=stock_analysis'
             }
           ]
         }
       }
     ];
-
-    await this.lineBot.replyMessage(replyToken, responseMessages);
   }
 
-  // Handle postback events (button clicks)
+  private async handleProductInquiry(replyToken: string, introMessage?: string): Promise<LineMessage[]> {
+    const messages = introMessage
+      ? [{ type: 'text' as const, text: introMessage }, ...this.getProductInquiryMessages()]
+      : this.getProductInquiryMessages();
+
+    await this.lineBot.replyMessage(replyToken, messages);
+    return messages;
+  }
+
+  private getStoreInquiryMessages(): LineMessage[] {
+    return [
+      {
+        type: 'text' as const,
+        text: `🏪 Store outreach tools
+
+• Discover nearby retailers
+• Send polished introductions in one tap
+• Track relationship status and next steps
+• Review order frequency and follow-ups
+
+Select what you need help with below.`,
+      },
+      {
+        type: 'template' as const,
+        altText: 'Store outreach quick menu',
+        contents: {
+          type: 'buttons',
+          title: 'Store outreach',
+          text: 'Pick a shortcut',
+          actions: [
+            {
+              type: 'uri',
+              label: 'Find new buyers',
+              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores&action=find`
+            },
+            {
+              type: 'uri',
+              label: 'Manage CRM',
+              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores`
+            }
+          ]
+        }
+      }
+    ];
+  }
+
+  private async handleStoreInquiry(replyToken: string, introMessage?: string): Promise<LineMessage[]> {
+    const messages = introMessage
+      ? [{ type: 'text' as const, text: introMessage }, ...this.getStoreInquiryMessages()]
+      : this.getStoreInquiryMessages();
+
+    await this.lineBot.replyMessage(replyToken, messages);
+    return messages;
+  }
+
+  private getMarketingInquiryMessages(): LineMessage[] {
+    return [
+      {
+        type: 'text' as const,
+        text: `📱 Marketing studio
+
+• Auto-generate product flyers
+• Draft social captions in seconds
+• Build recipe or shelf cards
+• Collect campaign ideas and schedules
+
+Let me know what you want to create.`,
+      },
+      {
+        type: 'template' as const,
+        altText: 'Marketing tools quick menu',
+        contents: {
+          type: 'buttons',
+          title: 'Marketing tools',
+          text: 'Choose a creative task',
+          actions: [
+            {
+              type: 'uri',
+              label: 'Generate campaign',
+              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=marketing&action=generate`
+            },
+            {
+              type: 'uri',
+              label: 'Copywriting help',
+              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=marketing&action=copywriting`
+            }
+          ]
+        }
+      }
+    ];
+  }
+
+  private async handleMarketingInquiry(replyToken: string, introMessage?: string): Promise<LineMessage[]> {
+    const messages = introMessage
+      ? [{ type: 'text' as const, text: introMessage }, ...this.getMarketingInquiryMessages()]
+      : this.getMarketingInquiryMessages();
+
+    await this.lineBot.replyMessage(replyToken, messages);
+    return messages;
+  }
+
+  private getAnalyticsInquiryMessages(): LineMessage[] {
+    const summaryData = {
+      orders: 3,
+      revenue: 2400,
+      newLeads: 1,
+      pendingTasks: 2,
+    };
+
+    return [MessageTemplates.dailySummary(summaryData)];
+  }
+
+  private async handleAnalyticsInquiry(replyToken: string, introMessage?: string): Promise<LineMessage[]> {
+    const baseMessages = this.getAnalyticsInquiryMessages();
+    const messages = introMessage
+      ? [{ type: 'text' as const, text: introMessage }, ...baseMessages]
+      : baseMessages;
+
+    await this.lineBot.replyMessage(replyToken, messages);
+    return messages;
+  }
+
+  private getHelpInquiryMessages(): LineMessage[] {
+    return [
+      {
+        type: 'text' as const,
+        text: `🤖 Farm2Market AI quick guide
+
+📦 Product management: keep listings and inventory synced
+🏪 Store outreach: find and nurture buyers
+📱 Marketing tools: auto-generate content and flyers
+📈 Analytics: track performance and reminders
+
+Tips:
+• Upload product photos to get instant marketing assets
+• AI reminders highlight the next best action
+• Supports Traditional Chinese and English responses`,
+      }
+    ];
+  }
+
+  private async handleHelpInquiry(replyToken: string, introMessage?: string): Promise<LineMessage[]> {
+    const messages = introMessage
+      ? [{ type: 'text' as const, text: introMessage }, ...this.getHelpInquiryMessages()]
+      : this.getHelpInquiryMessages();
+
+    await this.lineBot.replyMessage(replyToken, messages);
+    return messages;
+  }
+
+  private async handleGeneralInquiry(replyToken: string, text: string, history?: ConversationHistoryItem[]): Promise<LineMessage[]> {
+    console.debug('[WebhookHandler] handleGeneralInquiry using Gemini fallback');
+
+    let aiReply = '';
+
+    try {
+      aiReply = await generateOutOfScopeAnswer({ message: text, history });
+    } catch (error) {
+      console.error('[WebhookHandler] Gemini response failed:', error);
+      aiReply = 'Thanks for your question! I do not have that information right now, but you can reach our Farm2Market support team for more help.';
+    }
+
+    const messages: LineMessage[] = [
+      {
+        type: 'text' as const,
+        text: aiReply,
+      },
+    ];
+
+    await this.lineBot.replyMessage(replyToken, messages);
+    return messages;
+  }
+
+  private async persistConversation(context: TextContext, assistantMessages: LineMessage[]): Promise<void> {
+    const userEntry = context.text.trim().slice(0, HISTORY_TEXT_LIMIT);
+    const assistantEntry = this.convertMessagesToHistoryText(assistantMessages).trim();
+
+    if (!userEntry && !assistantEntry) {
+      return;
+    }
+
+    const turns: { role: 'user' | 'assistant'; text: string }[] = [];
+
+    if (userEntry) {
+      turns.push({ role: 'user', text: userEntry });
+    }
+
+    if (assistantEntry) {
+      turns.push({ role: 'assistant', text: assistantEntry });
+    }
+
+    if (!turns.length) {
+      return;
+    }
+
+    await ConversationStore.appendTurns(context.userId, turns);
+  }
+
+  private convertMessagesToHistoryText(messages: LineMessage[]): string {
+    const parts: string[] = [];
+
+    for (const message of messages) {
+      switch (message.type) {
+        case 'text':
+          if (message.text) {
+            parts.push(message.text);
+          }
+          break;
+        case 'template':
+        case 'flex':
+          if (message.altText) {
+            parts.push(message.altText);
+          } else {
+            parts.push(`[${message.type} message]`);
+          }
+          break;
+        default:
+          parts.push(`[${message.type} message]`);
+          break;
+      }
+    }
+
+    return parts.join('\n\n').slice(0, HISTORY_TEXT_LIMIT);
+  }
+
+
+  // Postback action handlers
   private async handlePostback(event: WebhookEvent): Promise<void> {
     if (!event.replyToken || !event.postback) return;
 
     const postbackData = this.parsePostbackData(event.postback.data);
-    
+
     switch (postbackData.action) {
       case 'send_intro':
         await this.handleSendIntro(event.replyToken, postbackData.store);
@@ -179,197 +683,12 @@ export class WebhookHandler {
     }
   }
 
-  // Specific handlers for different inquiries
-  private async handleProductInquiry(replyToken: string): Promise<void> {
-    const messages = [
-      {
-        type: 'text' as const,
-        text: '📦 產品管理功能\n\n• 新增產品資訊\n• 管理庫存狀態\n• AI 自動補貨提醒\n• 產品照片優化\n\n點選下方按鈕進入產品管理頁面。'
-      },
-      {
-        type: 'template' as const,
-        altText: '產品管理選項',
-        contents: {
-          type: 'buttons',
-          title: '產品管理',
-          text: '選擇您要執行的操作',
-          actions: [
-            {
-              type: 'uri',
-              label: '📦 管理產品',
-              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=products`
-            },
-            {
-              type: 'postback',
-              label: '📈 庫存分析',
-              data: 'action=stock_analysis'
-            }
-          ]
-        }
-      }
-    ];
-
-    await this.lineBot.replyMessage(replyToken, messages);
-  }
-
-  private async handleStoreInquiry(replyToken: string): Promise<void> {
-    const messages = [
-      {
-        type: 'text' as const,
-        text: '🏪 店家管理功能\n\n• AI 尋找潛在店家\n• 自動發送介紹信\n• 追蹤客戶關係\n• 訂單頻率分析\n\n讓 AI 幫您拓展業務！'
-      },
-      {
-        type: 'template' as const,
-        altText: '店家管理選項',
-        contents: {
-          type: 'buttons',
-          title: '店家管理',
-          text: '選擇您要執行的操作',
-          actions: [
-            {
-              type: 'uri',
-              label: '🔍 尋找新店家',
-              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores&action=find`
-            },
-            {
-              type: 'uri',
-              label: '📋 管理客戶',
-              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores`
-            }
-          ]
-        }
-      }
-    ];
-
-    await this.lineBot.replyMessage(replyToken, messages);
-  }
-
-  private async handleMarketingInquiry(replyToken: string): Promise<void> {
-    const messages = [
-      {
-        type: 'text' as const,
-        text: '📱 AI 行銷工具\n\n• 自動生成產品傳單\n• 建立社群媒體貼文\n• 食譜卡片設計\n• 多語言行銷文案\n\n只需上傳產品照片，AI 就能幫您建立專業行銷素材！'
-      },
-      {
-        type: 'template' as const,
-        altText: '行銷工具選項',
-        contents: {
-          type: 'buttons',
-          title: 'AI 行銷工具',
-          text: '開始建立行銷素材',
-          actions: [
-            {
-              type: 'uri',
-              label: '🎨 建立素材',
-              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=marketing`
-            },
-            {
-              type: 'text',
-              label: '📸 上傳產品照片',
-              text: '請上傳產品照片，我會幫您建立行銷素材'
-            }
-          ]
-        }
-      }
-    ];
-
-    await this.lineBot.replyMessage(replyToken, messages);
-  }
-
-  private async handleAnalyticsInquiry(replyToken: string): Promise<void> {
-    // Simulate daily summary data
-    const summaryData = {
-      orders: 3,
-      revenue: 2400,
-      newLeads: 1,
-      pendingTasks: 2
-    };
-
-    const summaryMessage = MessageTemplates.dailySummary(summaryData);
-    
-    await this.lineBot.replyMessage(replyToken, [summaryMessage]);
-  }
-
-  private async handleHelpInquiry(replyToken: string): Promise<void> {
-    const messages = [
-      {
-        type: 'text' as const,
-        text: '🤖 Farm2Market AI 使用指南\n\n📦 產品管理：管理農產品資訊和庫存\n🏪 店家開發：AI 協助尋找並聯繫潛在客戶\n📱 行銷工具：自動生成專業行銷素材\n📊 數據分析：追蹤業務表現和趨勢\n\n💡 小技巧：\n• 上傳產品照片可自動生成行銷素材\n• 系統會主動提醒最佳補貨時機\n• 支援中英文雙語行銷內容'
-      },
-      {
-        type: 'template' as const,
-        altText: '功能選單',
-        contents: {
-          type: 'carousel',
-          columns: [
-            {
-              title: '產品管理',
-              text: '管理農產品和庫存',
-              actions: [
-                {
-                  type: 'uri',
-                  label: '開始使用',
-                  uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=products`
-                }
-              ]
-            },
-            {
-              title: '店家開發',
-              text: 'AI協助客戶開發',
-              actions: [
-                {
-                  type: 'uri',
-                  label: '開始使用',
-                  uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores`
-                }
-              ]
-            },
-            {
-              title: '行銷工具',
-              text: '自動生成行銷素材',
-              actions: [
-                {
-                  type: 'uri',
-                  label: '開始使用',
-                  uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=marketing`
-                }
-              ]
-            }
-          ]
-        }
-      }
-    ];
-
-    await this.lineBot.replyMessage(replyToken, messages);
-  }
-
-  private async handleGeneralInquiry(replyToken: string, text: string): Promise<void> {
-    // Simple AI response logic
-    let response = '🤖 我是您的 Farm2Market AI 助理！\n\n';
-    
-    if (text.includes('雞蛋') || text.includes('蛋')) {
-      response += '看起來您想了解雞蛋相關的功能。我可以幫您：\n• 管理雞蛋產品資訊\n• 建立雞蛋行銷素材\n• 尋找蛋品批發商\n• 分析銷售數據';
-    } else if (text.includes('農場') || text.includes('養殖')) {
-      response += '我專門為農場主提供數位化銷售解決方案：\n• 產品數位化管理\n• 客戶關係維護\n• 自動化行銷\n• 業務數據分析';
-    } else {
-      response += '我能幫您管理農產品銷售的各個環節。請輸入以下關鍵字了解更多：\n\n📦 "產品" - 產品管理\n🏪 "店家" - 客戶開發\n📱 "行銷" - 行銷工具\n📊 "報告" - 數據分析\n❓ "幫助" - 使用指南';
-    }
-
-    const messages = [
-      {
-        type: 'text' as const,
-        text: response
-      }
-    ];
-
-    await this.lineBot.replyMessage(replyToken, messages);
-  }
-
-  // Postback action handlers
   private async handleSendIntro(replyToken: string, storeName?: string): Promise<void> {
     const message = {
       type: 'text' as const,
-      text: `✅ 自我介紹信已發送給 ${storeName || '目標店家'}！\n\nAI 已自動生成個人化的介紹內容，包含：\n• 農場簡介\n• 產品特色\n• 聯絡方式\n• 合作提案\n\n我會追蹤回覆狀況並適時提醒您跟進。`
+      text: `Here is an introduction you can share with ${storeName || 'your buyer'}:
+
+Hello! We are Farm2Market AI — ready to help streamline orders, keep products fresh, and deliver consistent quality. Let me know what you need and I’ll prepare everything for you.`,
     };
 
     await this.lineBot.replyMessage(replyToken, [message]);
@@ -378,7 +697,9 @@ export class WebhookHandler {
   private async handleSendReorderReminder(replyToken: string, storeName?: string, productName?: string): Promise<void> {
     const message = {
       type: 'text' as const,
-      text: `📧 補貨提醒已發送！\n\n已向 ${storeName || '客戶'} 發送 ${productName || '產品'} 的友善補貨提醒。\n\n提醒內容包含：\n• 上次訂購日期\n• 建議訂購數量\n• 特殊優惠資訊\n• 聯絡方式\n\n系統將追蹤回覆並通知您結果。`
+      text: `Reorder reminder drafted for ${storeName || 'your customer'}:
+
+Hi there! Just a friendly reminder that it's a great time to restock ${productName || 'your preferred items'}. Let me know the quantities you need and I’ll take care of it right away.`,
     };
 
     await this.lineBot.replyMessage(replyToken, [message]);
@@ -387,7 +708,7 @@ export class WebhookHandler {
   private async handleCreateFlyer(replyToken: string, imageId?: string): Promise<void> {
     const message = {
       type: 'text' as const,
-      text: `🎨 產品傳單製作中...\n\nAI 正在為您的產品照片建立專業傳單：\n• 自動去背優化\n• 添加產品資訊\n• 設計排版布局\n• 生成中英文版本\n\n預計 2-3 分鐘完成，完成後會傳送下載連結給您。`
+      text: 'I will create a marketing flyer with this image and send you a preview shortly.',
     };
 
     await this.lineBot.replyMessage(replyToken, [message]);
@@ -396,7 +717,7 @@ export class WebhookHandler {
   private async handleCreateShelfCard(replyToken: string, imageId?: string): Promise<void> {
     const message = {
       type: 'text' as const,
-      text: `🏷️ 貨架標籤製作中...\n\nAI 正在建立專業的貨架展示標籤：\n• 適合零售環境\n• 突出產品特色\n• 包含價格資訊\n• 二維碼追蹤\n\n完成後將提供列印就緒的檔案。`
+      text: 'A shelf card is on the way! I will format the pricing and highlights and share the final card soon.',
     };
 
     await this.lineBot.replyMessage(replyToken, [message]);
@@ -405,7 +726,7 @@ export class WebhookHandler {
   private async handleCreateRecipeCard(replyToken: string, imageId?: string): Promise<void> {
     const message = {
       type: 'text' as const,
-      text: `👨‍🍳 食譜卡片製作中...\n\nAI 正在建立以您的產品為主角的食譜卡片：\n• 健康營養資訊\n• 簡單料理方法\n• 精美圖文設計\n• 品牌宣傳整合\n\n這種內容通常能提升 70% 的客戶興趣！`
+      text: 'Great idea! I’ll prepare a recipe card featuring this product and send a draft once it is ready.',
     };
 
     await this.lineBot.replyMessage(replyToken, [message]);
@@ -414,7 +735,7 @@ export class WebhookHandler {
   private async handleSnoozeReminder(replyToken: string, storeName?: string): Promise<void> {
     const message = {
       type: 'text' as const,
-      text: `⏰ 提醒已延後\n\n${storeName || '客戶'} 的補貨提醒已設定為明天再次提醒。\n\n您也可以隨時在產品管理頁面手動發送提醒。`
+      text: `Understood. I’ll snooze reminders for ${storeName || 'this store'} and let you know when it is time to follow up again.`,
     };
 
     await this.lineBot.replyMessage(replyToken, [message]);

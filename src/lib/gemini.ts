@@ -7,9 +7,11 @@ import {
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY ?? '';
 
 const MODEL_IDS = {
-  flash: 'gemini-1.5-flash',
-  pro: 'gemini-1.5-pro'
+  flash: 'gemini-2.5-flash',
+  pro: 'gemini-2.0-pro-exp-02-05'
 } as const;
+const IMAGE_MODEL_ID = 'gemini-2.5-flash-image-preview';
+const IMAGE_ENDPOINT_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 const LANGUAGE_NAMES: Record<string, string> = {
   en: 'English',
@@ -19,7 +21,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
 const SAFETY_SETTINGS = [
   { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
   { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
-  { category: HarmCategory.HARM_CATEGORY_SEXUAL_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
   { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE }
 ] as const;
 
@@ -80,6 +82,22 @@ interface GenerateOptions {
   maxOutputTokens?: number;
 }
 
+export interface MarketingImageRequest {
+  prompt: string;
+  aspectRatio?: '1:1' | '3:4' | '4:3' | '9:16' | '16:9';
+  sampleCount?: number;
+  personGeneration?: 'dont_allow' | 'allow_adult' | 'allow_all';
+  negativePrompt?: string;
+}
+
+export interface GeneratedMarketingImage {
+  base64: string;
+  mimeType: string;
+  prompt: string;
+  aspectRatio: string;
+  safetyAttributes?: Array<Record<string, unknown>>;
+}
+
 class GeminiService {
   private client: GoogleGenerativeAI | null;
   private readonly modelId: string;
@@ -105,7 +123,7 @@ class GeminiService {
       contents: [{ role: 'user', parts: [{ text: prompt }]}],
       generationConfig: {
         temperature: options?.temperature ?? 0.7,
-        maxOutputTokens: options?.maxOutputTokens ?? 1024
+        maxOutputTokens: options?.maxOutputTokens ?? 2048
       },
       safetySettings: SAFETY_SETTINGS
     });
@@ -151,7 +169,7 @@ class GeminiService {
   private async generateStructuredOutput<T>(prompt: string, options?: GenerateOptions): Promise<T> {
     const response = await this.generateRaw(prompt, {
       temperature: options?.temperature ?? 0.6,
-      maxOutputTokens: options?.maxOutputTokens ?? 1400
+      maxOutputTokens: options?.maxOutputTokens ?? 2048
     });
 
     return this.parseJson<T>(response);
@@ -302,3 +320,128 @@ export const geminiService = new GeminiService('flash');
 export const geminiProService = new GeminiService('pro');
 
 export default GeminiService;
+
+class GeminiImageService {
+  private readonly apiKey = GEMINI_API_KEY;
+  private readonly modelId = IMAGE_MODEL_ID;
+  private client: GoogleGenerativeAI | null;
+
+  constructor() {
+    this.client = this.apiKey ? new GoogleGenerativeAI(this.apiKey) : null;
+  }
+
+  private ensureModel() {
+    if (!this.client) {
+      throw new Error('Gemini API key (VITE_GEMINI_API_KEY) is not configured.');
+    }
+
+    return this.client.getGenerativeModel({
+      model: this.modelId
+    });
+  }
+
+  async generateMarketingImages(request: MarketingImageRequest): Promise<GeneratedMarketingImage[]> {
+    const sampleCount = Math.min(Math.max(request.sampleCount ?? 2, 1), 4);
+    const aspectRatio = request.aspectRatio ?? '1:1';
+    const personGeneration = request.personGeneration ?? 'dont_allow';
+    const aspectRatioHint =
+      aspectRatio === '1:1'
+        ? 'Frame as a balanced square composition.'
+        : `Frame the scene using a ${aspectRatio} aspect ratio.`;
+    const peopleHint =
+      personGeneration === 'dont_allow'
+        ? 'Do not include people in the scene.'
+        : 'You may include people in the scene when it supports the story.';
+    const promptSegments = [
+      request.prompt,
+      aspectRatioHint,
+      peopleHint
+    ];
+
+    if (request.negativePrompt && request.negativePrompt.trim().length > 0) {
+      promptSegments.push(`Avoid: ${request.negativePrompt.trim()}`);
+    }
+
+    const finalPrompt = promptSegments.join('\n\n');
+
+    const results: GeneratedMarketingImage[] = [];
+
+    for (let index = 0; index < sampleCount; index += 1) {
+      const response = await fetch(`${IMAGE_ENDPOINT_BASE}/models/${this.modelId}:generateContent`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': this.apiKey
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: finalPrompt }]
+            }
+          ],
+          safetySettings: SAFETY_SETTINGS,
+          generationConfig: {
+            candidateCount: sampleCount
+          }
+        })
+      });
+
+      if (!response.ok) {
+        let message = `Gemini image generation failed with status ${response.status}`;
+        try {
+          const errorPayload = await response.json();
+          const details = errorPayload?.error?.message ?? JSON.stringify(errorPayload);
+          message = `${message}: ${details}`;
+        } catch {
+          const text = await response.text();
+          if (text) {
+            message = `${message}: ${text}`;
+          }
+        }
+        throw new Error(message);
+      }
+
+      const payload = await response.json();
+      const candidates: Array<{
+        content?: {
+          parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }>;
+        };
+        safetyRatings?: Array<Record<string, unknown>>;
+      }> = payload?.candidates ?? [];
+
+      for (const candidate of candidates) {
+        const inlinePart = candidate.content?.parts?.find((part) => part?.inlineData?.data);
+        const inlineData = inlinePart?.inlineData;
+
+        if (!inlineData?.data) {
+          continue;
+        }
+
+        results.push({
+          base64: inlineData.data,
+          mimeType: inlineData.mimeType ?? 'image/png',
+          prompt: request.prompt,
+          aspectRatio,
+          safetyAttributes: candidate.safetyRatings ?? []
+        });
+
+        if (results.length >= sampleCount) {
+          break;
+        }
+      }
+
+      if (results.length >= sampleCount) {
+        break;
+      }
+    }
+
+    if (!results.length) {
+      throw new Error('Gemini returned no image candidates.');
+    }
+
+    return results;
+  }
+}
+
+export const geminiImageService = new GeminiImageService();
