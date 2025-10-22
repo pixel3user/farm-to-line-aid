@@ -7,6 +7,9 @@ export interface LineMessage {
   altText?: string;
   contents?: any;
   template?: any;
+  quickReply?: {
+    items: Array<{ type: 'action'; action: any }>;
+  };
 }
 
 export interface WebhookEvent {
@@ -318,30 +321,30 @@ export class MessageTemplates {
     return [
       {
         type: 'text',
-        text: '🌾 歡迎使用 Farm2Market AI！\n您的智慧農業銷售助理已啟動。\n\n點選下方選單開始使用各項功能：\n📦 產品管理\n🏪 店家管理\n📱 行銷工具\n📊 數據分析'
+        text: '👋 Hi! Welcome to NexStore.\nWhat would you like to do today?'
       },
       {
         type: 'template',
-        altText: 'Farm2Market AI 功能選單',
+        altText: 'Main menu',
         template: {
           type: 'buttons',
-          title: 'Farm2Market AI',
-          text: '選擇您需要的功能',
+          title: 'NexStore',
+          text: 'Choose an option',
           actions: [
             {
               type: 'uri',
-              label: '📦 管理產品',
-              uri: `${LINE_CONFIG.LIFF_URL}?tab=products`
+              label: '🛒 Shop now',
+              uri: `${LINE_CONFIG.LIFF_URL}?tab=shop`
             },
             {
               type: 'uri',
-              label: '🏪 尋找店家',
-              uri: `${LINE_CONFIG.LIFF_URL}?tab=stores`
+              label: '📦 Track order',
+              uri: `${LINE_CONFIG.LIFF_URL}?tab=orders`
             },
             {
               type: 'uri',
-              label: '📱 行銷工具',
-              uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing`
+              label: '🎁 Offers',
+              uri: `${LINE_CONFIG.LIFF_URL}?tab=offers`
             }
           ]
         }
@@ -1232,6 +1235,122 @@ export class EnhancedMessageTemplates {
             }
           ]
         }
+      }
+    };
+  }
+
+  static mainQuickMenu(): LineMessage {
+    return {
+      type: 'text',
+      text: 'Choose an option:',
+      quickReply: {
+        items: [
+          { type: 'action', action: { type: 'postback', label: '🛒 Browse', data: 'action=browse_menu' } },
+          { type: 'action', action: { type: 'postback', label: '🔍 Search', data: 'action=search_prompt' } },
+          { type: 'action', action: { type: 'postback', label: '📦 Track Order', data: 'action=track_prompt' } },
+          { type: 'action', action: { type: 'postback', label: '💬 Support', data: 'action=support_menu' } },
+          { type: 'action', action: { type: 'postback', label: '🎁 Offers', data: 'action=offers' } },
+        ],
+      },
+    };
+  }
+
+  static categoryQuickReplies(): LineMessage {
+    return {
+      type: 'text',
+      text: 'Choose a category:',
+      quickReply: {
+        items: [
+          { type: 'action', action: { type: 'postback', label: '👟 Shoes', data: 'action=browse_category&cat=shoes' } },
+          { type: 'action', action: { type: 'postback', label: '👕 T-Shirts', data: 'action=browse_category&cat=t-shirts' } },
+          { type: 'action', action: { type: 'postback', label: '🎧 Accessories', data: 'action=browse_category&cat=accessories' } },
+        ],
+      },
+    };
+  }
+
+  static productCarousel(products: Array<{ id: string; name: string; price: number; currency: string; imageUrl: string }>): LineMessage {
+    return {
+      type: 'flex',
+      altText: 'Product list',
+      contents: {
+        type: 'carousel',
+        contents: products.slice(0, 10).map((p) => ({
+          type: 'bubble',
+          hero: {
+            type: 'image',
+            url: p.imageUrl,
+            size: 'full',
+            aspectRatio: '20:13',
+            aspectMode: 'cover'
+          },
+          body: {
+            type: 'box',
+            layout: 'vertical',
+            contents: [
+              { type: 'text', text: p.name, weight: 'bold', size: 'md', wrap: true },
+              { type: 'text', text: `${p.currency} ${p.price.toFixed(2)}`, color: '#666666', size: 'sm' }
+            ]
+          },
+          footer: {
+            type: 'box',
+            layout: 'vertical',
+            spacing: 'sm',
+            contents: [
+              {
+                type: 'button',
+                style: 'primary',
+                height: 'sm',
+                action: { type: 'uri', label: 'Buy Now', uri: `${LINE_CONFIG.LIFF_URL}?tab=shop&productId=${encodeURIComponent(p.id)}` }
+              },
+              {
+                type: 'button',
+                style: 'secondary',
+                height: 'sm',
+                action: { type: 'postback', label: 'Details', data: `action=product_detail&id=${encodeURIComponent(p.id)}` }
+              }
+            ]
+          }
+        }))
+      }
+    };
+  }
+
+  static orderStatusCard(orderId: string, status: string, eta?: string): LineMessage {
+    return {
+      type: 'flex',
+      altText: `Order ${orderId} status`,
+      contents: {
+        type: 'bubble',
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            { type: 'text', text: `Order #${orderId}`, weight: 'bold', size: 'lg' },
+            { type: 'text', text: `Status: ${status.replace(/_/g, ' ')}`, margin: 'md' },
+            ...(eta ? [{ type: 'text', text: `ETA: ${eta}`, size: 'sm', color: '#666666' }] : [])
+          ]
+        },
+        footer: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            { type: 'button', style: 'secondary', height: 'sm', action: { type: 'uri', label: 'View Order', uri: `${LINE_CONFIG.LIFF_URL}?tab=orders&orderId=${encodeURIComponent(orderId)}` } }
+          ]
+        }
+      }
+    };
+  }
+
+  static supportMenu(): LineMessage {
+    return {
+      type: 'text',
+      text: 'Support options:',
+      quickReply: {
+        items: [
+          { type: 'action', action: { type: 'postback', label: 'FAQs', data: 'action=support_faqs' } },
+          { type: 'action', action: { type: 'postback', label: 'Live Agent', data: 'action=support_agent' } }
+        ]
       }
     };
   }
