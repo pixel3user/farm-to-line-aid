@@ -1,12 +1,22 @@
 // LINE Bot API Integration for Farm2Market AI
 // This module handles LINE Messaging API interactions
 
+export interface QuickReplyItem {
+  type: 'action';
+  action: any;
+}
+
+export interface QuickReply {
+  items: QuickReplyItem[];
+}
+
 export interface LineMessage {
   type: 'text' | 'flex' | 'image' | 'template';
   text?: string;
   altText?: string;
   contents?: any;
   template?: any;
+  quickReply?: QuickReply;
 }
 
 export interface WebhookEvent {
@@ -119,7 +129,14 @@ export class LineBotAPI {
   }
 
   private logSkip(action: string, payload: Record<string, unknown>): void {
-    console.log(`[LineBotAPI] ${action} skipped (mock mode)`, this.sanitisePayload(payload));
+    const sanitised = this.sanitisePayload(payload);
+    console.log(`[LineBotAPI] ${action} skipped (mock mode)`, sanitised);
+    try {
+      const pretty = JSON.stringify(sanitised, null, 2);
+      console.log(`[LineBotAPI] ${action} payload (pretty)\n${pretty}`);
+    } catch {
+      // no-op
+    }
   }
 
   private logRequest(action: string, payload: Record<string, unknown>): void {
@@ -313,40 +330,161 @@ export class LineBotAPI {
 
 // Message Templates for Farm2Market AI
 export class MessageTemplates {
-  // Welcome message for new users
-  static welcomeMessage(): LineMessage[] {
-    return [
-      {
-        type: 'text',
-        text: '🌾 歡迎使用 Farm2Market AI！\n您的智慧農業銷售助理已啟動。\n\n點選下方選單開始使用各項功能：\n📦 產品管理\n🏪 店家管理\n📱 行銷工具\n📊 數據分析'
-      },
-      {
-        type: 'template',
-        altText: 'Farm2Market AI 功能選單',
-        template: {
-          type: 'buttons',
-          title: 'Farm2Market AI',
-          text: '選擇您需要的功能',
-          actions: [
+  private static isCJK(text: string): boolean {
+    return /[\u3400-\u9FFF\uF900-\uFAFF]/.test(text);
+  }
+
+  // Personalized, conversational welcome for new users
+  static welcomeMessagePersonalized(displayName?: string): LineMessage[] {
+    let name = '';
+    if (displayName && displayName.trim()) {
+      name = this.isCJK(displayName) ? `${displayName.trim()}，` : `${displayName.trim()}, `;
+    }
+    const text: LineMessage = {
+      type: 'text',
+      text: `🌾 ${name}歡迎使用 Farm2Market AI！\n我是您的 LINE 助理，會盡量在這裡完成事情，不需要跳去網站。\n\n先告訴我：您是「賣家/農友」還是「市場/買家」？`
+    };
+
+    const overview: LineMessage = {
+      type: 'flex',
+      altText: 'Farm2Market AI 介紹與快速操作',
+      contents: {
+        type: 'bubble',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            { type: 'text', text: '🚀 功能導覽', weight: 'bold', color: '#ffffff', size: 'lg' }
+          ],
+          backgroundColor: '#1DB446'
+        },
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          contents: [
+            { type: 'text', text: '賣家/農友：', weight: 'bold' },
+            { type: 'text', text: '• 建立/管理產品、庫存與價格' },
+            { type: 'text', text: '• 生成行銷海報與文案' },
+            { type: 'text', text: '• 設定補貨提醒與客戶追蹤' },
+            { type: 'separator', margin: 'md' },
+            { type: 'text', text: '市場/買家/市場主：', weight: 'bold' },
+            { type: 'text', text: '• 瀏覽供應、建立採購清單' },
+            { type: 'text', text: '• 與賣家對接、管理店家名單' },
+            { type: 'text', text: '• 查看即時統計與最佳行動' }
+          ]
+        },
+        footer: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          contents: [
             {
-              type: 'uri',
-              label: '📦 管理產品',
-              uri: `${LINE_CONFIG.LIFF_URL}?tab=products`
+              type: 'button',
+              style: 'primary',
+              height: 'sm',
+              action: { type: 'postback', label: '我是賣家/農友', data: 'action=set_role&role=farmer' }
             },
             {
-              type: 'uri',
-              label: '🏪 尋找店家',
-              uri: `${LINE_CONFIG.LIFF_URL}?tab=stores`
-            },
-            {
-              type: 'uri',
-              label: '📱 行銷工具',
-              uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing`
+              type: 'button',
+              style: 'secondary',
+              height: 'sm',
+              action: { type: 'postback', label: '我是市場/買家', data: 'action=set_role&role=market' }
             }
           ]
         }
       }
+    };
+
+    const quickReply: LineMessage = {
+      type: 'text',
+      text: '您也可以直接告訴我想做什麼，例如「新增雞蛋 120/斤、20 箱」。',
+      quickReply: {
+        items: [
+          { type: 'action', action: { type: 'message', label: '📦 管理產品', text: '我要管理產品' } },
+          { type: 'action', action: { type: 'message', label: '🏪 拓展店家', text: '協助拓展店家' } },
+          { type: 'action', action: { type: 'message', label: '📱 行銷素材', text: '我要行銷建議' } },
+          { type: 'action', action: { type: 'message', label: '📊 看統計', text: '查看營運分析' } }
+        ]
+      }
+    };
+
+    return [text, overview, quickReply];
+  }
+
+  static roleNextSteps(role: 'farmer' | 'market'): LineMessage[] {
+    const header = {
+      type: 'box',
+      layout: 'vertical',
+      contents: [ { type: 'text', text: '🧭 下一步建議', weight: 'bold', color: '#ffffff' } ],
+      backgroundColor: '#1DB446'
+    };
+
+    const bodyFarmer = [
+      { type: 'text', text: '適用於賣家/農友：', weight: 'bold' },
+      { type: 'text', text: '• 新增/管理產品與價格' },
+      { type: 'text', text: '• 盤點庫存、設定補貨提醒' },
+      { type: 'text', text: '• 生成行銷海報與文案' },
+      { type: 'text', text: '• 拓展店家、發送專業自我介紹' },
     ];
+
+    const bodyMarket = [
+      { type: 'text', text: '適用於市場/買家：', weight: 'bold' },
+      { type: 'text', text: '• 搜尋供應與比價' },
+      { type: 'text', text: '• 建立採購清單/需求' },
+      { type: 'text', text: '• 管理供應商名單與聯絡' },
+      { type: 'text', text: '• 查看即時統計與提醒' },
+    ];
+
+    const flex: LineMessage = {
+      type: 'flex',
+      altText: '下一步建議',
+      contents: {
+        type: 'bubble',
+        header,
+        body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: role === 'farmer' ? bodyFarmer : bodyMarket },
+        footer: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          contents: role === 'farmer'
+            ? [
+                { type: 'button', style: 'primary', height: 'sm', action: { type: 'message', label: '➕ 新增產品', text: '我要新增產品' } },
+                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '🏪 拓展店家', text: '協助拓展店家' } },
+                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '📱 行銷素材', text: '我要行銷建議' } },
+              ]
+            : [
+                { type: 'button', style: 'primary', height: 'sm', action: { type: 'message', label: '🔍 找供應', text: '我要找供應' } },
+                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '🧾 建立採購', text: '建立採購需求' } },
+                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '📊 看統計', text: '查看營運分析' } },
+              ]
+        }
+      }
+    };
+
+    const qrText: LineMessage = {
+      type: 'text',
+      text: role === 'farmer'
+        ? '告訴我要先做哪件事：例如「新增雞蛋 120/斤 20 箱」。'
+        : '告訴我您要找什麼：例如「我要找雞蛋供應，先看附近」。',
+      quickReply: {
+        items: role === 'farmer'
+          ? [
+              { type: 'action', action: { type: 'message', label: '新增產品', text: '我要新增產品' } },
+              { type: 'action', action: { type: 'message', label: '管理產品', text: '我要管理產品' } },
+              { type: 'action', action: { type: 'message', label: '拓展店家', text: '協助拓展店家' } },
+              { type: 'action', action: { type: 'message', label: '行銷素材', text: '我要行銷建議' } },
+            ]
+          : [
+              { type: 'action', action: { type: 'message', label: '找供應', text: '我要找供應' } },
+              { type: 'action', action: { type: 'message', label: '建立採購', text: '建立採購需求' } },
+              { type: 'action', action: { type: 'message', label: '管理供應商', text: '管理店家' } },
+              { type: 'action', action: { type: 'message', label: '看統計', text: '查看營運分析' } },
+            ]
+      }
+    };
+
+    return [flex, qrText];
   }
 
   // Product card template
@@ -439,7 +577,7 @@ export class MessageTemplates {
               action: {
                 type: 'uri',
                 label: '編輯產品',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=edit&product=${product.name}`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=edit&product=${product.name}&role=farmer`
               }
             },
             {
@@ -449,7 +587,7 @@ export class MessageTemplates {
               action: {
                 type: 'uri',
                 label: '建立行銷素材',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing&product=${product.name}`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing&product=${product.name}&role=farmer`
               }
             }
           ]
@@ -521,7 +659,7 @@ export class MessageTemplates {
               action: {
                 type: 'uri',
                 label: '查看更多店家',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&role=farmer`
               }
             }
           ]
@@ -682,7 +820,7 @@ export class MessageTemplates {
               action: {
                 type: 'uri',
                 label: '查看完整報告',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics&role=farmer`
               }
             }
           ]
@@ -711,7 +849,7 @@ export const RICH_MENU_CONFIG = {
       },
       action: {
         type: 'uri',
-        uri: `${LINE_CONFIG.LIFF_URL}?tab=dashboard`,
+        uri: `${LINE_CONFIG.LIFF_URL}?tab=dashboard&role=farmer`,
         label: 'Dashboard'
       }
     },
@@ -724,7 +862,7 @@ export const RICH_MENU_CONFIG = {
       },
       action: {
         type: 'uri',
-        uri: `${LINE_CONFIG.LIFF_URL}?tab=products`,
+        uri: `${LINE_CONFIG.LIFF_URL}?tab=products&role=farmer`,
         label: 'Products'
       }
     },
@@ -737,7 +875,7 @@ export const RICH_MENU_CONFIG = {
       },
       action: {
         type: 'uri',
-        uri: `${LINE_CONFIG.LIFF_URL}?tab=stores`,
+        uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&role=farmer`,
         label: 'Stores'
       }
     },
@@ -750,7 +888,7 @@ export const RICH_MENU_CONFIG = {
       },
       action: {
         type: 'uri',
-        uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing`,
+        uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing&role=farmer`,
         label: 'Marketing'
       }
     },
@@ -763,7 +901,7 @@ export const RICH_MENU_CONFIG = {
       },
       action: {
         type: 'uri',
-        uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics`,
+        uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics&role=farmer`,
         label: 'Analytics'
       }
     },
@@ -923,7 +1061,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '📦 新增產品',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=add`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=add&role=farmer`
               }
             },
             {
@@ -933,7 +1071,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '🏪 尋找店家',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&action=search`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&action=search&role=farmer`
               }
             },
             {
@@ -943,7 +1081,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '📊 查看數據',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics&role=farmer`
               }
             }
           ]
@@ -994,7 +1132,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '➕ 新增產品',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=create`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=create&role=farmer`
               }
             },
             {
@@ -1004,7 +1142,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '✏️ 編輯產品',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=edit`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=edit&role=farmer`
               }
             },
             {
@@ -1014,7 +1152,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '📊 庫存管理',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=inventory`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=products&action=inventory&role=farmer`
               }
             }
           ]
@@ -1065,7 +1203,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '🔍 搜尋店家',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&action=search`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&action=search&role=farmer`
               }
             },
             {
@@ -1075,7 +1213,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '📍 附近店家',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&action=nearby`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&action=nearby&role=farmer`
               }
             },
             {
@@ -1085,7 +1223,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '⭐ 推薦店家',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&action=recommended`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&action=recommended&role=farmer`
               }
             }
           ]
@@ -1136,7 +1274,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '🎨 生成海報',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing&action=generate`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing&action=generate&role=farmer`
               }
             },
             {
@@ -1146,7 +1284,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '📝 文案助手',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing&action=copywriting`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing&action=copywriting&role=farmer`
               }
             },
             {
@@ -1156,7 +1294,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '📊 行銷分析',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing&action=analytics`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=marketing&action=analytics&role=farmer`
               }
             }
           ]
@@ -1207,7 +1345,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '📈 銷售報告',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics&action=sales`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics&action=sales&role=farmer`
               }
             },
             {
@@ -1217,7 +1355,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '🔮 需求預測',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics&action=forecast`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics&action=forecast&role=farmer`
               }
             },
             {
@@ -1227,7 +1365,7 @@ export class EnhancedMessageTemplates {
               action: {
                 type: 'uri',
                 label: '💡 智能建議',
-                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics&action=insights`
+                uri: `${LINE_CONFIG.LIFF_URL}?tab=analytics&action=insights&role=farmer`
               }
             }
           ]
@@ -1236,3 +1374,4 @@ export class EnhancedMessageTemplates {
     };
   }
 }
+

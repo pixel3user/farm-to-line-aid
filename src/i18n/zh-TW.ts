@@ -3,6 +3,7 @@ export const zhTW = {
   'nav.home': '首頁',
   'nav.farmers': '農民',
   'nav.markets': '通路商',
+  'nav.store': '商店',
   'nav.demo': '示範',
   'nav.signin': '登入',
   'nav.signout': '登出',
@@ -81,6 +82,7 @@ export const zhTW = {
   'common.offline': '離線',
   'common.empty': '目前尚無資料',
   'common.step': '步驟',
+  'common.or': '或',
   // Dashboard
   'dashboard.welcome': '歡迎回來',
   'dashboard.overview': '總覽',
@@ -441,6 +443,11 @@ export const zhTW = {
   'auth.roleSelection.chooseMarket': '以通路商身份使用',
   'auth.roleSelection.settingUp': '設定中…',
   'auth.roleSelection.reminder': '之後可在個人設定中變更身份',
+  'auth.signinTitle': '登入你的帳號',
+  'auth.signinDescription': '登入以存取你的儀表板',
+  'auth.emailPlaceholder': '輸入你的電子郵件',
+  'auth.passwordPlaceholder': '輸入你的密碼',
+  'auth.signingIn': '登入中…',
   // Language selector
   'language.english': 'English',
   'language.traditionalChinese': '繁體中文',
