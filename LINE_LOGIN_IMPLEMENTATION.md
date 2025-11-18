@@ -2,7 +2,7 @@
 
 ## Overview
 
-This implementation adds LINE Login functionality to the Farm to LINE web application, allowing users to authenticate directly from the website using their LINE account. This complements the existing LIFF auto-login for mobile users.
+This implementation adds LINE Login functionality to the Farm2Market web application, allowing users to authenticate directly from the website using their LINE account. This complements the existing LIFF auto-login for mobile users.
 
 ## Features Implemented
 

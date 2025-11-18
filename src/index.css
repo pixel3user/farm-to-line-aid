@@ -37,6 +37,22 @@ html, body {
 
 /* Farm2Market AI Design System - Agricultural Technology Theme */
 
+/* Cart Popup Animation */
+@keyframes slideInUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.cart-popup-enter {
+  animation: slideInUp 0.3s ease-out;
+}
+
 @layer base {
   :root {
     /* Agricultural Color Palette */

@@ -288,6 +288,11 @@ export class DatabaseService {
     await updateDoc(productRef, updateData);
   }
 
+  static async deleteProduct(productId: string): Promise<void> {
+    const productRef = doc(db, 'products', productId);
+    await deleteDoc(productRef);
+  }
+
   // Store operations
   static async createStore(userId: string, storeData: Partial<Store>): Promise<{ id: string }> {
     const storeRef = doc(collection(db, 'stores'));

@@ -22,10 +22,28 @@ import {
   DialogTrigger
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Copy, Eye, EyeOff, Filter, MoreHorizontal, Plus, RefreshCw, Search } from 'lucide-react';
+import { Copy, Eye, EyeOff, Filter, MoreHorizontal, Plus, RefreshCw, Search, Edit, Trash2, Upload, X, Image as ImageIcon } from 'lucide-react';
 import { Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { DatabaseService, Product } from '@/lib/database';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { storage } from '@/lib/firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const formatDate = (timestamp?: Timestamp) => {
   if (!timestamp) return '';
@@ -45,7 +63,12 @@ const FarmerProducts: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isUploadingImages, setIsUploadingImages] = useState(false);
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
   const previousUserIdRef = useRef<string | null>(null);
   const [formData, setFormData] = useState({
@@ -55,6 +78,15 @@ const FarmerProducts: React.FC = () => {
     price: 0,
     stock: 0,
     description: ''
+  });
+  const [editFormData, setEditFormData] = useState({
+    name: '',
+    category: 'general',
+    unit: '',
+    price: 0,
+    stock: 0,
+    description: '',
+    images: [] as string[]
   });
 
   const products = (userProducts || []) as Product[];
@@ -168,6 +200,100 @@ const FarmerProducts: React.FC = () => {
       setLastRefreshTime(new Date());
     } catch (error) {
       console.error('Failed to update product status:', error);
+    }
+  };
+
+  const handleModifyClick = (product: Product) => {
+    setSelectedProduct(product);
+    setEditFormData({
+      name: product.name,
+      category: product.category || 'general',
+      unit: product.unit || '',
+      price: product.price || 0,
+      stock: product.stock || 0,
+      description: product.description || '',
+      images: product.images || []
+    });
+    setIsEditDialogOpen(true);
+  };
+
+  const handleDeleteClick = (product: Product) => {
+    setSelectedProduct(product);
+    setIsDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!selectedProduct) return;
+    setIsDeleting(true);
+    try {
+      await DatabaseService.deleteProduct(selectedProduct.id);
+      await refreshUserData();
+      setLastRefreshTime(new Date());
+      setIsDeleteDialogOpen(false);
+      setSelectedProduct(null);
+    } catch (error) {
+      console.error('Failed to delete product:', error);
+      alert('Failed to delete product. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleImageUpload = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !user?.id || !selectedProduct) return;
+    
+    setIsUploadingImages(true);
+    try {
+      const uploadPromises = Array.from(files).map(async (file) => {
+        const timestamp = Date.now();
+        const fileName = `products/${user.id}/${selectedProduct.id}/${timestamp}-${file.name}`;
+        const storageRef = ref(storage, fileName);
+        await uploadBytes(storageRef, file);
+        const downloadURL = await getDownloadURL(storageRef);
+        return downloadURL;
+      });
+
+      const newImageUrls = await Promise.all(uploadPromises);
+      const updatedImages = [...editFormData.images, ...newImageUrls].slice(0, 10); // Limit to 10 images
+      setEditFormData(prev => ({ ...prev, images: updatedImages }));
+    } catch (error) {
+      console.error('Failed to upload images:', error);
+      alert('Failed to upload images. Please try again.');
+    } finally {
+      setIsUploadingImages(false);
+    }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    setEditFormData(prev => ({
+      ...prev,
+      images: prev.images.filter((_, i) => i !== index)
+    }));
+  };
+
+  const handleEditSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedProduct) return;
+    setIsSubmitting(true);
+    try {
+      await DatabaseService.updateProduct(selectedProduct.id, {
+        name: editFormData.name,
+        category: editFormData.category,
+        unit: editFormData.unit,
+        price: Number(editFormData.price),
+        stock: Number(editFormData.stock),
+        description: editFormData.description,
+        images: editFormData.images
+      });
+      await refreshUserData();
+      setLastRefreshTime(new Date());
+      setIsEditDialogOpen(false);
+      setSelectedProduct(null);
+    } catch (error) {
+      console.error('Failed to update product:', error);
+      alert('Failed to update product. Please try again.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -480,13 +606,32 @@ const FarmerProducts: React.FC = () => {
                       {formatDate(product.updatedAt)}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center space-x-1">
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled>
-                          <Copy className="w-4 h-4" />
+                      <div className="flex items-center space-x-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => handleModifyClick(product)}
+                          className="bg-red-600 text-white hover:bg-red-700 border-red-600 hover:border-red-700"
+                        >
+                          <Edit className="w-4 h-4 mr-1" />
+                          Modify
                         </Button>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled>
-                          <MoreHorizontal className="w-4 h-4" />
-                        </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <MoreHorizontal className="w-4 h-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem 
+                              onClick={() => handleDeleteClick(product)}
+                              className="text-red-600 focus:text-red-600"
+                            >
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -512,6 +657,227 @@ const FarmerProducts: React.FC = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Edit Product Dialog */}
+      <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader className="pb-4">
+            <DialogTitle className="text-2xl font-bold">Modify Product</DialogTitle>
+            <DialogDescription className="text-base">View and edit your product details</DialogDescription>
+          </DialogHeader>
+          <form className="space-y-6" onSubmit={handleEditSubmit}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-gray-700">Product Name *</label>
+                <Input
+                  value={editFormData.name}
+                  onChange={(event) => setEditFormData((prev) => ({ ...prev, name: event.target.value }))}
+                  placeholder="Product name"
+                  className="h-11"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-gray-700">Category</label>
+                <Select value={editFormData.category} onValueChange={(value) => setEditFormData((prev) => ({ ...prev, category: value }))}>
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="eggs">Eggs</SelectItem>
+                    <SelectItem value="poultry">Poultry</SelectItem>
+                    <SelectItem value="vegetables">Vegetables</SelectItem>
+                    <SelectItem value="fruits">Fruits</SelectItem>
+                    <SelectItem value="dairy">Dairy</SelectItem>
+                    <SelectItem value="other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-gray-700">Unit</label>
+                <Input
+                  value={editFormData.unit}
+                  onChange={(event) => setEditFormData((prev) => ({ ...prev, unit: event.target.value }))}
+                  placeholder="Unit"
+                  className="h-11"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-gray-700">Price *</label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={editFormData.price}
+                  onChange={(event) => setEditFormData((prev) => ({ ...prev, price: Number(event.target.value) }))}
+                  placeholder="Price"
+                  className="h-11"
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-semibold text-gray-700">Stock Quantity *</label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={editFormData.stock}
+                  onChange={(event) => setEditFormData((prev) => ({ ...prev, stock: Number(event.target.value) }))}
+                  placeholder="Stock"
+                  className="h-11"
+                  required
+                />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="block text-sm font-semibold text-gray-700">Description</label>
+              <textarea
+                value={editFormData.description}
+                onChange={(event) => setEditFormData((prev) => ({ ...prev, description: event.target.value }))}
+                placeholder="Product description"
+                className="w-full min-h-[100px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+              />
+            </div>
+
+            {/* Image Upload Section */}
+            <div className="space-y-4">
+              <label className="block text-sm font-semibold text-gray-700">Product Photos</label>
+              
+              {/* Image Upload Area */}
+              <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-green-500 transition-colors">
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  onChange={(e) => handleImageUpload(e.target.files)}
+                  className="hidden"
+                  id="image-upload"
+                  disabled={isUploadingImages}
+                />
+                <label htmlFor="image-upload" className="cursor-pointer">
+                  {isUploadingImages ? (
+                    <div className="flex flex-col items-center">
+                      <div className="w-8 h-8 border-4 border-green-200 border-t-green-600 rounded-full animate-spin mb-2"></div>
+                      <p className="text-sm text-gray-600">Uploading images...</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center">
+                      <Upload className="w-8 h-8 text-gray-400 mb-2" />
+                      <p className="text-sm text-gray-600">Click to upload photos or drag and drop</p>
+                      <p className="text-xs text-gray-400 mt-1">PNG, JPG, GIF up to 10MB (max 10 images)</p>
+                    </div>
+                  )}
+                </label>
+              </div>
+
+              {/* Display Existing Images */}
+              {editFormData.images.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {editFormData.images.map((imageUrl, index) => (
+                    <div key={index} className="relative group">
+                      <img
+                        src={imageUrl}
+                        alt={`Product ${index + 1}`}
+                        className="w-full h-32 object-cover rounded-lg border border-gray-200"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveImage(index)}
+                        className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {editFormData.images.length === 0 && (
+                <div className="text-center py-8 text-gray-400">
+                  <ImageIcon className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                  <p className="text-sm">No images uploaded yet</p>
+                </div>
+              )}
+            </div>
+            
+            <div className="flex justify-between pt-4 border-t">
+              <Button 
+                type="button" 
+                variant="destructive"
+                onClick={() => {
+                  setIsEditDialogOpen(false);
+                  handleDeleteClick(selectedProduct!);
+                }}
+                className="px-6"
+                disabled={isSubmitting || isUploadingImages}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete Product
+              </Button>
+              <div className="flex space-x-3">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => {
+                    setIsEditDialogOpen(false);
+                    setSelectedProduct(null);
+                  }} 
+                  className="px-6"
+                  disabled={isSubmitting || isUploadingImages}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmitting || isUploadingImages}
+                  className="px-6 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800"
+                >
+                  {isSubmitting ? (
+                    <div className="flex items-center">
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                      Saving...
+                    </div>
+                  ) : (
+                    'Save Changes'
+                  )}
+                </Button>
+              </div>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Product</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete "{selectedProduct?.name}"? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting ? (
+                <div className="flex items-center">
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+                  Deleting...
+                </div>
+              ) : (
+                'Delete'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

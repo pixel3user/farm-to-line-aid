@@ -132,7 +132,7 @@ const TopNavigation: React.FC = () => {
           <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center">
             <span className="text-white font-bold text-sm">F</span>
           </div>
-          <span className="font-bold text-xl text-gray-900">Farm to LINE</span>
+          <span className="font-bold text-xl text-gray-900">Farm2Market</span>
         </Link>
 
         {/* Desktop Navigation */}

@@ -9,7 +9,7 @@ export const zhTW = {
   'nav.signout': '登出',
   'nav.settings': '設定',
   // Home Page
-  'home.title': 'Farm to LINE',
+  'home.title': 'Farm2Market',
   'home.subtitle': '讓台灣小農也能輕鬆做生意',
   'home.description': '挑選你的角色，取得最合適的 LINE 整合工具，快速串接產地與通路',
   'home.farmers.title': '農民（供應端）',
@@ -55,7 +55,7 @@ export const zhTW = {
   'home.footer.language': '語言',
   'home.footer.english': 'English',
   'home.footer.traditionalChinese': '繁體中文',
-  'home.footer.copyright': '© 2025 Farm to LINE. 版權所有。',
+  'home.footer.copyright': '© 2025 Farm2Market. 版權所有。',
   // Common
   'common.loading': '載入中…',
   'common.error': '發生錯誤',
@@ -198,7 +198,7 @@ export const zhTW = {
   'analytics.awaitingFollowUp': '待追蹤店家',
   // References
   'references.title': '參考資源',
-  'references.description': '幫助你上手 Farm to LINE 的指南與範例',
+  'references.description': '幫助你上手 Farm2Market 的指南與範例',
   'references.quietHours': '什麼是「安靜時段」與同意？',
   'references.leadScoring': '名單評分如何計算（示範）',
   'references.lineBot': 'LINE Bot 快速起步',
@@ -366,7 +366,7 @@ export const zhTW = {
   'ratings.captureFeedback': '收集質性回饋（口味、品質、物流）以供未來版本參考。',
   // LINE Demo
   'demo.title': 'LINE Bot 體驗',
-  'demo.subtitle': '看看農友如何透過 LINE 使用 Farm to LINE',
+  'demo.subtitle': '看看農友如何透過 LINE 使用 Farm2Market',
   'demo.open': '開啟 LIFF 示範',
   'demo.scan': '掃描 QR Code',
   'demo.howItWorks': '運作方式',
@@ -689,7 +689,7 @@ export const zhTW = {
   
   // Farmer References
   'farmer.references.title': '參考資料',
-  'farmer.references.subtitle': '使用 Farm to LINE 的有用指南和資源',
+  'farmer.references.subtitle': '使用 Farm2Market 的有用指南和資源',
   'farmer.references.quietHoursTitle': '什麼是「安靜時間」和同意？',
   'farmer.references.quietHoursDescription': '尊重溝通的指導原則',
   'farmer.references.leadScoringTitle': '潛在客戶評分如何運作（示範）',

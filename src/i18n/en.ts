@@ -9,7 +9,7 @@ export const en = {
   'nav.signout': 'Sign Out',
   'nav.settings': 'Settings',
   // Home Page
-  'home.title': 'Farm to LINE',
+  'home.title': 'Farm2Market',
   'home.subtitle': 'Smart, simple sales for Taiwan farms',
   'home.description': 'Pick your role to get the right tools for connecting farms with markets through LINE integration',
   'home.farmers.title': 'Farmers (Sellers)',
@@ -55,7 +55,7 @@ export const en = {
   'home.footer.language': 'Language',
   'home.footer.english': 'English',
   'home.footer.traditionalChinese': '繁體中文',
-  'home.footer.copyright': '© 2025 Farm to LINE. All rights reserved.',
+  'home.footer.copyright': '© 2025 Farm2Market. All rights reserved.',
   // Common
   'common.loading': 'Loading...',
   'common.error': 'Error',
@@ -198,7 +198,7 @@ export const en = {
   'analytics.awaitingFollowUp': 'Awaiting follow-up',
   // References
   'references.title': 'References',
-  'references.description': 'Helpful guides and resources for using Farm to LINE',
+  'references.description': 'Helpful guides and resources for using Farm2Market',
   'references.quietHours': 'What counts as "quiet hours" and consent?',
   'references.leadScoring': 'How lead scoring works (demo)',
   'references.lineBot': 'LINE bot quick start',
@@ -366,7 +366,7 @@ export const en = {
   'ratings.captureFeedback': 'Capture qualitative feedback (taste, quality, logistics) for future releases.',
   // LINE Demo
   'demo.title': 'LINE Bot Experience',
-  'demo.subtitle': 'See how farmers use Farm to LINE through LINE integration',
+  'demo.subtitle': 'See how farmers use Farm2Market through LINE integration',
   'demo.open': 'Open LIFF Demo',
   'demo.scan': 'Scan QR Code',
   'demo.howItWorks': 'How It Works',
@@ -433,7 +433,7 @@ export const en = {
   'auth.noAccount': "Don't have an account?",
   'auth.lineLogin': 'Continue with LINE',
   'auth.roleSelection.title': 'Select Your Role',
-  'auth.roleSelection.subtitle': 'Choose the dashboard that matches how you use Farm to LINE',
+  'auth.roleSelection.subtitle': 'Choose the dashboard that matches how you use Farm2Market',
   'auth.roleSelection.completeProfile': 'Complete your profile',
   'auth.roleSelection.completeProfileDesc': 'We need a few details to set up your account.',
   'auth.roleSelection.displayName': 'Display name',
@@ -689,7 +689,7 @@ export const en = {
   
   // Farmer References
   'farmer.references.title': 'References',
-  'farmer.references.subtitle': 'Helpful guides and resources for using Farm to LINE',
+  'farmer.references.subtitle': 'Helpful guides and resources for using Farm2Market',
   'farmer.references.quietHoursTitle': 'What counts as "quiet hours" and consent?',
   'farmer.references.quietHoursDescription': 'Guidelines for respectful communication',
   'farmer.references.leadScoringTitle': 'How lead scoring works (demo)',

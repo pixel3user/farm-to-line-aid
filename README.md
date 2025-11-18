@@ -1,4 +1,4 @@
-# Farm to LINE - Smart Agricultural Sales Platform
+# Farm2Market - Smart Agricultural Sales Platform
 
 A professional web application connecting Taiwan's farms with markets through LINE integration, featuring AI-powered tools for demand prediction, marketing asset generation, and store discovery.
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Button } from '@/components/ui/button';
@@ -29,6 +29,7 @@ const Home: React.FC = () => {
   const mobileConfig = useMobileOptimization();
   const [isLiffApp, setIsLiffApp] = useState(false);
   const [currentSlide, setCurrentSlide] = useState(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const revealContainerRef = useScrollReveal({ selector: '.reveal' });
 
   const slides = useMemo(() => [
@@ -50,6 +51,45 @@ const Home: React.FC = () => {
     }, 6000);
     return () => window.clearInterval(id);
   }, [slides.length]);
+
+  // Video control: start at 00:25 and loop from 00:25 to 02:13
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || mobileConfig.isMobile) return;
+
+    const handleTimeUpdate = () => {
+      // If video reaches 2:13 (133 seconds), loop back to 0:25 (25 seconds)
+      if (video.currentTime >= 133) {
+        video.currentTime = 25;
+      }
+    };
+
+    const handleEnded = () => {
+      // If video ends, restart at 25 seconds
+      video.currentTime = 25;
+      video.play().catch(() => {
+        // Autoplay may be blocked, that's okay
+      });
+    };
+
+    const handleLoadedMetadata = () => {
+      // Set initial start time to 25 seconds
+      video.currentTime = 25;
+      video.play().catch(() => {
+        // Autoplay may be blocked, that's okay
+      });
+    };
+
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('ended', handleEnded);
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+
+    return () => {
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+      video.removeEventListener('ended', handleEnded);
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+    };
+  }, [mobileConfig.isMobile]);
   
   const features = [
     {
@@ -85,20 +125,50 @@ const Home: React.FC = () => {
       <section className={`relative overflow-hidden ${
         mobileConfig.isMobile ? 'min-h-[500px]' : 'min-h-[600px]'
       }`}>
-        {/* Background slideshow */}
-        <div className="absolute inset-0">
-          {slides.map((slide, idx) => (
-            <img
-              key={idx}
-              src={slide.src}
-              alt={slide.alt}
-              className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${
-                idx === currentSlide ? 'opacity-100' : 'opacity-0'
-              }`}
-            />
-          ))}
-        </div>
-        <div className={`absolute inset-0 bg-gradient-to-r from-green-900/80 via-green-800/70 to-blue-900/80 flex items-center justify-center ${
+        {/* Background video - Desktop only */}
+        {!mobileConfig.isMobile && (
+          <div className="absolute inset-0 w-full h-full overflow-hidden">
+            <video
+              ref={videoRef}
+              className="absolute top-1/2 left-1/2 w-full h-full"
+              style={{
+                objectFit: 'cover',
+                objectPosition: 'center',
+                transform: 'translate(-50%, -50%) scale(1.1)',
+                minWidth: '100%',
+                minHeight: '100%'
+              }}
+              playsInline
+              muted
+              autoPlay
+            >
+              <source src="/farmer-video.mp4" type="video/mp4" />
+            </video>
+          </div>
+        )}
+        
+        {/* Background slideshow - Mobile only */}
+        {mobileConfig.isMobile && (
+          <div className="absolute inset-0">
+            {slides.map((slide, idx) => (
+              <img
+                key={idx}
+                src={slide.src}
+                alt={slide.alt}
+                className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${
+                  idx === currentSlide ? 'opacity-100' : 'opacity-0'
+                }`}
+              />
+            ))}
+          </div>
+        )}
+        {/* Gradient overlay - Mobile only (for slideshow) */}
+        {mobileConfig.isMobile && (
+          <div className={`absolute inset-0 bg-gradient-to-r from-green-900/80 via-green-800/70 to-blue-900/80 ${
+            mobileConfig.isLiffApp ? 'pt-16 pb-8' : ''
+          }`}></div>
+        )}
+        <div className={`absolute inset-0 flex items-center justify-center ${
           mobileConfig.isLiffApp ? 'pt-16 pb-8' : ''
         }`}>
           <div className={`text-center text-white space-y-6 sm:space-y-8 max-w-5xl px-4 sm:px-6`}>
@@ -355,7 +425,7 @@ const Home: React.FC = () => {
                 <div className="w-8 h-8 bg-green-600 rounded-lg flex items-center justify-center">
                   <span className="text-white font-bold text-sm">F</span>
                 </div>
-                <span className="font-bold text-xl">Farm to LINE</span>
+                <span className="font-bold text-xl">Farm2Market</span>
               </div>
               <p className="text-gray-400 text-sm">
                 {t('home.footer.tagline')}
