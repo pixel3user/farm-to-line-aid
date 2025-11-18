@@ -11,17 +11,19 @@ export interface ConversationHistoryItem {
 interface ConversationPlanInput {
   message: string;
   history?: ConversationHistoryItem[];
+  user?: { displayName?: string; role?: 'farmer' | 'market'; locale?: 'zh-TW' | 'en' };
+  sessionUserId?: string; // ensure per-user session separation
 }
 
 interface ConversationPlan {
   text?: string;
   lineMessages?: LineMessage[];
-  functionCalls: Array<{ name: string }>;
+  functionCalls: Array<{ name: string; args?: Record<string, unknown> }>;
 }
 
 type UnknownRecord = Record<string, unknown>;
 
-const GEMINI_MODEL = process.env.GEMINI_MODEL_ID ?? 'gemini-2.0-flash';
+const GEMINI_MODEL = process.env.GEMINI_MODEL_ID ?? 'gemini-2.5-flash-lite';
 const GEMINI_API_KEY =
   process.env.GEMINI_API_KEY ||
   process.env.GOOGLE_GEMINI_API_KEY ||
@@ -29,12 +31,28 @@ const GEMINI_API_KEY =
   '';
 
 const ALLOWED_FUNCTION_CALLS = new Set([
+  // Menus / helpers
   'show_product_tools',
   'show_store_tools',
   'show_marketing_tools',
   'show_analytics_tools',
   'open_dashboard',
   'show_help_options',
+  // App feature actions
+  'product_list',
+  'product_create',
+  'store_list',
+  'store_create',
+  'marketing_material_list',
+  'analytics_get_user_stats',
+  // Profile actions
+  'user_set_role',
+  // Public marketplace actions
+  'product_browse_public',
+  'store_browse_public',
+  'marketplace_get_stats',
+  'product_search_public',
+  'store_search_public',
 ]);
 
 const FUNCTION_SUGGESTIONS: Record<string, { label: string; text: string }> = {
@@ -54,9 +72,8 @@ const GENERAL_SUGGESTIONS = [
   FUNCTION_SUGGESTIONS.show_help_options,
 ];
 
-const SYSTEM_PROMPT = `
-You are the response composer for the NexStore LINE Messaging API bot. Every reply you produce must be immediately renderable by the LINE bot without additional reasoning.
-
+// Minimal format instruction to ensure LINE-supported JSON structure without templates
+const SYSTEM_FORMAT_PROMPT = `
 Return ONLY strict JSON (no markdown fences) using this schema:
 {
   "text": string | null,
@@ -64,19 +81,86 @@ Return ONLY strict JSON (no markdown fences) using this schema:
   "functionCalls": [ { "name": FunctionName } ]
 }
 
-Rules:
-- Prefer including rich UI elements such as Flex carousels, quick replies, and templates to guide the farmer's next step.
-- A LineMessage object must follow LINE's structure:
-  * Text bubble: { "type": "text", "text": string, "quickReply"?: { "items": [ { "type": "action", "action": { ... } } ] } }
-  * Flex bubble: { "type": "flex", "altText": string, "contents": { ...valid Flex message JSON... } }
-  * Template bubble: { "type": "template", "altText": string, "template": { ...valid template JSON... } }
-- Provide at most three messages per response and ensure every required field (like altText) is present so LINE will not reject it.
-- If you include quick replies, provide 1-4 actionable suggestions related to the conversation context.
-- Function calls are optional and MUST use one of these exact names when relevant: show_product_tools, show_store_tools, show_marketing_tools, show_analytics_tools, open_dashboard, show_help_options.
-- When you cannot determine a specific tool, return a supportive text message plus quick replies guiding the user to the main menu.
-- Never output placeholders or TODO text. Ensure the JSON is complete and can be rendered safely.
-- Keep responses concise (under 120 words of visible text).
+Rules for LINE output:
+- Allowed LineMessage types: "text" or "flex" only. Do NOT use "template".
+- You MUST include at least one primary Flex message per response. Prefer a horizontal carousel of product cards for any product list/browse/search results. It must have a clear visual element:
+  * Prefer a hero image WHEN a safe, explicit image URL is provided by the user/context.
+  * Otherwise, use a visual header (e.g., colored header bar and an emoji/icon in the text) and well-structured sections.
+- Flex messages MUST include both "altText" and a valid "contents" per LINE Flex spec.
+- Keep it concise and scannable. Prefer max 2 messages (primary Flex + optional short text). When onboarding, up to 3 is ok.
+- Quick replies are encouraged for next steps; provide 2–4 actionable items.
+
+Privacy and data sharing:
+- Share only business information (e.g., product names, prices, stock, store name/type/location, public business contact).
+- Never expose personal data (private phone numbers, emails, exact home addresses) unless explicitly labeled as business contact.
+- When in doubt, show a summary and offer to broker contact via a safe message template.
+
+ Reference Flex layout (use as a style guide and customize content):
+ - Bubble
+   - Header: brand color #1DB446, bold title with a leading emoji summarizing the action (e.g., 📦 Product created, 🏪 Store created, 📊 Stats)
+   - Hero (optional): include when an explicit image URL is available (e.g., product image)
+   - Body: vertical box with concise, relevant key-value lines from the user request and/or function result (e.g., Name, Price+Unit, Stock, Location)
+   - Footer (optional): one or two buttons linking to LIFF tabs when clearly relevant: products, stores, marketing, analytics
+
+Tool use:
+- functionCalls are optional. Allowed: show_product_tools, show_store_tools, show_marketing_tools, show_analytics_tools, open_dashboard, show_help_options.
+- Minimize website redirections. Prefer a short back-and-forth in chat to collect missing info and confirm intent. Only suggest dashboard links when necessary for a complex workflow or when the user asks.
+- Include a function call when executing an app feature is clearly intended.
+- After setting user role, proactively propose role-specific next steps and quick replies.
+- For dataset queries, prefer calling search/browse tools (product_browse_public, product_search_public, store_browse_public, store_search_public, marketplace_get_stats) instead of answering from memory.
+- Never create placeholder/unnamed records. If required info is missing, ask the user succinct follow-up questions and wait.
+- When you call a function, include useful arguments parsed from the request:
+  * product_create: REQUIRED fields = name, price, unit, stock. Do NOT call this function until you have all four. If any are missing or ambiguous, ask 1–2 concise follow-up questions to collect them (e.g., "What price and unit?", "How many in stock?"). Price must be > 0; stock must be >= 0.
+  * store_create: REQUIRED field = name. Do NOT call without a clear non-empty name. Type/location optional; ask if the user mentions them.
+  * product_list/store_list/marketing_material_list: include limit when the user specifies a number.
+
+User feedback:
+- When you include any functionCalls, also set "text" to a brief, user-visible status message describing what you are doing (e.g., "Adding eggs to your products..."). Keep it under 20 words.
+
+Follow-up questions:
+- If required arguments are missing or the request is ambiguous, DO NOT answer directly. Ask ONE concise clarifying question and include 2–4 relevant quick replies. After you have enough info, then call the appropriate function.
+- For product listing/browse/search requests, first check if the user has specified a category, keyword, or a price range. If not, ask one clarifying question (e.g., "要找哪一類或價格範圍？") with 2–4 quick replies (e.g., 顯示全部, 價格 ≤ 200, 雞蛋, 蔬果)。 After that, call product_browse_public or product_search_public with parsed filters.
+- For searches, infer reasonable filters from user text (keywords, categories, tags, price ranges, locations) and include them in the tool args. If ambiguous, ask one clarifying question.
+
+After execution:
+- After the function completes, return a Flex summary showing the result (e.g., created product/store or refreshed list).
+
+Onboarding and persona:
+- First-time or early interactions should welcome the user with a rich overview of features tailored to their role (farmer/seller vs market buyer/owner) and language.
+- Personalize with the user's display name when available (e.g., "Hi Alex"), and be proactive but concise.
+- Ask 1–2 short onboarding questions to understand role and immediate goal (e.g., role and what they want to do first). Keep the flow inside LINE.
+- Provide next-step quick actions. Offer LIFF links only if clearly beneficial.
+
+Output nothing except the JSON object.
 `;
+
+function getTools() {
+  return [
+    {
+      functionDeclarations: [
+        { name: 'show_product_tools', description: 'Show product management shortcuts and guidance.' },
+        { name: 'show_store_tools', description: 'Show store/CRM shortcuts and guidance.' },
+        { name: 'show_marketing_tools', description: 'Show marketing content creation shortcuts.' },
+        { name: 'show_analytics_tools', description: 'Show analytics shortcuts.' },
+        { name: 'open_dashboard', description: 'Open the Farm2Market LIFF dashboard for the user.' },
+        { name: 'show_help_options', description: 'Show help options and tips.' },
+        // Features
+        { name: 'product_list', description: 'List the user\'s products. If a limit is mentioned, include it in args.' },
+        { name: 'product_create', description: 'Create a new product. Required: name, price (>0), unit, stock (>=0). Do not call until all provided; otherwise ask for the missing fields first.' },
+        { name: 'store_list', description: 'List the user\'s stores. If a limit is mentioned, include it in args.' },
+        { name: 'store_create', description: 'Create a new store. Ask for missing: name (required). type/location optional. Include parsed args.' },
+        { name: 'marketing_material_list', description: 'List recent marketing materials. If a limit is mentioned, include it in args.' },
+        { name: 'analytics_get_user_stats', description: 'Get counts for products, stores, conversations for this user.' },
+        { name: 'user_set_role', description: 'Set the user role. Args: { role: "farmer" | "market" }.' },
+        { name: 'product_browse_public', description: 'Browse public products. Optional args: { limit?: number }' },
+        { name: 'store_browse_public', description: 'Browse public stores/buyers. Optional args: { limit?: number }' },
+        { name: 'marketplace_get_stats', description: 'Get public marketplace stats (counts of sellers/buyers/products/stores).' },
+        { name: 'product_search_public', description: 'Search products by name/category/tags/price. Args: { nameContains?: string, categoryEquals?: string, tagsAny?: string[], minPrice?: number, maxPrice?: number, limit?: number }' },
+        { name: 'store_search_public', description: 'Search stores by name/type/location. Args: { nameContains?: string, typeEquals?: string, locationContains?: string, limit?: number }' },
+      ],
+    },
+  ];
+}
 
 let geminiClient: GoogleGenAI | null = null;
 
@@ -90,6 +174,11 @@ function getGeminiClient(): GoogleGenAI {
   }
 
   return geminiClient;
+}
+
+function detectLanguageFromMessage(text: string): 'zh-TW' | 'en' {
+  const hasCJK = /[\u3400-\u9FFF\uF900-\uFAFF]/.test(text);
+  return hasCJK ? 'zh-TW' : 'en';
 }
 
 function isRecord(value: unknown): value is UnknownRecord {
@@ -139,7 +228,8 @@ function normaliseLineMessage(payload: unknown, index: number): LineMessage {
   }
 
   const type = payload.type;
-  if (type !== 'text' && type !== 'flex' && type !== 'template') {
+  // Disallow template messages as requested; only permit text and flex.
+  if (type !== 'text' && type !== 'flex') {
     throw new Error(`Unsupported LINE message type at index ${index}: ${String(type)}`);
   }
 
@@ -152,25 +242,14 @@ function normaliseLineMessage(payload: unknown, index: number): LineMessage {
     return { type, text: payload.text.trim(), quickReply };
   }
 
-  if (typeof payload.altText !== 'string' || !payload.altText.trim()) {
-    throw new Error(`Non-text message at index ${index} must include altText.`);
+  if (!isRecord(payload.contents)) {
+    throw new Error(`Flex message at index ${index} must include contents.`);
   }
-
-  if (type === 'flex') {
-    if (!isRecord(payload.contents)) {
-      throw new Error(`Flex message at index ${index} must include contents.`);
-    }
-    return { type, altText: payload.altText.trim(), contents: payload.contents, quickReply };
-  }
-
-  if (!isRecord(payload.template)) {
-    throw new Error(`Template message at index ${index} must include template data.`);
-  }
-
-  return { type, altText: payload.altText.trim(), template: payload.template, quickReply };
+  const altText = typeof payload.altText === 'string' && payload.altText.trim() ? payload.altText.trim() : 'Flex message';
+  return { type, altText, contents: payload.contents, quickReply };
 }
 
-function normaliseFunctionCalls(value: unknown): Array<{ name: string }> {
+function normaliseFunctionCalls(value: unknown): Array<{ name: string; args?: Record<string, unknown> }> {
   if (value == null) {
     return [];
   }
@@ -187,7 +266,8 @@ function normaliseFunctionCalls(value: unknown): Array<{ name: string }> {
     if (!ALLOWED_FUNCTION_CALLS.has(trimmed)) {
       throw new Error(`Function call name "${trimmed}" is not permitted.`);
     }
-    return { name: trimmed };
+    const args = isRecord((entry as any).args) ? ((entry as any).args as Record<string, unknown>) : undefined;
+    return { name: trimmed, args };
   });
 }
 
@@ -197,8 +277,9 @@ function parseGeminiPlan(raw: string): ConversationPlan {
   let parsed: UnknownRecord;
   try {
     parsed = JSON.parse(cleaned) as UnknownRecord;
-  } catch (error) {
-    throw new Error(`Unable to parse Gemini response as JSON: ${(error as Error).message}`);
+  } catch {
+    // Fallback: treat model output as plain text answer
+    return { text: cleaned, functionCalls: [] } as unknown as ConversationPlan;
   }
 
   const functionCalls = normaliseFunctionCalls(parsed.functionCalls);
@@ -241,16 +322,29 @@ function buildConversationContents(history: ConversationHistoryItem[] | undefine
   return contents;
 }
 
-async function requestConversationPlan(message: string, history?: ConversationHistoryItem[]): Promise<ConversationPlan> {
+function getUserContextPrompt(user?: { displayName?: string; role?: 'farmer' | 'market'; locale?: 'zh-TW' | 'en' }): string {
+  if (!user) return 'Keep most interactions inside LINE chat; minimize external links.';
+  const parts: string[] = ['Keep most interactions inside LINE chat; minimize external links.'];
+  if (user.displayName) parts.push(`User displayName: ${user.displayName}`);
+  if (user.role) parts.push(`User role: ${user.role === 'farmer' ? 'farmer/seller' : 'market buyer/owner'}`);
+  if (user.locale) parts.push(`User locale preference: ${user.locale}`);
+  return parts.join('\n');
+}
+
+async function requestConversationPlan(message: string, history?: ConversationHistoryItem[], user?: { displayName?: string; role?: 'farmer' | 'market'; locale?: 'zh-TW' | 'en' }, sessionUserId?: string): Promise<ConversationPlan> {
   const client = getGeminiClient();
+  const lang = detectLanguageFromMessage(message);
+  const langPrompt = lang === 'zh-TW'
+    ? '回覆使用繁體中文。'
+    : 'Respond in English.';
+  const userContext = getUserContextPrompt(user);
+  const sessionNote = sessionUserId ? `\nSession: line_user_id=${sessionUserId}` : '';
   const response = await client.models.generateContent({
     model: GEMINI_MODEL,
     contents: buildConversationContents(history, message),
     config: {
-      temperature: 0.45,
-      topP: 0.8,
-      maxOutputTokens: 1024,
-      systemInstruction: { role: 'system', parts: [{ text: SYSTEM_PROMPT }] },
+      tools: getTools(),
+      systemInstruction: { role: 'system', parts: [{ text: `${SYSTEM_FORMAT_PROMPT}\n\n${userContext}${sessionNote}\n\nLanguage: ${langPrompt}` }] },
     },
   });
 
@@ -263,115 +357,69 @@ async function requestConversationPlan(message: string, history?: ConversationHi
     throw new Error(`Gemini blocked the prompt: ${reason}`);
   }
 
-  const text = response.text;
-  if (!text) {
-    throw new Error('Gemini returned an empty response.');
+  // Prefer native tool/function calls before reading concatenated text to avoid SDK warnings
+  try {
+    const candidate: any = (response as any).candidates?.[0];
+    const parts: any[] = candidate?.content?.parts ?? [];
+    const toolCalls = parts
+      .map(p => (p?.functionCall?.name ? { name: String(p.functionCall.name), args: (p.functionCall as any).args } : null))
+      .filter(Boolean) as Array<{ name: string; args?: Record<string, unknown> }>;
+
+    const validCalls = toolCalls.filter(c => ALLOWED_FUNCTION_CALLS.has(c.name));
+    if (validCalls.length) {
+      try { console.debug('[gemini-client] Tool calls detected', { calls: validCalls.map(c => c.name) }); } catch {}
+      return { functionCalls: validCalls };
+    }
+  } catch {
+    // ignore
   }
 
-  return parseGeminiPlan(text);
+  const text = response.text;
+  if (text && text.trim()) {
+    try { console.debug('[gemini-client] Falling back to text parse path'); } catch {}
+    return parseGeminiPlan(text);
+  }
+
+  throw new Error('Gemini returned no actionable content.');
 }
 
-function detectIntent(message: string): ConversationPlan {
-  const lowered = message.trim().toLowerCase();
-  const calls: Array<{ name: string }> = [];
-
-  if (!lowered) {
-    return { text: '我可以如何協助您管理農產業務？', functionCalls: calls };
-  }
-
-  if (/(產品|product|inventory|stock)/.test(lowered)) {
-    calls.push({ name: 'show_product_tools' });
-  }
-  if (/(店|store|buyer|客戶|market)/.test(lowered)) {
-    calls.push({ name: 'show_store_tools' });
-  }
-  if (/(行銷|marketing|promote|宣傳)/.test(lowered)) {
-    calls.push({ name: 'show_marketing_tools' });
-  }
-  if (/(分析|analytics|report|數據)/.test(lowered)) {
-    calls.push({ name: 'show_analytics_tools' });
-  }
-  if (/(dashboard|控制台|open liff|web app|打開|開啟).*/.test(lowered)) {
-    calls.push({ name: 'open_dashboard' });
-  }
-  if (/(help|幫助|說明|指引)/.test(lowered)) {
-    calls.push({ name: 'show_help_options' });
-  }
-
-  if (!calls.length) {
-    const fallbackText =
-      '我已經記錄下您的問題，以下是一些可以嘗試的選項：產品管理、店家拓展、行銷素材或營運分析。告訴我您想先處理哪一項。';
-    const quickReplyItems = GENERAL_SUGGESTIONS.slice(0, 4).map(suggestion => ({
-      type: 'action' as const,
-      action: { type: 'message', label: suggestion.label, text: suggestion.text },
-    }));
-
-    const lineMessages: LineMessage[] = [
-      {
-        type: 'text',
-        text: fallbackText,
-        quickReply: { items: quickReplyItems },
-      },
-    ];
-
+export async function generateConversationPlan({ message, history, user, sessionUserId }: ConversationPlanInput): Promise<ConversationPlan> {
+  const trimmed = message.trim();
+  if (!trimmed) {
     return {
-      text: fallbackText,
+      text: '我可以如何協助您？您可以描述需求或直接點擊下方按鈕。',
       functionCalls: [],
-      lineMessages,
     };
   }
 
-  const summaryIntro =
-    '為您整理了一些相關的工具與建議，請選擇下方建議或提出更多需求。';
-
-    const quickReplyItems = calls
-    .map(call => FUNCTION_SUGGESTIONS[call.name])
-    .filter((entry): entry is { label: string; text: string } => Boolean(entry))
-    .slice(0, 4)
-    .map(suggestion => ({
-      type: 'action' as const,
-      action: { type: 'message', label: suggestion.label, text: suggestion.text },
-    }));
-
-  const lineMessages = quickReplyItems.length
-    ? ([
-        {
-          type: 'text' as const,
-          text: summaryIntro,
-          quickReply: { items: quickReplyItems },
-        },
-      ] as LineMessage[])
-    : undefined;
-
-  return { text: summaryIntro, functionCalls: calls, lineMessages };
-}
-
-export async function generateConversationPlan({ message, history }: ConversationPlanInput): Promise<ConversationPlan> {
-  const trimmed = message.trim();
-  if (!trimmed) {
-    return detectIntent(message);
-  }
-
   if (!GEMINI_API_KEY) {
-    return detectIntent(message);
+    // No API key: ask a clarifying question instead of fallback
+    return {
+      text: '我想更了解您的需求：需要我幫您管理產品、拓展店家、建立行銷素材，或查看營運分析？',
+      functionCalls: [],
+    };
   }
 
   try {
-    return await requestConversationPlan(trimmed, history);
+    return await requestConversationPlan(trimmed, history, user, sessionUserId);
   } catch (error) {
-    console.error('[gemini-client] Falling back to heuristic intent detection:', error);
-    return detectIntent(message);
+    console.error('[gemini-client] Gemini conversation plan failed:', error);
+    // Retry with explicit instruction to ask a clarifying question
+    try {
+      return await requestConversationPlan(
+        trimmed + '\n\n(如果目前資訊不足，請先提出一個簡短澄清問題，並附上 2–4 個 quick replies。)',
+        history
+      );
+    } catch {
+      return {
+        text: '想更精準協助您，請用一句話說明要做的事（例如：新增雞蛋 120/斤 20 箱）。',
+        functionCalls: [],
+      };
+    }
   }
 }
 
-export async function generateOutOfScopeAnswer({
-  message,
-}: {
-  message: string;
-  history?: ConversationHistoryItem[];
-}): Promise<string> {
-  return `我目前無法直接處理「${message.trim() || '這個問題'}」，但您可以從功能選單中選擇產品管理、店家關係或行銷工具，我可以協助您更進一步。`;
-}
+// Removed generic out-of-scope fallback; all flows should go through generateConversationPlan
 
 export async function analyzeImageWithGemini({
   prompt,

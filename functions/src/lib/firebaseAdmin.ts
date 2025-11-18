@@ -8,7 +8,7 @@ function initialiseApp(): admin.app.App {
   }
 
   const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
-  const storageBucket = process.env.FIREBASE_STORAGE_BUCKET;
+  const storageBucket = process.env.VITE_FIREBASE_STORAGE_BUCKET;
   const projectId = process.env.GCLOUD_PROJECT || process.env.FIREBASE_PROJECT_ID;
 
   if (serviceAccountJson) {

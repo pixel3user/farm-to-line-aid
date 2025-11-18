@@ -3,6 +3,7 @@ export const en = {
   'nav.home': 'Home',
   'nav.farmers': 'Farmers',
   'nav.markets': 'Markets',
+  'nav.store': 'Store',
   'nav.demo': 'Demo',
   'nav.signin': 'Sign In',
   'nav.signout': 'Sign Out',
@@ -81,6 +82,7 @@ export const en = {
   'common.offline': 'Offline',
   'common.empty': 'No data available yet',
   'common.step': 'Step',
+  'common.or': 'Or',
   // Dashboard
   'dashboard.welcome': 'Welcome back',
   'dashboard.overview': 'Overview',
@@ -441,6 +443,11 @@ export const en = {
   'auth.roleSelection.chooseMarket': 'Choose as Market',
   'auth.roleSelection.settingUp': 'Setting up...',
   'auth.roleSelection.reminder': 'You can change your role later in your profile settings',
+  'auth.signinTitle': 'Sign in to your account',
+  'auth.signinDescription': 'Sign in to access your dashboard',
+  'auth.emailPlaceholder': 'Enter your email',
+  'auth.passwordPlaceholder': 'Enter your password',
+  'auth.signingIn': 'Signing in...',
   // Language selector
   'language.english': 'English',
   'language.traditionalChinese': 'Traditional Chinese',

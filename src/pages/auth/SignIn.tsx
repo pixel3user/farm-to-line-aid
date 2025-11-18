@@ -78,12 +78,12 @@ const SignIn: React.FC = () => {
           </Link>
         </div>
         <h2 className="mt-6 text-center text-3xl font-bold text-gray-900">
-          Sign in to your account
+          {t('auth.signinTitle')}
         </h2>
         <p className="mt-2 text-center text-sm text-gray-600">
-          Or{' '}
+          {t('common.or')}{' '}
           <Link to="/" className="font-medium text-green-600 hover:text-green-500">
-            return to home
+            {t('nav.home')}
           </Link>
         </p>
       </div>
@@ -91,14 +91,16 @@ const SignIn: React.FC = () => {
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <Card>
           <CardHeader>
-            <CardTitle>Welcome back</CardTitle>
+            <CardTitle>{t('dashboard.welcome')}</CardTitle>
             <CardDescription>
               {role ? (
                 <>
-                  Sign in as a <span className="font-semibold capitalize">{role}</span> to access your tools
+                  {t('auth.signin')}{' '}as{' '}
+                  <span className="font-semibold capitalize">{role}</span>{' '}
+                  {t('home.features.description')}
                 </>
               ) : (
-                'Sign in to access your dashboard'
+                t('auth.signinDescription')
               )}
             </CardDescription>
           </CardHeader>
@@ -111,7 +113,7 @@ const SignIn: React.FC = () => {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <Label htmlFor="email">Email address</Label>
+                <Label htmlFor="email">{t('auth.email')}</Label>
                 <div className="mt-1 relative">
                   <Input
                     id="email"
@@ -122,14 +124,14 @@ const SignIn: React.FC = () => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="pl-10"
-                    placeholder="Enter your email"
+                    placeholder={t('auth.emailPlaceholder')}
                   />
                   <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                 </div>
               </div>
 
               <div>
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t('auth.password')}</Label>
                 <div className="mt-1 relative">
                   <Input
                     id="password"
@@ -140,7 +142,7 @@ const SignIn: React.FC = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="pl-10 pr-10"
-                    placeholder="Enter your password"
+                    placeholder={t('auth.passwordPlaceholder')}
                   />
                   <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <button
@@ -166,13 +168,13 @@ const SignIn: React.FC = () => {
                     className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
                   />
                   <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-900">
-                    Remember me
+                    {t('auth.remember')}
                   </label>
                 </div>
 
                 <div className="text-sm">
                   <Link to="#" className="font-medium text-green-600 hover:text-green-500">
-                    Forgot your password?
+                    {t('auth.forgot')}
                   </Link>
                 </div>
               </div>
@@ -182,7 +184,7 @@ const SignIn: React.FC = () => {
                 className="w-full"
                 disabled={isLoading}
               >
-                {isLoading ? 'Signing in...' : 'Sign in'}
+                {isLoading ? t('auth.signingIn') : t('auth.signin')}
               </Button>
             </form>
 
@@ -197,9 +199,9 @@ const SignIn: React.FC = () => {
 
             <div className="mt-6 text-center">
               <p className="text-sm text-gray-600">
-                Don't have an account?{' '}
+                {t('auth.noAccount')}{' '}
                 <Link to="/auth/signup" className="font-medium text-green-600 hover:text-green-500">
-                  Sign up
+                  {t('auth.signup')}
                 </Link>
               </p>
             </div>

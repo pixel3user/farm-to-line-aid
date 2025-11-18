@@ -66,6 +66,146 @@ export interface MarketingMaterialRecord {
 }
 
 export class DatabaseService {
+  static async getLineUser(userId: string): Promise<LineUserRecord | null> {
+    const doc = await firestore.collection('line_users').doc(userId).get();
+    if (!doc.exists) {
+      return null;
+    }
+    const data = doc.data() as LineUserRecord;
+    const { lineUserId: _ignored, ...rest } = data || {} as any;
+    return { ...(rest as Omit<LineUserRecord, 'lineUserId'>), lineUserId: userId };
+  }
+
+  static async updateLineUserRole(userId: string, role: 'farmer' | 'market'): Promise<void> {
+    if (!userId) throw new Error('userId is required');
+    if (role !== 'farmer' && role !== 'market') throw new Error('Invalid role');
+    await firestore.collection('line_users').doc(userId).set(
+      { role, updatedAt: nowTimestamp() },
+      { merge: true }
+    );
+  }
+
+  static async getAllProducts(limit: number = 10): Promise<Array<Pick<ProductRecord, 'id' | 'name' | 'price' | 'unit' | 'stock' | 'images'>>> {
+    const snapshot = await firestore
+      .collection('products')
+      .orderBy('createdAt', 'desc')
+      .limit(Math.min(Math.max(limit, 1), 20))
+      .get();
+    return snapshot.docs.map((doc: QueryDocumentSnapshot) => {
+      const data = doc.data() as ProductRecord;
+      return {
+        id: doc.id,
+        name: data.name,
+        price: data.price,
+        unit: data.unit,
+        stock: data.stock,
+        images: data.images ?? [],
+      };
+    });
+  }
+
+  static async getAllStores(limit: number = 10): Promise<Array<Pick<StoreRecord, 'id' | 'name' | 'type' | 'location'>>> {
+    const snapshot = await firestore
+      .collection('stores')
+      .orderBy('createdAt', 'desc')
+      .limit(Math.min(Math.max(limit, 1), 20))
+      .get();
+    return snapshot.docs.map((doc: QueryDocumentSnapshot) => {
+      const data = doc.data() as StoreRecord;
+      return {
+        id: doc.id,
+        name: data.name,
+        type: data.type ?? 'other',
+        location: data.location ?? '',
+      };
+    });
+  }
+
+  static async getMarketplaceStats(): Promise<{ sellers: number; buyers: number; products: number; stores: number; }>
+  {
+    const [sellers, buyers, products, stores] = await Promise.all([
+      firestore.collection('line_users').where('role', '==', 'farmer').count().get(),
+      firestore.collection('line_users').where('role', '==', 'market').count().get(),
+      firestore.collection('products').count().get(),
+      firestore.collection('stores').count().get(),
+    ]);
+
+    return {
+      sellers: sellers.data().count,
+      buyers: buyers.data().count,
+      products: products.data().count,
+      stores: stores.data().count,
+    };
+  }
+
+  static async searchProductsPublic(filters: { nameContains?: string; categoryEquals?: string; tagsAny?: string[]; minPrice?: number; maxPrice?: number; limit?: number } = {}): Promise<Array<Pick<ProductRecord, 'id' | 'name' | 'price' | 'unit' | 'stock' | 'images'>>> {
+    let baseQuery: FirebaseFirestore.Query = firestore.collection('products');
+    if (filters.categoryEquals) baseQuery = baseQuery.where('category', '==', filters.categoryEquals);
+    if (Array.isArray(filters.tagsAny) && filters.tagsAny.length) baseQuery = baseQuery.where('tags', 'array-contains-any', filters.tagsAny.slice(0, 10));
+    const hasPriceFilter = typeof filters.minPrice === 'number' || typeof filters.maxPrice === 'number';
+    if (typeof filters.minPrice === 'number') baseQuery = baseQuery.where('price', '>=', filters.minPrice);
+    if (typeof filters.maxPrice === 'number') baseQuery = baseQuery.where('price', '<=', filters.maxPrice);
+    // Avoid composite index requirement: when filtering by price, order by price instead of createdAt
+    baseQuery = hasPriceFilter ? baseQuery.orderBy('price', 'asc') : baseQuery.orderBy('createdAt', 'desc');
+
+    const requestedLimit = Math.min(Math.max(filters.limit ?? 10, 1), 20);
+    const hasName = typeof filters.nameContains === 'string' && !!filters.nameContains.trim();
+
+    // If no name filter, just fetch a single page sized to the requested limit
+    if (!hasName) {
+      const snapshot = await baseQuery.limit(requestedLimit).get();
+      const rows = snapshot.docs.map((doc: QueryDocumentSnapshot) => ({ id: doc.id, ...(doc.data() as ProductRecord) }));
+      return rows.map(r => ({ id: r.id, name: r.name, price: r.price, unit: r.unit, stock: r.stock, images: r.images ?? [] }));
+    }
+
+    // With a name filter, paginate through the entire queryable dataset, filter client-side by name, then return up to requestedLimit
+    const nameKw = filters.nameContains!.trim().toLowerCase();
+    const pageSize = 200; // per-page fetch size for efficiency
+    let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | undefined;
+    const matched: Array<Pick<ProductRecord, 'id' | 'name' | 'price' | 'unit' | 'stock' | 'images'>> = [];
+
+    // Safety cap to prevent runaway scans in extremely large datasets
+    const SCAN_CAP = 50000; // total docs to scan at most in one request
+    let scanned = 0;
+
+    while (true) {
+      let q = baseQuery.limit(pageSize);
+      if (lastDoc) q = q.startAfter(lastDoc);
+      const snapshot = await q.get();
+      if (snapshot.empty) break;
+
+      for (const doc of snapshot.docs) {
+        scanned++;
+        const data = doc.data() as ProductRecord;
+        if ((data.name || '').toLowerCase().includes(nameKw)) {
+          matched.push({ id: doc.id, name: data.name, price: data.price, unit: data.unit, stock: data.stock, images: data.images ?? [] });
+        }
+      }
+
+      lastDoc = snapshot.docs[snapshot.docs.length - 1];
+      if (scanned >= SCAN_CAP) break;
+    }
+
+    return matched.slice(0, requestedLimit);
+  }
+
+  static async searchStoresPublic(filters: { nameContains?: string; typeEquals?: string; locationContains?: string; limit?: number } = {}): Promise<Array<Pick<StoreRecord, 'id' | 'name' | 'type' | 'location'>>> {
+    let q: FirebaseFirestore.Query = firestore.collection('stores');
+    if (filters.typeEquals) q = q.where('type', '==', filters.typeEquals);
+    q = q.orderBy('createdAt', 'desc');
+    const snapshot = await q.limit(Math.min(Math.max(filters.limit ?? 10, 1), 20)).get();
+    let rows = snapshot.docs.map((doc: QueryDocumentSnapshot) => ({ id: doc.id, ...(doc.data() as StoreRecord) }));
+    if (filters.nameContains && filters.nameContains.trim()) {
+      const kw = filters.nameContains.trim().toLowerCase();
+      rows = rows.filter(r => (r.name || '').toLowerCase().includes(kw));
+    }
+    if (filters.locationContains && filters.locationContains.trim()) {
+      const kw = filters.locationContains.trim().toLowerCase();
+      rows = rows.filter(r => (r.location || '').toLowerCase().includes(kw));
+    }
+    return rows.map(r => ({ id: r.id, name: r.name, type: r.type ?? 'other', location: r.location ?? '' }));
+  }
+
   static async upsertLineUser(user: LineUserRecord): Promise<void> {
     if (!user.lineUserId) {
       throw new Error('lineUserId is required for upsertLineUser');
@@ -124,16 +264,31 @@ export class DatabaseService {
   }
 
   static async getProductsByUser(userId: string): Promise<ProductRecord[]> {
-    const snapshot = await firestore
-      .collection('products')
-      .where('userId', '==', userId)
-      .orderBy('createdAt', 'desc')
-      .get();
+    try {
+      const snapshot = await firestore
+        .collection('products')
+        .where('userId', '==', userId)
+        .orderBy('createdAt', 'desc')
+        .get();
 
-    return snapshot.docs.map((doc: QueryDocumentSnapshot) => ({
-      id: doc.id,
-      ...(doc.data() as ProductRecord),
-    }));
+      return snapshot.docs.map((doc: QueryDocumentSnapshot) => ({
+        id: doc.id,
+        ...(doc.data() as ProductRecord),
+      }));
+    } catch (err: any) {
+      // If index is missing, fall back to no orderBy to avoid hard failure
+      const message = String(err?.message || '');
+      if (message.includes('The query requires an index')) {
+        const snapshot = await firestore
+          .collection('products')
+          .where('userId', '==', userId)
+          .get();
+        return snapshot.docs
+          .map((doc: QueryDocumentSnapshot) => ({ id: doc.id, ...(doc.data() as ProductRecord) }))
+          .sort((a: any, b: any) => ((b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0)));
+      }
+      throw err;
+    }
   }
 
   static async createProduct(userId: string, productData: Partial<ProductRecord>): Promise<{ id: string }> {
@@ -141,15 +296,25 @@ export class DatabaseService {
       throw new Error('userId is required to create a product');
     }
 
+    // Enforce required fields at server-side too
+    const name = String(productData.name || '').trim();
+    const price = typeof productData.price === 'number' ? productData.price : NaN;
+    const unit = String(productData.unit || '').trim();
+    const stock = typeof productData.stock === 'number' ? productData.stock : NaN;
+
+    if (!name || !(price > 0) || !unit || !(stock >= 0)) {
+      throw new Error('Invalid product payload. Required: name (non-empty), price (>0), unit (non-empty), stock (>=0).');
+    }
+
     const docRef = firestore.collection('products').doc();
     await docRef.set({
       userId,
-      name: productData.name ?? '未命名商品',
+      name,
       description: productData.description ?? '',
       category: productData.category ?? 'general',
-      price: productData.price ?? 0,
-      unit: productData.unit ?? 'unit',
-      stock: productData.stock ?? 0,
+      price,
+      unit,
+      stock,
       images: productData.images ?? [],
       tags: productData.tags ?? [],
       isActive: productData.isActive ?? true,
@@ -159,6 +324,39 @@ export class DatabaseService {
     });
 
     return { id: docRef.id };
+  }
+
+  static async updateProductImages(userId: string, productId: string, images: string[]): Promise<void> {
+    if (!userId || !productId) {
+      throw new Error('userId and productId are required to update product images');
+    }
+    const ref = firestore.collection('products').doc(productId);
+    const snap = await ref.get();
+    if (!snap.exists) return;
+    const data = snap.data() as ProductRecord;
+    if (data.userId !== userId) {
+      throw new Error('Permission denied to update this product');
+    }
+    await ref.update({ images, updatedAt: nowTimestamp() });
+  }
+
+  static async getLatestProductByUser(userId: string): Promise<ProductRecord | null> {
+    const snapshot = await firestore
+      .collection('products')
+      .where('userId', '==', userId)
+      .orderBy('createdAt', 'desc')
+      .limit(1)
+      .get();
+    if (snapshot.empty) return null;
+    const doc = snapshot.docs[0];
+    return { id: doc.id, ...(doc.data() as ProductRecord) };
+  }
+
+  static async getProductById(productId: string): Promise<ProductRecord | null> {
+    if (!productId) return null;
+    const doc = await firestore.collection('products').doc(productId).get();
+    if (!doc.exists) return null;
+    return { id: doc.id, ...(doc.data() as ProductRecord) };
   }
 
   static async getStoresByUser(userId: string): Promise<StoreRecord[]> {
@@ -179,10 +377,15 @@ export class DatabaseService {
       throw new Error('userId is required to create a store');
     }
 
+    const name = String(storeData.name || '').trim();
+    if (!name) {
+      throw new Error('Invalid store payload. Required: name (non-empty).');
+    }
+
     const docRef = firestore.collection('stores').doc();
     await docRef.set({
       userId,
-      name: storeData.name ?? '未命名店家',
+      name,
       type: storeData.type ?? 'other',
       location: storeData.location ?? '',
       contact: storeData.contact ?? {},
