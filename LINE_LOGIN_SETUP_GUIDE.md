@@ -132,14 +132,3 @@ open https://farm2market-99.web.app/test-line-redirect
 
 
 
-
-
-
-
-
-
-
-
-
-
-

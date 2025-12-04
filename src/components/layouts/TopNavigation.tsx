@@ -13,12 +13,7 @@ import {
   User,
   LogOut,
   Settings,
-  Globe,
-  LayoutDashboard,
-  Trees,
-  Package,
-  Calendar,
-  Star
+  Globe
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -33,76 +28,7 @@ const TopNavigation: React.FC = () => {
     { label: t('nav.home'), href: '/', key: 'home' },
     { label: t('nav.farmers'), href: '/farmer', key: 'farmers' },
     { label: t('nav.markets'), href: '/market', key: 'markets' },
-    { label: t('nav.store'), href: '/market/products', key: 'store' },
     { label: t('nav.demo'), href: '/demo/line', key: 'demo' },
-  ];
-
-  // Market-specific navigation items for mobile
-  const marketNavigationItems = [
-    { 
-      label: t('dashboard.overview'), 
-      href: '/market', 
-      icon: LayoutDashboard,
-      key: 'dashboard'
-    },
-    { 
-      label: t('farms.title'), 
-      href: '/market/farms', 
-      icon: Trees,
-      key: 'farms'
-    },
-    { 
-      label: t('catalog.title'), 
-      href: '/market/products', 
-      icon: Package,
-      key: 'products'
-    },
-    { 
-      label: t('schedule.title'), 
-      href: '/market/schedule', 
-      icon: Calendar,
-      key: 'schedule'
-    },
-    { 
-      label: t('ratings.title'), 
-      href: '/market/ratings', 
-      icon: Star,
-      key: 'ratings'
-    },
-  ];
-
-  // Farmer-specific navigation items for mobile
-  const farmerNavigationItems = [
-    {
-      label: t('dashboard.overview'),
-      href: '/farmer',
-      icon: LayoutDashboard,
-      key: 'dashboard'
-    },
-    {
-      label: t('products.title'),
-      href: '/farmer/products',
-      icon: Package,
-      key: 'products'
-    },
-    {
-      label: t('stores.title'),
-      href: '/farmer/stores',
-      icon: Trees,
-      key: 'stores'
-    },
-    {
-      label: t('marketing.title'),
-      href: '/farmer/marketing',
-      icon: Calendar,
-      key: 'marketing'
-    },
-    {
-      label: t('analytics.title'),
-      href: '/farmer/analytics',
-      icon: Star,
-      key: 'analytics'
-    }
   ];
 
   const isActive = (path: string) => {
@@ -232,69 +158,6 @@ const TopNavigation: React.FC = () => {
                 {item.label}
               </Link>
             ))}
-            
-            {/* Market-specific navigation - only show when in market section */}
-            {location.pathname.startsWith('/market') && (
-              <>
-                <div className="border-t border-gray-200 my-2"></div>
-                <div className="px-3 py-1">
-                  <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">{t('nav.markets')}</h3>
-                </div>
-                {marketNavigationItems.map((item) => {
-                  const Icon = item.icon;
-                  const subActive = item.href === '/market'
-                    ? location.pathname === '/market'
-                    : location.pathname.startsWith(item.href);
-                  return (
-                    <Link
-                      key={item.key}
-                      to={item.href}
-                      className={`flex items-center text-base font-medium px-3 py-2 rounded-md transition-colors ${
-                        subActive
-                          ? 'bg-blue-50 text-blue-600'
-                          : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
-                      }`}
-                      onClick={() => setIsMobileMenuOpen(false)}
-                    >
-                      <Icon className="w-5 h-5 mr-3" />
-                      {item.label}
-                    </Link>
-                  );
-                })}
-              </>
-            )}
-
-            {/* Farmer-specific navigation - only show when in farmer section */}
-            {location.pathname.startsWith('/farmer') && (
-              <>
-                <div className="border-t border-gray-200 my-2"></div>
-                <div className="px-3 py-1">
-                  <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">{t('nav.farmers')}</h3>
-                </div>
-                {farmerNavigationItems.map((item) => {
-                  const Icon = item.icon;
-                  const subActive = item.href === '/farmer'
-                    ? location.pathname === '/farmer'
-                    : location.pathname.startsWith(item.href);
-                  return (
-                    <Link
-                      key={item.key}
-                      to={item.href}
-                      className={`flex items-center text-base font-medium px-3 py-2 rounded-md transition-colors ${
-                        subActive
-                          ? 'bg-green-50 text-green-600'
-                          : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
-                      }`}
-                      onClick={() => setIsMobileMenuOpen(false)}
-                    >
-                      <Icon className="w-5 h-5 mr-3" />
-                      {item.label}
-                    </Link>
-                  );
-                })}
-              </>
-            )}
-            
             <div className="border-t border-gray-200 my-2"></div>
             {/* Mobile Language Toggle */}
             <div className="flex justify-around px-3 py-2">

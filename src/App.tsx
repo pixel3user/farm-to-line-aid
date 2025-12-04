@@ -1,6 +1,5 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import AppLayout from "./components/layouts/AppLayout";
-import DeepLinkRouter from "./components/DeepLinkRouter";
 import FarmerLayout from "./components/layouts/FarmerLayout";
 import MarketLayout from "./components/layouts/MarketLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -37,7 +36,7 @@ const App = () => {
     <BrowserRouter>
       <Routes>
             {/* Public routes */}
-            <Route path="/" element={<AppLayout><><DeepLinkRouter /><Home /></></AppLayout>} />
+            <Route path="/" element={<AppLayout><Home /></AppLayout>} />
             <Route path="/auth/signin" element={<AppLayout><SignIn /></AppLayout>} />
             <Route path="/auth/signup" element={<AppLayout><SignUp /></AppLayout>} />
             <Route path="/auth/line/callback" element={<AppLayout><LineCallback /></AppLayout>} />
@@ -45,7 +44,7 @@ const App = () => {
         
         {/* Farmer routes */}
         <Route path="/farmer" element={
-          <ProtectedRoute>
+          <ProtectedRoute requiredRole="farmer">
             <FarmerLayout />
           </ProtectedRoute>
         }>
@@ -59,7 +58,7 @@ const App = () => {
 
         {/* Market routes */}
         <Route path="/market" element={
-          <ProtectedRoute>
+          <ProtectedRoute requiredRole="market">
             <MarketLayout />
           </ProtectedRoute>
         }>

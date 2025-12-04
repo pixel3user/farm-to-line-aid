@@ -384,10 +384,7 @@ export class DatabaseService {
 
     const q = query(collection(db, 'products'), ...constraints);
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({
-      ...(doc.data() as Product),
-      id: doc.id,
-    }));
+    return snapshot.docs.map(doc => doc.data() as Product);
   }
 
   // Conversation operations
