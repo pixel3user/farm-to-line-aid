@@ -6,6 +6,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import TopNavigation from './TopNavigation';
 import { useAuth } from '@/contexts/AuthContext';
+import LocationReminder from '@/components/LocationReminder';
 
 const queryClient = new QueryClient();
 
@@ -31,6 +32,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
         <div className="min-h-screen bg-background">
           <TopNavigation />
           <main className="pt-16">
+            <LocationReminder />
             {children || <Outlet />}
           </main>
           <Toaster />

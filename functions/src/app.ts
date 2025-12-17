@@ -16,7 +16,10 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true }));
 
+// Support both prefixed and root paths so Cloud Functions (where the function name is the first segment)
+// and local dev both resolve the same routes.
 app.use('/api', apiRoutes);
+app.use('/', apiRoutes);
 
 app.get('/health', (req, res) => {
   res.json({

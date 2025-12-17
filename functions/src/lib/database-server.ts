@@ -1,4 +1,5 @@
 import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
+import type { LinePayConfirmResponse, LinePayReserveResponse } from './linePay';
 import admin from './firebaseAdmin';
 
 const firestore = admin.firestore();
@@ -11,6 +12,7 @@ type FirestoreDocumentData = FirebaseFirestore.DocumentData;
 
 export interface LineUserRecord {
   lineUserId: string;
+  lineId?: string;
   displayName?: string;
   pictureUrl?: string;
   statusMessage?: string;
@@ -18,6 +20,7 @@ export interface LineUserRecord {
   role?: 'farmer' | 'market';
   createdAt?: Timestamp | FirebaseFirestore.FieldValue;
   updatedAt?: Timestamp | FirebaseFirestore.FieldValue;
+  isAdmin?: boolean;
 }
 
 export interface ProductRecord {
@@ -63,6 +66,75 @@ export interface MarketingMaterialRecord {
   isActive?: boolean;
   createdAt?: Timestamp | FirebaseFirestore.FieldValue;
   usage?: Record<string, unknown>;
+}
+
+export interface OrderItemRecord {
+  productId?: string;
+  ownerId?: string;
+  name: string;
+  price: number;
+  quantity: number;
+  unit?: string;
+  imageUrl?: string;
+}
+
+export interface OrderRecord {
+  orderId: string;
+  status: 'pending' | 'reserved' | 'authorized' | 'confirmed' | 'paid' | 'cancelled' | 'failed';
+  paymentMethod?: 'line_pay' | 'cod' | 'other';
+  amount: number;
+  currency: string;
+  items: OrderItemRecord[];
+  sellerIds?: string[];
+  buyer?: {
+    userId?: string;
+    displayName?: string;
+    email?: string;
+  };
+  shipping?: {
+    fullName?: string;
+    phone?: string;
+    email?: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    city?: string;
+    postalCode?: string;
+    instructions?: string;
+  };
+  redirectUrls?: {
+    successUrl?: string;
+    cancelUrl?: string;
+  };
+  metadata?: Record<string, unknown>;
+  deliveryStatus?: 'awaiting_pickup' | 'enroute' | 'delivered' | 'cancelled';
+  linePay?: {
+    transactionId?: string;
+    paymentUrl?: {
+      web?: string;
+      app?: string;
+    };
+    reservedAt?: Timestamp | FirebaseFirestore.FieldValue;
+    confirmedAt?: Timestamp | FirebaseFirestore.FieldValue;
+    rawReserveResponse?: LinePayReserveResponse | Record<string, unknown>;
+    rawConfirmResponse?: LinePayConfirmResponse | Record<string, unknown>;
+  };
+  createdAt?: Timestamp | FirebaseFirestore.FieldValue;
+  updatedAt?: Timestamp | FirebaseFirestore.FieldValue;
+}
+
+export interface SavedAddressRecord {
+  id?: string;
+  label: string;
+  fullName: string;
+  phone: string;
+  email?: string;
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  postalCode: string;
+  instructions?: string;
+  createdAt?: Timestamp | FirebaseFirestore.FieldValue;
+  updatedAt?: Timestamp | FirebaseFirestore.FieldValue;
 }
 
 export class DatabaseService {
@@ -214,11 +286,13 @@ export class DatabaseService {
     const userDoc = firestore.collection('line_users').doc(user.lineUserId);
     const payload: FirestoreDocumentData = {
       displayName: user.displayName ?? null,
+      lineId: user.lineId ?? user.lineUserId ?? null,
       pictureUrl: user.pictureUrl ?? null,
       statusMessage: user.statusMessage ?? null,
       email: user.email ?? null,
       role: user.role ?? null,
       updatedAt: nowTimestamp(),
+      ...(user.isAdmin !== undefined ? { isAdmin: user.isAdmin } : {}),
     };
 
     const snapshot = await userDoc.get();
@@ -239,6 +313,7 @@ export class DatabaseService {
           lastInteraction: nowTimestamp(),
           favoriteFeatures: [],
         },
+        isAdmin: user.isAdmin ?? false,
         ...payload,
       });
     }
@@ -431,6 +506,97 @@ export class DatabaseService {
 
   static async healthCheck(): Promise<void> {
     await firestore.doc('_system/health-check').set({ checkedAt: nowTimestamp() }, { merge: true });
+  }
+
+  static async createOrder(order: OrderRecord): Promise<{ id: string }> {
+    if (!order?.orderId) {
+      throw new Error('orderId is required to create an order');
+    }
+    if (!Array.isArray(order.items) || order.items.length === 0) {
+      throw new Error('Order must include at least one item');
+    }
+
+    const orderRef = firestore.collection('orders').doc(order.orderId);
+    await orderRef.set({
+      ...order,
+      status: order.status ?? 'pending',
+      createdAt: order.createdAt ?? nowTimestamp(),
+      updatedAt: order.updatedAt ?? nowTimestamp(),
+    });
+    return { id: orderRef.id };
+  }
+
+  static async updateOrder(orderId: string, updates: Partial<OrderRecord>): Promise<void> {
+    if (!orderId) throw new Error('orderId is required to update an order');
+    const orderRef = firestore.collection('orders').doc(orderId);
+    await orderRef.set(
+      {
+        ...updates,
+        updatedAt: nowTimestamp(),
+      },
+      { merge: true }
+    );
+  }
+
+  static async getOrderByOrderId(orderId: string): Promise<OrderRecord | null> {
+    if (!orderId) return null;
+    const snapshot = await firestore.collection('orders').doc(orderId).get();
+    if (!snapshot.exists) {
+      return null;
+    }
+    return snapshot.data() as OrderRecord;
+  }
+
+  // Saved addresses
+  static async getSavedAddresses(userId: string): Promise<SavedAddressRecord[]> {
+    if (!userId) return [];
+    const snapshot = await firestore
+      .collection('line_users')
+      .doc(userId)
+      .collection('addresses')
+      .orderBy('createdAt', 'desc')
+      .get();
+    return snapshot.docs.map((doc: QueryDocumentSnapshot) => ({ id: doc.id, ...(doc.data() as SavedAddressRecord) }));
+  }
+
+  static async upsertSavedAddress(userId: string, address: SavedAddressRecord): Promise<{ id: string }> {
+    if (!userId) throw new Error('userId is required');
+    const collectionRef = firestore.collection('line_users').doc(userId).collection('addresses');
+    const docRef = address.id ? collectionRef.doc(address.id) : collectionRef.doc();
+    await docRef.set(
+      {
+        label: address.label || 'Saved address',
+        fullName: address.fullName,
+        phone: address.phone,
+        email: address.email || null,
+        addressLine1: address.addressLine1,
+        addressLine2: address.addressLine2 || '',
+        city: address.city,
+        postalCode: address.postalCode,
+        instructions: address.instructions || '',
+        createdAt: address.createdAt || nowTimestamp(),
+        updatedAt: nowTimestamp(),
+      },
+      { merge: true }
+    );
+    return { id: docRef.id };
+  }
+
+  static async deleteSavedAddress(userId: string, addressId: string): Promise<void> {
+    if (!userId || !addressId) return;
+    await firestore.collection('line_users').doc(userId).collection('addresses').doc(addressId).delete();
+  }
+
+  static async confirmOrder(orderId: string): Promise<void> {
+    if (!orderId) throw new Error('orderId is required');
+    await firestore.collection('orders').doc(orderId).set(
+      {
+        status: 'confirmed',
+        deliveryStatus: 'awaiting_pickup',
+        updatedAt: nowTimestamp(),
+      },
+      { merge: true }
+    );
   }
 }
 

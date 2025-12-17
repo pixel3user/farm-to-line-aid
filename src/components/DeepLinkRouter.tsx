@@ -28,9 +28,18 @@ export default function DeepLinkRouter() {
         product = stateParams.get('product') || product;
       } catch {}
     }
+    // Allow product-only deep links to resolve to the catalog
+    if (!tab && product) {
+      tab = 'products';
+    }
     if (!tab) return;
 
-    const role = user?.role || roleParam || null;
+    // If a specific product is being opened from LINE, force the market storefront
+    // (we want a buyer-facing view even if role=farmer is present).
+    const role = (() => {
+      if (product) return 'market';
+      return user?.role || roleParam || null;
+    })();
 
     function routeFor(tabName: string): string | null {
       switch (tabName) {
@@ -66,5 +75,3 @@ export default function DeepLinkRouter() {
 
   return null;
 }
-
-

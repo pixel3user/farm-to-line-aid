@@ -6,6 +6,12 @@ import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
 import TopNavigation from './TopNavigation';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { featureFlags } from '@/config/featureFlags';
+import LocationReminder from '@/components/LocationReminder';
+import { Toaster } from '@/components/ui/toaster';
+import { Toaster as Sonner } from '@/components/ui/sonner';
+import FarmerOnboarding from '@/components/FarmerOnboarding';
+import FarmerTutorial from '@/components/FarmerTutorial';
 import { 
   LayoutDashboard, 
   Package, 
@@ -13,6 +19,7 @@ import {
   Megaphone, 
   BarChart3, 
   BookOpen,
+  Truck,
   Menu,
   X,
   Plus,
@@ -56,6 +63,12 @@ const FarmerLayout: React.FC = () => {
       key: 'stores'
     },
     { 
+      label: t('schedule.title'), 
+      href: '/farmer/delivery', 
+      icon: Truck,
+      key: 'delivery'
+    },
+    { 
       label: t('marketing.title'), 
       href: '/farmer/marketing', 
       icon: Megaphone,
@@ -73,13 +86,29 @@ const FarmerLayout: React.FC = () => {
       icon: BookOpen,
       key: 'references'
     },
-  ];
+  ].filter((item) => {
+    if (item.key === 'marketing') {
+      return featureFlags.marketingTools;
+    }
+    if (item.key === 'analytics') {
+      return featureFlags.analytics;
+    }
+    if (item.key === 'references') {
+      return featureFlags.references;
+    }
+    return true;
+  });
 
   const quickActions = [
-    { label: t('products.add'), icon: Plus, href: '/farmer/products?action=add' },
-    { label: t('marketing.generate'), icon: FileText, href: '/farmer/marketing?action=create' },
-    { label: t('dashboard.quickActions.findStores.title'), icon: MapPin, href: '/farmer/stores' },
-  ];
+    { key: 'add-product', label: t('products.add'), icon: Plus, href: '/farmer/products?action=add' },
+    { key: 'marketing', label: t('marketing.generate'), icon: FileText, href: '/farmer/marketing?action=create' },
+    { key: 'find-stores', label: t('dashboard.quickActions.findStores.title'), icon: MapPin, href: '/farmer/stores' },
+  ].filter((action) => {
+    if (action.key === 'marketing') {
+      return featureFlags.marketingTools;
+    }
+    return true;
+  });
 
   const isActive = (path: string) => {
     if (path === '/farmer') {
@@ -92,10 +121,28 @@ const FarmerLayout: React.FC = () => {
     <div className="min-h-screen bg-gray-50">
       {/* Top Navigation */}
       <TopNavigation />
-      
       {/* Mobile Navigation */}
       {isMobile ? (
-        null
+        <div className="sticky top-16 z-30 bg-white border-b shadow-sm">
+          <div className="flex overflow-x-auto gap-2 px-3 py-2">
+            {navigationItems.map((item) => {
+              const Icon = item.icon;
+              const active = isActive(item.href);
+              return (
+                <Link
+                  key={item.key}
+                  to={item.href}
+                  className={`flex items-center gap-1 px-3 py-2 rounded-full text-sm whitespace-nowrap transition-colors ${
+                    active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
       ) : (
         /* Desktop Sidebar */
         <div className="fixed inset-y-0 left-0 z-30 w-64 bg-white shadow-lg" style={{ top: '64px' }}>
@@ -144,7 +191,7 @@ const FarmerLayout: React.FC = () => {
                 const Icon = action.icon;
                 return (
                   <Link
-                    key={action.label}
+                    key={action.key}
                     to={action.href}
                     className="flex items-center px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900 rounded-md transition-colors"
                   >
@@ -177,9 +224,19 @@ const FarmerLayout: React.FC = () => {
       <div className={isMobile ? '' : 'md:ml-64'} style={{ marginTop: '64px' }}>
         {/* Page content */}
         <div className="p-3 sm:p-4 md:p-6 lg:p-8">
-          <Outlet />
+          <LocationReminder />
+          <FarmerOnboarding>
+            <>
+              <FarmerTutorial />
+              <Outlet />
+            </>
+          </FarmerOnboarding>
         </div>
       </div>
+
+      {/* Toast containers for protected routes */}
+      <Toaster />
+      <Sonner />
 
       {/* Mobile Bottom Navigation for LIFF */}
       {isMobile && isLiffApp && (

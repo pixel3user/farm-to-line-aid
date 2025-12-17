@@ -20,6 +20,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { UserDataService } from '@/services/userDataService';
 import { Conversation, Store } from '@/lib/database';
+import { featureFlags } from '@/config/featureFlags';
+import FarmerLocationMap from '@/components/FarmerLocationMap';
 
 const formatTimestamp = (timestamp?: Timestamp | Date) => {
   if (!timestamp) return '';
@@ -48,6 +50,7 @@ const FarmerDashboard: React.FC = () => {
   const [recentConversations, setRecentConversations] = useState<Conversation[]>([]);
   const [isLoadingConversations, setIsLoadingConversations] = useState(false);
   const hasRequestedDataRef = useRef(false);
+  const marketingEnabled = featureFlags.marketingTools;
 
   useEffect(() => {
     if (!user?.id) {
@@ -95,35 +98,87 @@ const FarmerDashboard: React.FC = () => {
     authLoading ||
     isRefreshingData;
 
-  const metricCards = useMemo(
-    () => [
+  const metricCards = useMemo(() => {
+    const cards = [
       {
+        key: 'activeProducts',
         title: t('dashboard.metrics.activeProducts'),
         value: userStats?.activeProducts ?? 0,
         icon: Package,
-        color: 'bg-green-100 text-green-700'
+        color: 'bg-green-100 text-green-700',
+        href: '/farmer/products'
       },
       {
+        key: 'lowStockAlerts',
         title: t('dashboard.metrics.lowStockAlerts'),
         value: userStats?.lowStockProducts ?? 0,
         icon: Bell,
         color: 'bg-red-100 text-red-700'
       },
       {
+        key: 'partnerStores',
         title: t('dashboard.metrics.partnerStores'),
         value: userStats?.totalStores ?? 0,
         icon: Users,
-        color: 'bg-blue-100 text-blue-700'
+        color: 'bg-blue-100 text-blue-700',
+        href: '/farmer/stores'
       },
       {
+        key: 'marketingAssets',
         title: t('dashboard.metrics.marketingAssets'),
         value: userStats?.totalMarketingMaterials ?? 0,
         icon: FileText,
         color: 'bg-purple-100 text-purple-700'
       }
+    ];
+
+    return marketingEnabled ? cards : cards.filter((card) => card.key !== 'marketingAssets');
+  }, [t, userStats, marketingEnabled]);
+
+  const quickActions = useMemo(
+    () => [
+      {
+        key: 'createSupply',
+        title: t('dashboard.quickActions.createSupply.title'),
+        description: t('dashboard.quickActions.createSupply.desc'),
+        icon: Plus,
+        href: '/farmer/products?action=add',
+        color: 'from-green-500 to-green-600',
+        hoverColor: 'hover:from-green-600 hover:to-green-700'
+      },
+      {
+        key: 'marketing',
+        title: t('dashboard.quickActions.marketing.title'),
+        description: t('dashboard.quickActions.marketing.desc'),
+        icon: FileText,
+        href: '/farmer/marketing?action=create',
+        color: 'from-blue-500 to-blue-600',
+        hoverColor: 'hover:from-blue-600 hover:to-blue-700'
+      },
+      {
+        key: 'findStores',
+        title: t('dashboard.quickActions.findStores.title'),
+        description: t('dashboard.quickActions.findStores.desc'),
+        icon: MapPin,
+        href: '/farmer/stores',
+        color: 'from-purple-500 to-purple-600',
+        hoverColor: 'hover:from-purple-600 hover:to-purple-700'
+      },
+      {
+        key: 'openDemo',
+        title: t('dashboard.quickActions.openDemo.title'),
+        description: t('dashboard.quickActions.openDemo.desc'),
+        icon: Smartphone,
+        href: '/demo/line',
+        color: 'from-orange-500 to-orange-600',
+        hoverColor: 'hover:from-orange-600 hover:to-orange-700'
+      }
     ],
-    [t, userStats]
+    [t]
   );
+  const visibleQuickActions = marketingEnabled
+    ? quickActions
+    : quickActions.filter((action) => action.key !== 'marketing');
 
   const storeStatusSummary = useMemo(() => {
     const summary: Record<string, number> = {};
@@ -156,7 +211,7 @@ const FarmerDashboard: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Welcome Section */}
-      <div className="bg-gradient-to-r from-green-500 via-green-600 to-green-700 rounded-2xl p-8 text-white shadow-xl">
+      <div className="bg-gradient-to-r from-green-500 via-green-600 to-green-700 rounded-2xl p-8 text-white shadow-xl" data-tour="farmer-welcome">
         <div className="flex items-center justify-between">
           <div className="space-y-3">
             <h1 className="text-3xl font-bold">
@@ -186,27 +241,32 @@ const FarmerDashboard: React.FC = () => {
 
       {/* Metrics */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {metricCards.map((metric, index) => {
+        {metricCards.map((metric) => {
           const Icon = metric.icon;
-          return (
-            <Card key={index} className="group hover:shadow-xl transition-all duration-300 border-0 shadow-lg">
+          const helper =
+            metric.key === 'activeProducts' && (userStats?.activeProducts ?? 0) > 0
+              ? { text: '+2 this week', className: 'text-xs text-green-600 font-medium' }
+              : metric.key === 'lowStockAlerts' && (userStats?.lowStockProducts ?? 0) > 0
+              ? { text: t('dashboard.lowStockAlerts'), className: 'text-xs text-red-600 font-medium' }
+              : metric.key === 'partnerStores' && (userStats?.totalStores ?? 0) > 0
+              ? { text: 'Growing network', className: 'text-xs text-blue-600 font-medium' }
+              : metric.key === 'marketingAssets' && (userStats?.totalMarketingMaterials ?? 0) > 0
+              ? { text: 'Active campaigns', className: 'text-xs text-purple-600 font-medium' }
+              : null;
+
+          const card = (
+            <Card
+              data-tour={`metric-${metric.key}`}
+              className={`group hover:shadow-xl transition-all duration-300 border-0 shadow-lg ${
+                metric.href ? 'cursor-pointer' : ''
+              }`}
+            >
               <CardContent className="p-6">
                 <div className="flex items-center justify-between">
                   <div className="space-y-2">
                     <p className="text-sm font-medium text-gray-600">{metric.title}</p>
                     <p className="text-3xl font-bold text-gray-900 group-hover:scale-105 transition-transform">{metric.value}</p>
-                    {index === 0 && userStats?.activeProducts > 0 && (
-                      <p className="text-xs text-green-600 font-medium">+2 this week</p>
-                    )}
-                    {index === 1 && userStats?.lowStockProducts > 0 && (
-                      <p className="text-xs text-red-600 font-medium">Needs attention</p>
-                    )}
-                    {index === 2 && userStats?.totalStores > 0 && (
-                      <p className="text-xs text-blue-600 font-medium">Growing network</p>
-                    )}
-                    {index === 3 && userStats?.totalMarketingMaterials > 0 && (
-                      <p className="text-xs text-purple-600 font-medium">Active campaigns</p>
-                    )}
+                    {helper && <p className={helper.className}>{helper.text}</p>}
                   </div>
                   <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${metric.color} group-hover:scale-110 transition-transform shadow-lg`}>
                     <Icon className="w-8 h-8" />
@@ -214,6 +274,14 @@ const FarmerDashboard: React.FC = () => {
                 </div>
               </CardContent>
             </Card>
+          );
+
+          return metric.href ? (
+            <Link key={metric.key} to={metric.href} className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-green-500 rounded-2xl">
+              {card}
+            </Link>
+          ) : (
+            <div key={metric.key}>{card}</div>
           );
         })}
       </div>
@@ -228,38 +296,10 @@ const FarmerDashboard: React.FC = () => {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[{
-              title: t('dashboard.quickActions.createSupply.title'),
-              description: t('dashboard.quickActions.createSupply.desc'),
-              icon: Plus,
-              href: '/farmer/products?action=add',
-              color: 'from-green-500 to-green-600',
-              hoverColor: 'hover:from-green-600 hover:to-green-700'
-            }, {
-              title: t('dashboard.quickActions.marketing.title'),
-              description: t('dashboard.quickActions.marketing.desc'),
-              icon: FileText,
-              href: '/farmer/marketing?action=create',
-              color: 'from-blue-500 to-blue-600',
-              hoverColor: 'hover:from-blue-600 hover:to-blue-700'
-            }, {
-              title: t('dashboard.quickActions.findStores.title'),
-              description: t('dashboard.quickActions.findStores.desc'),
-              icon: MapPin,
-              href: '/farmer/stores',
-              color: 'from-purple-500 to-purple-600',
-              hoverColor: 'hover:from-purple-600 hover:to-purple-700'
-            }, {
-              title: t('dashboard.quickActions.openDemo.title'),
-              description: t('dashboard.quickActions.openDemo.desc'),
-              icon: Smartphone,
-              href: '/demo/line',
-              color: 'from-orange-500 to-orange-600',
-              hoverColor: 'hover:from-orange-600 hover:to-orange-700'
-            }].map((action, index) => {
+            {visibleQuickActions.map((action) => {
               const Icon = action.icon;
               return (
-                <Link key={index} to={action.href} className="group">
+                <Link key={action.key} to={action.href} className="group">
                   <div className="bg-white border-2 border-gray-100 rounded-2xl p-6 hover:border-gray-200 hover:shadow-xl transition-all duration-300 h-full">
                     <div className={`w-16 h-16 bg-gradient-to-br ${action.color} ${action.hoverColor} rounded-2xl flex items-center justify-center mx-auto mb-4 group-hover:scale-110 transition-transform shadow-lg`}>
                       <Icon className="w-8 h-8 text-white" />
@@ -276,9 +316,9 @@ const FarmerDashboard: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Recent Activity & Performance */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="shadow-lg border-0">
+      {/* Recent Activity, Performance & Location */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <Card className="shadow-lg border-0 lg:col-span-1">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center text-xl">
               <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mr-3">
@@ -316,7 +356,7 @@ const FarmerDashboard: React.FC = () => {
           </CardContent>
         </Card>
 
-        <Card className="shadow-lg border-0">
+        <Card className="shadow-lg border-0 lg:col-span-1">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center text-xl">
               <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mr-3">
@@ -364,6 +404,23 @@ const FarmerDashboard: React.FC = () => {
             </div>
           </CardContent>
         </Card>
+
+        <Card className="shadow-lg border-0 lg:col-span-1">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center text-xl">
+              <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mr-3">
+                <MapPin className="w-5 h-5 text-green-600" />
+              </div>
+              {t('farmer.location.map.title')}
+            </CardTitle>
+            <CardDescription className="text-base">
+              {t('farmer.location.map.subtitle')}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <FarmerLocationMap />
+          </CardContent>
+        </Card>
       </div>
 
       {/* Store Insights */}
@@ -381,16 +438,22 @@ const FarmerDashboard: React.FC = () => {
           {userStores && userStores.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
               {Object.entries(storeStatusSummary).map(([status, count]) => (
-                <div key={status} className="bg-gradient-to-br from-gray-50 to-white border-2 border-gray-100 rounded-xl p-6 hover:border-gray-200 transition-colors">
-                  <p className="text-sm font-medium text-gray-600 capitalize mb-2">{t(`stores.status.${status}`)}</p>
-                  <p className="text-3xl font-bold text-gray-900">{count}</p>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-3">
-                    <div 
-                      className="bg-purple-500 h-2 rounded-full transition-all duration-300" 
-                      style={{ width: `${(count / Math.max(...Object.values(storeStatusSummary))) * 100}%` }}
-                    ></div>
+                <Link
+                  key={status}
+                  to={`/farmer/stores?status=${status}`}
+                  className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-purple-500 rounded-2xl"
+                >
+                  <div className="bg-gradient-to-br from-gray-50 to-white border-2 border-gray-100 rounded-xl p-6 hover:border-gray-200 transition-colors cursor-pointer">
+                    <p className="text-sm font-medium text-gray-600 capitalize mb-2">{t(`stores.status.${status}`)}</p>
+                    <p className="text-3xl font-bold text-gray-900">{count}</p>
+                    <div className="w-full bg-gray-200 rounded-full h-2 mt-3">
+                      <div
+                        className="bg-purple-500 h-2 rounded-full transition-all duration-300"
+                        style={{ width: `${(count / Math.max(...Object.values(storeStatusSummary))) * 100}%` }}
+                      ></div>
+                    </div>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           ) : (
@@ -406,47 +469,49 @@ const FarmerDashboard: React.FC = () => {
       </Card>
 
       {/* Marketing Materials */}
-      <Card className="shadow-lg border-0">
-        <CardHeader className="pb-4">
-          <CardTitle className="flex items-center text-xl">
-            <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center mr-3">
-              <FileText className="w-5 h-5 text-orange-600" />
-            </div>
-            {t('dashboard.marketingRecent')}
-          </CardTitle>
-          <CardDescription className="text-base">{t('dashboard.marketingRecentDescription')}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {userMarketingMaterials && userMarketingMaterials.length > 0 ? (
-            <div className="space-y-4">
-              {userMarketingMaterials.slice(0, 3).map((material) => (
-                <div key={material.id} className="flex items-center justify-between bg-gradient-to-r from-orange-50 to-white border-2 border-orange-100 rounded-xl p-6 hover:border-orange-200 transition-colors">
-                  <div className="flex items-center space-x-4">
-                    <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
-                      <FileText className="w-6 h-6 text-orange-600" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-base font-semibold text-gray-900">{material.title}</p>
-                      <p className="text-sm text-gray-600 capitalize">{material.type}</p>
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="text-sm font-medium border-orange-200 text-orange-700">
-                    {(material.usage?.timesUsed || 0)} {t('dashboard.marketingUses')}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <FileText className="w-10 h-10 text-gray-400" />
+      {marketingEnabled && (
+        <Card className="shadow-lg border-0">
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center text-xl">
+              <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center mr-3">
+                <FileText className="w-5 h-5 text-orange-600" />
               </div>
-              <p className="text-gray-500 text-lg mb-2">{t('dashboard.noMarketing')}</p>
-              <p className="text-sm text-gray-400">Create your first marketing material to promote your products</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              {t('dashboard.marketingRecent')}
+            </CardTitle>
+            <CardDescription className="text-base">{t('dashboard.marketingRecentDescription')}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {userMarketingMaterials && userMarketingMaterials.length > 0 ? (
+              <div className="space-y-4">
+                {userMarketingMaterials.slice(0, 3).map((material) => (
+                  <div key={material.id} className="flex items-center justify-between bg-gradient-to-r from-orange-50 to-white border-2 border-orange-100 rounded-xl p-6 hover:border-orange-200 transition-colors">
+                    <div className="flex items-center space-x-4">
+                      <div className="w-12 h-12 bg-orange-100 rounded-lg flex items-center justify-center">
+                        <FileText className="w-6 h-6 text-orange-600" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-base font-semibold text-gray-900">{material.title}</p>
+                        <p className="text-sm text-gray-600 capitalize">{material.type}</p>
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="text-sm font-medium border-orange-200 text-orange-700">
+                      {(material.usage?.timesUsed || 0)} {t('dashboard.marketingUses')}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <div className="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <FileText className="w-10 h-10 text-gray-400" />
+                </div>
+                <p className="text-gray-500 text-lg mb-2">{t('dashboard.noMarketing')}</p>
+                <p className="text-sm text-gray-400">Create your first marketing material to promote your products</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };

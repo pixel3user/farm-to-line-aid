@@ -11,6 +11,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole 
   const { user, isLoading } = useAuth();
   const location = useLocation();
 
+  const isAdmin = !!user?.isAdmin;
+
   // Show loading while checking authentication
   if (isLoading) {
     return (
@@ -28,14 +30,16 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole 
     return <Navigate to="/auth/signin" state={{ from: location }} replace />;
   }
 
-  // If no role selected, redirect to role selection
-  if (!user.role) {
+  // If no role selected and not admin, redirect to role selection
+  if (!user.role && !isAdmin) {
     return <Navigate to="/auth/role-selection" replace />;
   }
 
-  // If role is required and doesn't match, redirect to appropriate dashboard
-  if (requiredRole && user.role !== requiredRole) {
-    return <Navigate to={`/${user.role}`} replace />;
+  // If role is required and doesn't match, redirect to appropriate dashboard,
+  // but allow admin users to access all areas.
+  if (requiredRole && user.role !== requiredRole && !isAdmin) {
+    const targetPath = user.role ? `/${user.role}` : '/';
+    return <Navigate to={targetPath} replace />;
   }
 
   return <>{children}</>;

@@ -1,4 +1,5 @@
 import { User as FirebaseUser } from 'firebase/auth';
+import { resolveApiBaseUrl } from './api';
 
 export interface LineLoginUser {
   userId: string;
@@ -12,23 +13,6 @@ export interface LineLoginResult {
   idToken?: string;
   accessToken: string;
 }
-
-const resolveApiBaseUrl = (): string => {
-  // In development, use relative URLs so Vite can proxy /api to the backend
-  if (import.meta.env.DEV) {
-    return '';
-  }
-
-  const envBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  if (envBaseUrl) {
-    // If someone accidentally configured a localhost base URL for production, fall back to current origin
-    if (import.meta.env.PROD && envBaseUrl.includes('localhost')) {
-      return typeof window !== 'undefined' ? window.location.origin : '';
-    }
-    return envBaseUrl;
-  }
-  return typeof window !== 'undefined' ? window.location.origin : '';
-};
 
 class LineAuthService {
   private channelId: string;

@@ -1,5 +1,6 @@
 // API routes for LINE Login authentication
 import { Request, Response } from 'express';
+import runtimeConfig from '../lib/runtimeConfig';
 
 interface LineTokenRequest {
   code: string;
@@ -34,6 +35,14 @@ export const exchangeCodeForToken = async (req: Request, res: Response) => {
   try {
     const { code, redirect_uri, client_id }: LineTokenRequest = req.body;
 
+    // Prefer dedicated LINE Login channel secret; fall back to bot secret if needed
+    const channelSecret =
+      runtimeConfig.lineLoginChannelSecret ||
+      runtimeConfig.lineChannelSecret ||
+      process.env.LINE_LOGIN_CHANNEL_SECRET ||
+      process.env.LINE_CHANNEL_SECRET ||
+      'your-line-channel-secret';
+
     if (!code || !redirect_uri || !client_id) {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
@@ -48,7 +57,7 @@ export const exchangeCodeForToken = async (req: Request, res: Response) => {
         code,
         redirect_uri,
         client_id,
-        client_secret: process.env.LINE_CHANNEL_SECRET || 'your-line-channel-secret',
+        client_secret: channelSecret,
       }),
     });
 

@@ -23,16 +23,23 @@ import {
   MapPin,
   Calendar,
   Crown,
-  AlertTriangle
+  AlertTriangle,
+  Link as LinkIcon,
+  Unlink
 } from 'lucide-react';
 import { LineUser } from '@/lib/database';
 
 const Settings: React.FC = () => {
-  const { user, updateUserProfile, updateUserPreferences } = useAuth();
+  const { user, liffUser, firebaseUser, updateUserProfile, updateUserPreferences, login, refreshUserData } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLinkingLine, setIsLinkingLine] = useState(false);
+  const isLineLoginAccount = Boolean(
+    liffUser?.userId ||
+    firebaseUser?.providerData?.some((p) => (p.providerId || '').toLowerCase().includes('line'))
+  );
 
   // Form states
   const [profileData, setProfileData] = useState({
@@ -69,6 +76,65 @@ const Settings: React.FC = () => {
       setSubscriptionTier(user.subscriptionTier || 'free');
     }
   }, [user]);
+
+  const handleLinkLine = async () => {
+    if (!user) return;
+    if (isLineLoginAccount) {
+      toast({
+        title: 'LINE already linked',
+        description: 'This account uses LINE login and cannot be re-linked.',
+      });
+      return;
+    }
+    try {
+      setIsLinkingLine(true);
+      await login(undefined, undefined, { force: true });
+      await refreshUserData();
+      toast({
+        title: 'LINE linked',
+        description: 'Your account is now connected for order alerts.',
+      });
+    } catch (error) {
+      console.error('LINE link failed', error);
+      toast({
+        title: 'Unable to link LINE',
+        description: 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLinkingLine(false);
+    }
+  };
+
+  const handleRemoveLine = async () => {
+    if (!user) return;
+    if (isLineLoginAccount) {
+      toast({
+        title: 'LINE unlink disabled',
+        description: 'This account was created with LINE login and cannot unlink LINE.',
+      });
+      return;
+    }
+    if (!window.confirm('Remove LINE link? You will stop receiving order alerts on LINE.')) return;
+    try {
+      setIsLinkingLine(true);
+      await updateUserProfile({ lineId: null } as Partial<LineUser>);
+      await refreshUserData();
+      toast({
+        title: 'LINE removed',
+        description: 'You can relink LINE anytime.',
+      });
+    } catch (error) {
+      console.error('Failed to remove LINE link', error);
+      toast({
+        title: 'Unable to remove LINE link',
+        description: 'Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLinkingLine(false);
+    }
+  };
 
   const handleSaveProfile = async () => {
     if (!user) return;
@@ -258,6 +324,59 @@ const Settings: React.FC = () => {
               <Save className="w-4 h-4" />
               {isSaving ? t('common.saving') : t('settings.profile.save')}
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* LINE Link */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <LinkIcon className="w-5 h-5" />
+            {t('settings.line.title')}
+          </CardTitle>
+          <CardDescription>
+            {t('settings.line.description')}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-gray-900">
+                {user.lineId
+                  ? t('settings.line.linkedId', { id: user.lineId })
+                  : isLineLoginAccount
+                    ? t('settings.line.linkedVia', { id: liffUser?.userId || t('settings.line.lineAccount') })
+                    : t('settings.line.notLinked')}
+              </p>
+              <p className="text-xs text-gray-600">
+                {t('settings.line.helper')}
+              </p>
+            </div>
+            {user.lineId ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRemoveLine}
+                disabled={isLinkingLine || isLineLoginAccount}
+              >
+                <Unlink className="w-4 h-4 mr-2" />
+                {isLineLoginAccount ? t('settings.line.viaLogin') : t('settings.line.remove')}
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                onClick={handleLinkLine}
+                disabled={isLinkingLine || isLineLoginAccount}
+              >
+                <LinkIcon className="w-4 h-4 mr-2" />
+                {isLineLoginAccount
+                  ? t('settings.line.viaLogin')
+                  : isLinkingLine
+                    ? t('settings.line.linking')
+                    : t('settings.line.linkCta')}
+              </Button>
+            )}
           </div>
         </CardContent>
       </Card>

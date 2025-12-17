@@ -1,5 +1,5 @@
 // LINE Bot Webhook Handler for Farm2Market AI
-import { LineBotAPI, MessageTemplates, WebhookEvent, LineMessage } from './lineBot';
+import { LineBotAPI, MessageTemplates, WebhookEvent, LineMessage, RichMenuManager } from './lineBot';
 import { EventDeduper } from '../lib/idempotency';
 import { generateConversationPlan, analyzeImageWithGemini } from '../lib/gemini-client';
 import type { ConversationHistoryItem } from '../lib/gemini-client';
@@ -7,6 +7,7 @@ import { ConversationStore } from '../lib/conversationStore';
 import DatabaseService from '../lib/database-server';
 import admin from '../lib/firebaseAdmin';
 import sharp from 'sharp';
+import runtimeConfig from '../lib/runtimeConfig';
 
 interface TextContext {
   replyToken: string;
@@ -23,9 +24,11 @@ const SESSION_IDLE_MS = 10 * 60 * 1000; // 10 minutes
 
 export class WebhookHandler {
   private lineBot: LineBotAPI;
+  private richMenuManager: RichMenuManager;
 
   constructor() {
     this.lineBot = new LineBotAPI();
+    this.richMenuManager = new RichMenuManager();
   }
 
   private buildProductCarousel(
@@ -197,6 +200,12 @@ export class WebhookHandler {
 
     const welcomeMessages = MessageTemplates.welcomeMessagePersonalized(displayName);
     await this.lineBot.replyMessage(event.replyToken, welcomeMessages);
+
+    // Attach onboarding rich menu (role picker) if configured
+    if (runtimeConfig.richMenuOnboardingId && event.source?.userId) {
+      await this.linkRichMenuSafe(event.source.userId, runtimeConfig.richMenuOnboardingId, 'onboarding');
+    }
+
     console.debug('[WebhookHandler] handleFollow welcome message queue complete');
   }
 
@@ -583,6 +592,7 @@ export class WebhookHandler {
                   ];
                   await this.lineBot.replyMessage(replyToken, messages);
                   responseMessages = messages;
+                  await this.applyRoleRichMenu(context.rawEvent.source.userId, role);
                 } catch (e) {
                   const fail: LineMessage[] = [ { type: 'text', text: '設定角色時發生問題，請稍後再試。' } ];
                   await this.lineBot.replyMessage(replyToken, fail);
@@ -1323,6 +1333,7 @@ Tips:
               ...MessageTemplates.roleNextSteps(role),
             ];
             await this.lineBot.replyMessage(event.replyToken, messages);
+            await this.applyRoleRichMenu(event.source.userId, role);
           }
         } catch (e) {
           await this.lineBot.replyMessage(event.replyToken, [
@@ -1566,6 +1577,28 @@ Hi there! Just a friendly reminder that it's a great time to restock ${productNa
     if (snapshot.empty) return null;
     const doc = snapshot.docs[0];
     return { id: doc.id, data: doc.data() };
+  }
+
+  private async linkRichMenuSafe(userId: string, richMenuId: string, label: string): Promise<void> {
+    if (!richMenuId || runtimeConfig.skipLineApi || runtimeConfig.useMockLine || runtimeConfig.isEmulator) {
+      console.debug('[WebhookHandler] Skipping rich menu link (mock/emulator/skip):', { userId, richMenuId, label });
+      return;
+    }
+    try {
+      await this.richMenuManager.linkUserRichMenu(userId, richMenuId);
+      console.debug('[WebhookHandler] Linked rich menu', { userId, richMenuId, label });
+    } catch (error) {
+      console.warn('[WebhookHandler] Failed to link rich menu', { userId, richMenuId, label, error });
+    }
+  }
+
+  private async applyRoleRichMenu(userId: string, role: 'farmer' | 'market'): Promise<void> {
+    const richMenuId = role === 'farmer' ? runtimeConfig.richMenuFarmerId : runtimeConfig.richMenuMarketId;
+    if (!richMenuId) {
+      console.debug('[WebhookHandler] No role-specific rich menu configured', { role });
+      return;
+    }
+    await this.linkRichMenuSafe(userId, richMenuId, `${role}-menu`);
   }
 
   private getGenericProductImageUrl(name?: string, category?: string): string | undefined {

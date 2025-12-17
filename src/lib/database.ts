@@ -23,12 +23,19 @@ import { db } from './firebase';
 export interface LineUser {
   id: string;
   lineUserId: string;
+  lineId?: string;
   displayName: string;
   pictureUrl?: string;
   statusMessage?: string;
   email?: string;
   role?: 'farmer' | 'market';
   roleSelectedAt?: Timestamp | string;
+  location?: {
+    lat: number;
+    lng: number;
+    source?: 'browser' | 'manual';
+    updatedAt: Timestamp;
+  };
   createdAt: Timestamp;
   updatedAt: Timestamp;
   isActive: boolean;
@@ -38,11 +45,29 @@ export interface LineUser {
     notifications: boolean;
     marketingOptIn: boolean;
   };
+  marketProfile?: {
+    businessName?: string;
+    businessType?: 'retailer' | 'restaurant' | 'wholesaler' | 'distributor' | 'hotel' | 'ecommerce' | 'processor' | 'other';
+    procurementNeeds?: string[];
+    deliveryRegions?: string;
+    deliveryNotes?: string;
+    budgetNotes?: string;
+    contactPhone?: string;
+    preferredDeliveryDays?: string[];
+    paymentTerms?: string;
+    volumeRange?: string;
+    sourcingRegions?: string;
+    specialNotes?: string;
+  };
   metadata: {
     totalMessages: number;
     lastInteraction: Timestamp;
     favoriteFeatures: string[];
+    tutorialCompletedAt?: Timestamp | string;
+    tutorialLastStep?: string;
+    tutorialDismissed?: boolean;
   };
+  isAdmin?: boolean;
 }
 
 export interface Product {
@@ -70,7 +95,22 @@ export interface Store {
   id: string;
   userId: string;
   name: string;
-  type: 'restaurant' | 'supermarket' | 'farmers_market' | 'online_store' | 'other';
+  type:
+    | 'vegetable'
+    | 'fruit'
+    | 'poultry'
+    | 'livestock'
+    | 'dairy'
+    | 'aquaculture'
+    | 'grains'
+    | 'flowers'
+    | 'mixed'
+    // legacy values for backward compatibility with existing data
+    | 'restaurant'
+    | 'supermarket'
+    | 'farmers_market'
+    | 'online_store'
+    | 'other';
   location: string;
   contact: {
     name?: string;
@@ -127,6 +167,50 @@ export interface MarketingMaterial {
   };
 }
 
+export interface OrderItem {
+  productId?: string;
+  ownerId?: string;
+  name: string;
+  price: number;
+  quantity: number;
+  unit?: string;
+  imageUrl?: string;
+}
+
+export interface Order {
+  id?: string;
+  orderId: string;
+  status: 'pending' | 'reserved' | 'authorized' | 'confirmed' | 'paid' | 'cancelled' | 'failed';
+  paymentMethod?: 'line_pay' | 'cod' | 'other';
+  amount: number;
+  currency: string;
+  items: OrderItem[];
+  sellerIds?: string[];
+  buyer?: {
+    userId?: string;
+    displayName?: string;
+    email?: string;
+  };
+  shipping?: {
+    fullName?: string;
+    phone?: string;
+    email?: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    city?: string;
+    postalCode?: string;
+    instructions?: string;
+  };
+  deliveryStatus?: 'awaiting_pickup' | 'enroute' | 'delivered' | 'cancelled';
+  redirectUrls?: {
+    successUrl?: string;
+    cancelUrl?: string;
+  };
+  metadata?: Record<string, any>;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
+}
+
 // Database Service Class
 export class DatabaseService {
   // Line User operations
@@ -137,6 +221,7 @@ export class DatabaseService {
     const userDoc = {
       id: lineUserData.lineUserId!,
       lineUserId: lineUserData.lineUserId!,
+      lineId: lineUserData.lineId || lineUserData.lineUserId,
       displayName: lineUserData.displayName || 'Unknown',
       pictureUrl: lineUserData.pictureUrl,
       statusMessage: lineUserData.statusMessage,
@@ -155,7 +240,8 @@ export class DatabaseService {
         lastInteraction: now,
         favoriteFeatures: [],
         ...lineUserData.metadata
-      }
+      },
+      isAdmin: lineUserData.isAdmin ?? false
     };
 
     await setDoc(userRef, userDoc);
@@ -472,6 +558,47 @@ export class DatabaseService {
     
     const querySnapshot = await getDocs(q);
     return querySnapshot.docs.map(doc => doc.data() as MarketingMaterial);
+  }
+
+  // Order operations
+  static async getOrdersForBuyer(userId: string, limitCount: number = 50): Promise<Order[]> {
+    if (!db) return [];
+    const constraints: QueryConstraint[] = [where('buyer.userId', '==', userId)];
+    if (limitCount > 0) {
+      constraints.push(limit(limitCount));
+    }
+    const q = query(collection(db, 'orders'), ...constraints);
+    const snapshot = await getDocs(q);
+    return snapshot.docs
+      .map((doc) => {
+        const data = doc.data() as Order;
+        return {
+          ...data,
+          id: doc.id,
+          orderId: data.orderId || doc.id,
+        };
+      })
+      .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+  }
+
+  static async getOrdersForSeller(userId: string, limitCount: number = 50): Promise<Order[]> {
+    if (!db) return [];
+    const constraints: QueryConstraint[] = [where('sellerIds', 'array-contains', userId)];
+    if (limitCount > 0) {
+      constraints.push(limit(limitCount));
+    }
+    const q = query(collection(db, 'orders'), ...constraints);
+    const snapshot = await getDocs(q);
+    return snapshot.docs
+      .map((doc) => {
+        const data = doc.data() as Order;
+        return {
+          ...data,
+          id: doc.id,
+          orderId: data.orderId || doc.id,
+        };
+      })
+      .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
   }
 
   // Analytics helpers

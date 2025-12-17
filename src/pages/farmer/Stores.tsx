@@ -43,7 +43,7 @@ const FarmerStores: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [formData, setFormData] = useState({
     name: '',
-    type: 'other' as Store['type'],
+    type: 'mixed' as Store['type'],
     location: '',
     contactName: '',
     contactPhone: '',
@@ -258,7 +258,11 @@ const FarmerStores: React.FC = () => {
           </Button>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button size="sm" className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800">
+              <Button
+                size="sm"
+                className="bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800"
+                data-tour="stores-add"
+              >
                 <Plus className="w-4 h-4 mr-2" /> {t('farmer.stores.addStore')}
               </Button>
             </DialogTrigger>
@@ -287,19 +291,23 @@ const FarmerStores: React.FC = () => {
                   </div>
                   <div className="space-y-2">
                     <label className="block text-sm font-semibold text-gray-700">{t('farmer.stores.storeType')}</label>
-                    <Select value={formData.type} onValueChange={(value) => setFormData((prev) => ({ ...prev, type: value as Store['type'] }))}>
-                      <SelectTrigger className="h-11">
-                        <SelectValue placeholder={t('farmer.stores.selectType')} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="restaurant">{t('farmer.stores.restaurant')}</SelectItem>
-                        <SelectItem value="supermarket">{t('farmer.stores.supermarket')}</SelectItem>
-                        <SelectItem value="farmers_market">{t('farmer.stores.farmersMarket')}</SelectItem>
-                        <SelectItem value="online_store">{t('farmer.stores.onlineStore')}</SelectItem>
-                        <SelectItem value="other">{t('farmer.stores.other')}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <Select value={formData.type} onValueChange={(value) => setFormData((prev) => ({ ...prev, type: value as Store['type'] }))}>
+                    <SelectTrigger className="h-11">
+                      <SelectValue placeholder={t('farmer.stores.selectType')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="vegetable">{t('farmer.stores.type.vegetable')}</SelectItem>
+                      <SelectItem value="fruit">{t('farmer.stores.type.fruit')}</SelectItem>
+                      <SelectItem value="poultry">{t('farmer.stores.type.poultry')}</SelectItem>
+                      <SelectItem value="livestock">{t('farmer.stores.type.livestock')}</SelectItem>
+                      <SelectItem value="dairy">{t('farmer.stores.type.dairy')}</SelectItem>
+                      <SelectItem value="aquaculture">{t('farmer.stores.type.aquaculture')}</SelectItem>
+                      <SelectItem value="grains">{t('farmer.stores.type.grains')}</SelectItem>
+                      <SelectItem value="flowers">{t('farmer.stores.type.flowers')}</SelectItem>
+                      <SelectItem value="mixed">{t('farmer.stores.type.mixed')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 </div>
                 
                 <div className="space-y-2">
@@ -514,7 +522,7 @@ const FarmerStores: React.FC = () => {
             </Select>
           </div>
 
-          <div className="space-y-6">
+      <div className="space-y-6" data-tour="stores-list">
             {isLoading || isRefreshingData ? (
               <div className="text-center py-12">
                 <div className="w-8 h-8 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto mb-4"></div>

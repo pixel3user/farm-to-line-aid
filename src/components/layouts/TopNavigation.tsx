@@ -18,7 +18,8 @@ import {
   Trees,
   Package,
   Calendar,
-  Star
+  Star,
+  Truck
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -29,12 +30,22 @@ const TopNavigation: React.FC = () => {
   const { language, setLanguage, t } = useLanguage();
   const location = useLocation();
 
+  const role = user?.role;
+  const isAdmin = !!user?.isAdmin;
+
+  const canAccessFarmer = isAdmin || role === 'farmer';
+  const canAccessMarket = isAdmin || role === 'market';
+
   const navigationItems = [
     { label: t('nav.home'), href: '/', key: 'home' },
-    { label: t('nav.farmers'), href: '/farmer', key: 'farmers' },
-    { label: t('nav.markets'), href: '/market', key: 'markets' },
-    { label: t('nav.store'), href: '/market/products', key: 'store' },
-    { label: t('nav.demo'), href: '/demo/line', key: 'demo' },
+    ...(canAccessFarmer ? [{ label: t('nav.farmers'), href: '/farmer', key: 'farmers' as const }] : []),
+    ...(canAccessMarket
+      ? [
+          { label: t('nav.markets'), href: '/market', key: 'markets' as const },
+          { label: t('nav.store'), href: '/market/products', key: 'store' as const },
+        ]
+      : []),
+    { label: t('nav.demo'), href: '/demo/line', key: 'demo' as const },
   ];
 
   // Market-specific navigation items for mobile
@@ -90,6 +101,12 @@ const TopNavigation: React.FC = () => {
       href: '/farmer/stores',
       icon: Trees,
       key: 'stores'
+    },
+    {
+      label: t('schedule.title'),
+      href: '/farmer/delivery',
+      icon: Truck,
+      key: 'delivery'
     },
     {
       label: t('marketing.title'),

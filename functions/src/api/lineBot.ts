@@ -60,6 +60,7 @@ export const LINE_CONFIG = {
   CHANNEL_ACCESS_TOKEN: runtimeConfig.lineAccessToken || '',
   CHANNEL_SECRET: runtimeConfig.lineChannelSecret || '',
   MESSAGING_API_URL: 'https://api.line.me/v2/bot',
+  MESSAGING_DATA_API_URL: 'https://api-data.line.me/v2/bot',
   LIFF_URL: runtimeConfig.liffUrl || 'https://farm2market-99.web.app',
 };
 
@@ -947,7 +948,8 @@ export class RichMenuManager {
       });
 
       if (!response.ok) {
-        throw new Error(`LINE API Error: ${response.status}`);
+        const body = await response.text().catch(() => '');
+        throw new Error(`LINE API Error: ${response.status} ${response.statusText} ${body || ''}`.trim());
       }
 
       const result = await response.json();
@@ -959,22 +961,34 @@ export class RichMenuManager {
   }
 
   // Upload rich menu image
-  async uploadRichMenuImage(richMenuId: string, imageBuffer: ArrayBuffer): Promise<void> {
-    const url = `${this.baseUrl}/richmenu/${richMenuId}/content`;
+  async uploadRichMenuImage(
+    richMenuId: string,
+    imageBuffer: ArrayBuffer | Buffer,
+    contentType: string = 'image/png'
+  ): Promise<void> {
+    // Image uploads must go to api-data.line.me per LINE docs
+    const url = `${LINE_CONFIG.MESSAGING_DATA_API_URL}/richmenu/${richMenuId}/content`;
     const headers = {
-      'Content-Type': 'image/png',
+      'Content-Type': contentType,
       'Authorization': `Bearer ${this.accessToken}`,
     };
 
     try {
+      const uploadBody =
+        imageBuffer instanceof Buffer
+          ? imageBuffer
+          : Buffer.from(new Uint8Array(imageBuffer as ArrayBuffer));
+
       const response = await fetch(url, {
         method: 'POST',
         headers,
-        body: imageBuffer,
+        // Node's fetch requires a Buffer or TypedArray; normalize here
+        body: uploadBody as any,
       });
 
       if (!response.ok) {
-        throw new Error(`LINE API Error: ${response.status}`);
+        const body = await response.text().catch(() => '');
+        throw new Error(`LINE API Error: ${response.status} ${response.statusText} ${body || ''}`.trim());
       }
     } catch (error) {
       console.error('Failed to upload rich menu image:', error);
@@ -996,7 +1010,8 @@ export class RichMenuManager {
       });
 
       if (!response.ok) {
-        throw new Error(`LINE API Error: ${response.status}`);
+        const body = await response.text().catch(() => '');
+        throw new Error(`LINE API Error: ${response.status} ${response.statusText} ${body || ''}`.trim());
       }
     } catch (error) {
       console.error('Failed to set default rich menu:', error);
@@ -1018,10 +1033,57 @@ export class RichMenuManager {
       });
 
       if (!response.ok) {
-        throw new Error(`LINE API Error: ${response.status}`);
+        const body = await response.text().catch(() => '');
+        throw new Error(`LINE API Error: ${response.status} ${response.statusText} ${body || ''}`.trim());
       }
     } catch (error) {
       console.error('Failed to delete rich menu:', error);
+      throw error;
+    }
+  }
+
+  // Link a rich menu to a specific user
+  async linkUserRichMenu(userId: string, richMenuId: string): Promise<void> {
+    const url = `${this.baseUrl}/user/${userId}/richmenu/${richMenuId}`;
+    const headers = {
+      'Authorization': `Bearer ${this.accessToken}`,
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        throw new Error(`LINE API Error: ${response.status} ${response.statusText} ${body || ''}`.trim());
+      }
+    } catch (error) {
+      console.error('Failed to link user to rich menu:', error);
+      throw error;
+    }
+  }
+
+  // Unlink rich menu from a user (back to default)
+  async unlinkUserRichMenu(userId: string): Promise<void> {
+    const url = `${this.baseUrl}/user/${userId}/richmenu`;
+    const headers = {
+      'Authorization': `Bearer ${this.accessToken}`,
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers,
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        throw new Error(`LINE API Error: ${response.status} ${response.statusText} ${body || ''}`.trim());
+      }
+    } catch (error) {
+      console.error('Failed to unlink user rich menu:', error);
       throw error;
     }
   }
@@ -1374,4 +1436,3 @@ export class EnhancedMessageTemplates {
     };
   }
 }
-

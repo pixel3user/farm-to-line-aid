@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,7 +33,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { 
+import {
   Search, 
   Package, 
   ShoppingCart,
@@ -76,6 +76,7 @@ const MarketProducts: React.FC = () => {
   const { t } = useLanguage();
   const { toast } = useToast();
   const { user, refreshUserData } = useAuth();
+  const isAdmin = Boolean(user?.isAdmin);
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -109,6 +110,7 @@ const MarketProducts: React.FC = () => {
   });
   const [showCartPopup, setShowCartPopup] = useState(false);
   const [addedProduct, setAddedProduct] = useState<{ product: CatalogProduct; quantity: number } | null>(null);
+  const navigate = useNavigate();
 
   // Load products using the same source as the market featured products
   useEffect(() => {
@@ -475,7 +477,7 @@ const MarketProducts: React.FC = () => {
               <SheetTrigger asChild>
                 <Button variant="outline" className="relative">
                   <ShoppingCart className="w-4 h-4 mr-2" />
-                  Cart ({cartCount})
+                  {`${t('cart.label')} (${cartCount})`}
                   {cartCount > 0 && (
                     <span className="absolute -top-2 -right-2 bg-green-600 text-white text-xs px-2 py-0.5 rounded-full">{cartCount}</span>
                   )}
@@ -484,7 +486,7 @@ const MarketProducts: React.FC = () => {
             </div>
 
             {/* Filters */}
-            <Card>
+            <Card data-tour="market-products-search">
               <CardContent className="p-3 md:p-6 space-y-3">
                 <div className="flex items-center gap-2">
                   <div className="flex-1">
@@ -537,7 +539,7 @@ const MarketProducts: React.FC = () => {
             </Card>
 
           {/* Product Grid */}
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between" data-tour="market-products-list">
             <p className="text-sm text-gray-600">{t('catalog.availableProducts').replace('{count}', sorted.length.toString())}</p>
             <div className="flex items-center gap-2 text-sm">
               <span className="text-gray-600">Per page</span>
@@ -706,7 +708,7 @@ const MarketProducts: React.FC = () => {
               <h1 className="text-xl font-semibold truncate">{selectedProduct.name}</h1>
             </div>
             <div className="flex items-center gap-2">
-              {user?.id && selectedProduct.ownerId === user.id && (
+              {user?.id && (isAdmin || selectedProduct.ownerId === user.id) && (
                 <Button 
                   variant="outline" 
                   onClick={() => handleModifyClick(selectedProduct)}
@@ -719,7 +721,7 @@ const MarketProducts: React.FC = () => {
               <SheetTrigger asChild>
                 <Button variant="outline" className="relative">
                   <ShoppingCart className="w-4 h-4 mr-2" />
-                  Cart ({cartCount})
+                  {`${t('cart.label')} (${cartCount})`}
                   {cartCount > 0 && (
                     <span className="absolute -top-2 -right-2 bg-green-600 text-white text-xs px-2 py-0.5 rounded-full">{cartCount}</span>
                   )}
@@ -793,7 +795,17 @@ const MarketProducts: React.FC = () => {
               </div>
               <div className="flex flex-col sm:flex-row gap-2 pt-2">
                 <Button className="sm:flex-1" onClick={() => { addToCart(selectedProduct, dialogQty, true); }}>Add to Cart</Button>
-                <Button className="sm:flex-1" variant="outline" onClick={() => { addToCart(selectedProduct, dialogQty, false); setCartOpen(true); }}>Buy Now</Button>
+                <Button
+                  className="sm:flex-1"
+                  variant="outline"
+                  onClick={() => {
+                    addToCart(selectedProduct, dialogQty, false);
+                    setCartOpen(false);
+                    navigate('/market/checkout');
+                  }}
+                >
+                  Go to Checkout
+                </Button>
                 <Button className="sm:flex-1" variant="ghost" onClick={() => {
                   setSelectedProduct(null);
                   setSearchParams(prev => {
@@ -1100,17 +1112,17 @@ const MarketProducts: React.FC = () => {
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                       <p className="text-sm font-semibold text-gray-900 truncate">
-                        Added to Cart!
+                        {t('cart.addedTitle')}
                       </p>
                     </div>
                     <p className="text-xs text-gray-600 truncate mt-1">
                       {addedProduct.product.name}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
-                      Quantity: {addedProduct.quantity} × NT$ {(addedProduct.product.price || 0).toLocaleString()}
+                      {t('cart.quantity')}: {addedProduct.quantity} × NT$ {(addedProduct.product.price || 0).toLocaleString()}
                     </p>
                   </div>
                   <button
@@ -1130,7 +1142,7 @@ const MarketProducts: React.FC = () => {
                     }}
                   >
                     <ShoppingCart className="w-4 h-4 mr-2" />
-                    View Cart
+                    {t('cart.viewCart')}
                   </Button>
                 </div>
               </div>
@@ -1142,11 +1154,11 @@ const MarketProducts: React.FC = () => {
 
     <SheetContent side="right" className="w-full sm:max-w-md">
       <SheetHeader>
-        <SheetTitle>Your Cart</SheetTitle>
+        <SheetTitle>{t('cart.title')}</SheetTitle>
       </SheetHeader>
       <div className="mt-4 space-y-4">
         {cartItems.length === 0 ? (
-          <p className="text-sm text-gray-500">Your cart is empty.</p>
+          <p className="text-sm text-gray-500">{t('cart.empty')}</p>
         ) : (
           <div className="space-y-4">
             {cartItems.map(({ product, quantity }) => (
@@ -1187,12 +1199,22 @@ const MarketProducts: React.FC = () => {
               </div>
             ))}
             <div className="border-t pt-4 flex items-center justify-between">
-              <span className="text-sm text-gray-600">Subtotal</span>
+              <span className="text-sm text-gray-600">{t('cart.subtotal')}</span>
               <span className="text-lg font-bold">NT$ {cartTotal.toLocaleString()}</span>
             </div>
             <div className="flex gap-2">
-              <Button className="flex-1" onClick={() => toast({ title: 'Checkout', description: 'Checkout flow coming soon.' })}>Proceed to Checkout</Button>
-              <Button className="flex-1" variant="outline" onClick={() => setCartOpen(false)}>Continue Shopping</Button>
+              <Button
+                className="flex-1"
+                onClick={() => {
+                  setCartOpen(false);
+                  navigate('/market/checkout');
+                }}
+              >
+                {t('cart.checkout')}
+              </Button>
+              <Button className="flex-1" variant="outline" onClick={() => setCartOpen(false)}>
+                {t('cart.continueShopping')}
+              </Button>
             </div>
           </div>
         )}

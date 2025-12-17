@@ -8,6 +8,7 @@
     "dev:client": "vite",
     "dev:server": "tsx server.ts",
     "dev:full": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "deploy:richmenus": "tsx functions/src/dev/deployRichMenus.ts",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",

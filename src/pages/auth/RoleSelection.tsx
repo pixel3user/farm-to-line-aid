@@ -22,8 +22,54 @@ const RoleSelection: React.FC = () => {
   const [emailInput, setEmailInput] = useState<string>(user?.email || '');
   const [nameInput, setNameInput] = useState<string>(user?.displayName || '');
   const [profileError, setProfileError] = useState<string>('');
+  const [isCheckingUser, setIsCheckingUser] = useState(true);
+
+  // Update input fields when user data changes
+  useEffect(() => {
+    if (user?.email) {
+      setEmailInput(user.email);
+    }
+    if (user?.displayName) {
+      setNameInput(user.displayName);
+    }
+  }, [user?.email, user?.displayName]);
 
   const missingEmail = !user?.email;
+  const missingName = !user?.displayName || user.displayName.trim() === '';
+  const missingRole = !user?.role;
+
+  // Check if user already has all required details and redirect if so
+  useEffect(() => {
+    const checkAndRedirect = () => {
+      if (!user) {
+        setIsCheckingUser(false);
+        return;
+      }
+
+      // Check if user has all required fields: email, displayName, and role
+      const hasEmail = user.email && user.email.trim() !== '';
+      const hasName = user.displayName && user.displayName.trim() !== '';
+      const hasRole = user.role === 'farmer' || user.role === 'market';
+
+      if (hasEmail && hasName && hasRole) {
+        // User already has all details, redirect to their dashboard
+        navigate(`/${user.role}`, { replace: true });
+        return;
+      }
+
+      setIsCheckingUser(false);
+    };
+
+    // First check with current user data
+    checkAndRedirect();
+  }, [user, navigate]);
+
+  // Refresh user data on mount to ensure we have latest information
+  useEffect(() => {
+    if (user?.id) {
+      refreshUserData();
+    }
+  }, [user?.id, refreshUserData]);
 
   const handleSaveProfile = async (): Promise<boolean> => {
     if (!user?.id) return false;
@@ -65,7 +111,7 @@ const RoleSelection: React.FC = () => {
 
     try {
       // Ensure profile basics are saved first if missing
-      if (missingEmail) {
+      if (missingEmail || missingName) {
         const saved = await handleSaveProfile();
         if (!saved) {
           setSelectedRole(null);
@@ -114,6 +160,22 @@ const RoleSelection: React.FC = () => {
     );
   }
 
+  // Show loading state while checking if user already has all details
+  if (isCheckingUser) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Card className="w-full max-w-md">
+          <CardContent className="p-6 text-center">
+            <div className="flex justify-center mb-4">
+              <div className="w-8 h-8 border-4 border-green-600 border-t-transparent rounded-full animate-spin"></div>
+            </div>
+            <p className="text-gray-600">Checking your account...</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-2xl">
@@ -126,8 +188,8 @@ const RoleSelection: React.FC = () => {
           </p>
         </div>
 
-        {/* Profile completion if email missing */}
-        {missingEmail && (
+        {/* Profile completion if email or name missing */}
+        {(missingEmail || missingName) && (
           <Card className="mb-8">
             <CardHeader>
               <CardTitle>Complete your profile</CardTitle>

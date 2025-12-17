@@ -95,6 +95,17 @@ Key environment variables needed:
 - `LINE_CHANNEL_SECRET`: LINE bot channel secret
 - `VITE_MAPBOX_TOKEN`: Mapbox token (optional)
 
+### Granting Admin Access
+
+To let a specific account manage every product (e.g., for merchandising or support staff):
+
+1. Open the Firebase console for your project and go to **Firestore Database → line_users**.
+2. Find the document whose `lineUserId` matches the account you want to promote.
+3. Add or update a boolean field named `isAdmin` and set it to `true`, then save.
+4. Ask the user to sign out/in (or refresh) so the new flag is picked up by the web app.
+
+Admins can now modify any product from `/market/products`, while regular users remain limited to their own items.
+
 ## Routes
 
 ### Public Routes

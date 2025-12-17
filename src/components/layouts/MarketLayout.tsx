@@ -3,6 +3,12 @@ import { Outlet, Link, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import TopNavigation from './TopNavigation';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useIsMobile } from '@/hooks/use-mobile';
+import LocationReminder from '@/components/LocationReminder';
+import { Toaster } from '@/components/ui/toaster';
+import { Toaster as Sonner } from '@/components/ui/sonner';
+import MarketOnboarding from '@/components/MarketOnboarding';
+import MarketTutorial from '@/components/MarketTutorial';
 import { 
   LayoutDashboard, 
   Trees, 
@@ -20,6 +26,7 @@ const MarketLayout: React.FC = () => {
   const { t } = useLanguage();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+  const isMobile = useIsMobile();
 
   const navigationItems = [
     { 
@@ -65,6 +72,28 @@ const MarketLayout: React.FC = () => {
     <div className="min-h-screen bg-gray-50">
       {/* Top Navigation */}
       <TopNavigation />
+      {isMobile && (
+        <div className="sticky top-16 z-30 bg-white border-b shadow-sm">
+          <div className="flex overflow-x-auto gap-2 px-3 py-2">
+            {navigationItems.map((item) => {
+              const Icon = item.icon;
+              const active = isActive(item.href);
+              return (
+                <Link
+                  key={item.key}
+                  to={item.href}
+                  className={`flex items-center gap-1 px-3 py-2 rounded-full text-sm whitespace-nowrap transition-colors ${
+                    active ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      )}
       
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
@@ -118,9 +147,19 @@ const MarketLayout: React.FC = () => {
       <div className="md:ml-64" style={{ marginTop: '64px' }}>
         {/* Page content */}
         <div className="p-4 sm:p-6 lg:p-8">
-          <Outlet />
+          <LocationReminder />
+          <MarketOnboarding>
+            <>
+              <MarketTutorial />
+              <Outlet />
+            </>
+          </MarketOnboarding>
         </div>
       </div>
+
+      {/* Toast containers for protected routes */}
+      <Toaster />
+      <Sonner />
     </div>
   );
 };

@@ -238,25 +238,25 @@ const StoresMap: React.FC<StoresMapProps> = ({ stores, isLoading = false }) => {
                       <span>{location.store.location}</span>
                     </div>
                     
-                    {location.store.contact.phone && (
+                    {location.store.contact?.phone && (
                       <div className="flex items-center gap-2">
                         <Phone className="w-4 h-4" />
-                        <span>{location.store.contact.phone}</span>
+                        <span>{location.store.contact?.phone}</span>
                       </div>
                     )}
                     
-                    {location.store.contact.email && (
+                    {location.store.contact?.email && (
                       <div className="flex items-center gap-2">
                         <Mail className="w-4 h-4" />
-                        <span>{location.store.contact.email}</span>
+                        <span>{location.store.contact?.email}</span>
                       </div>
                     )}
                     
-                    {location.store.contact.website && (
+                    {location.store.contact?.website && (
                       <div className="flex items-center gap-2">
                         <Globe className="w-4 h-4" />
                         <a 
-                          href={location.store.contact.website} 
+                          href={location.store.contact?.website || '#'} 
                           target="_blank" 
                           rel="noopener noreferrer"
                           className="text-blue-600 hover:text-blue-800 underline"
@@ -268,11 +268,13 @@ const StoresMap: React.FC<StoresMapProps> = ({ stores, isLoading = false }) => {
                     
                     <div className="flex items-center gap-2">
                       <Users className="w-4 h-4" />
-                      <span>{t('farmer.stores.map.totalOrders')}: {location.store.metadata.totalOrders}</span>
+                      <span>
+                        {t('farmer.stores.map.totalOrders')}: {location.store.metadata?.totalOrders ?? 0}
+                      </span>
                     </div>
                   </div>
                   
-                  {location.store.metadata.notes.length > 0 && (
+                  {location.store.metadata?.notes && location.store.metadata.notes.length > 0 && (
                     <div className="mt-3 pt-3 border-t border-gray-200">
                       <p className="text-xs text-gray-500">
                         {t('farmer.stores.map.note')}: {location.store.metadata.notes[0]}

@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { featureFlags } from '@/config/featureFlags';
 import {
   AlertTriangle,
   BarChart3,
@@ -31,6 +32,20 @@ const formatCurrency = (value: number | undefined) => {
 const FarmerAnalytics: React.FC = () => {
   const { t } = useLanguage();
   const { userStats, userProducts, userStores, userMarketingMaterials } = useAuth();
+
+  if (!featureFlags.analytics) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('farmer.analytics.title')}</CardTitle>
+          <CardDescription>Analytics insights are temporarily unavailable.</CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm text-gray-600">
+          We are polishing the analytics experience and will bring it back soon.
+        </CardContent>
+      </Card>
+    );
+  }
 
   const inventoryMetrics = useMemo(() => {
     const products = userProducts || [];

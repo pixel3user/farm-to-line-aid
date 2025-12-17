@@ -59,7 +59,9 @@ export default function WebhookDashboard() {
   const lineConfig = {
     channelAccessToken: process.env.REACT_APP_LINE_CHANNEL_ACCESS_TOKEN || '',
     channelSecret: process.env.REACT_APP_LINE_CHANNEL_SECRET || '',
-    webhookUrl: `${window.location.origin}/api/webhook`
+    webhookUrl: `${window.location.origin}/api/webhook`,
+    liffId: import.meta.env?.VITE_LIFF_ID || (process.env as any)?.VITE_LIFF_ID || '',
+    frontendBaseUrl: window.location.origin
   };
 
   return (
@@ -242,5 +244,4 @@ export default function WebhookDashboard() {
     </div>
   );
 }
-
 

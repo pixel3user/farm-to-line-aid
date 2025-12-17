@@ -18,6 +18,7 @@ import FarmerStores from "./pages/farmer/Stores";
 import FarmerMarketing from "./pages/farmer/Marketing";
 import FarmerAnalytics from "./pages/farmer/Analytics";
 import FarmerReferences from "./pages/farmer/References";
+import FarmerDeliverySchedule from "./pages/farmer/DeliverySchedule";
 
 // Market pages
 import MarketDashboard from "./pages/market/Dashboard";
@@ -25,9 +26,11 @@ import MarketFarms from "./pages/market/Farms";
 import MarketProducts from "./pages/market/Products";
 import MarketSchedule from "./pages/market/Schedule";
 import MarketRatings from "./pages/market/Ratings";
+import MarketCheckout from "./pages/market/Checkout";
 
 // Demo pages
 import LineDemo from "./pages/demo/LineDemo";
+import LinePayResult from "./pages/payments/LinePayResult";
 
 // Settings page
 import Settings from "./pages/Settings";
@@ -35,37 +38,47 @@ import Settings from "./pages/Settings";
 const App = () => {
   return (
     <BrowserRouter>
+      <DeepLinkRouter />
       <Routes>
             {/* Public routes */}
-            <Route path="/" element={<AppLayout><><DeepLinkRouter /><Home /></></AppLayout>} />
+            <Route path="/" element={<AppLayout><Home /></AppLayout>} />
             <Route path="/auth/signin" element={<AppLayout><SignIn /></AppLayout>} />
             <Route path="/auth/signup" element={<AppLayout><SignUp /></AppLayout>} />
             <Route path="/auth/line/callback" element={<AppLayout><LineCallback /></AppLayout>} />
             <Route path="/auth/role-selection" element={<AppLayout><RoleSelection /></AppLayout>} />
+            <Route path="/payments/line-pay/result" element={<AppLayout><LinePayResult /></AppLayout>} />
         
-        {/* Farmer routes */}
-        <Route path="/farmer" element={
-          <ProtectedRoute>
-            <FarmerLayout />
-          </ProtectedRoute>
-        }>
+        {/* Farmer routes - only farmers and admins can access */}
+        <Route
+          path="/farmer"
+          element={
+            <ProtectedRoute requiredRole="farmer">
+              <FarmerLayout />
+            </ProtectedRoute>
+          }
+        >
           <Route index element={<FarmerDashboard />} />
           <Route path="products" element={<FarmerProducts />} />
           <Route path="stores" element={<FarmerStores />} />
           <Route path="marketing" element={<FarmerMarketing />} />
           <Route path="analytics" element={<FarmerAnalytics />} />
           <Route path="references" element={<FarmerReferences />} />
+          <Route path="delivery" element={<FarmerDeliverySchedule />} />
         </Route>
 
-        {/* Market routes */}
-        <Route path="/market" element={
-          <ProtectedRoute>
-            <MarketLayout />
-          </ProtectedRoute>
-        }>
+        {/* Market routes - only markets and admins can access */}
+        <Route
+          path="/market"
+          element={
+            <ProtectedRoute requiredRole="market">
+              <MarketLayout />
+            </ProtectedRoute>
+          }
+        >
           <Route index element={<MarketDashboard />} />
           <Route path="farms" element={<MarketFarms />} />
           <Route path="products" element={<MarketProducts />} />
+          <Route path="checkout" element={<MarketCheckout />} />
           <Route path="schedule" element={<MarketSchedule />} />
           <Route path="ratings" element={<MarketRatings />} />
         </Route>

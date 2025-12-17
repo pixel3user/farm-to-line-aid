@@ -350,7 +350,11 @@ const FarmerProducts: React.FC = () => {
           </Button>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
-              <Button size="lg" className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 shadow-lg">
+              <Button
+                size="lg"
+                className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 shadow-lg"
+                data-tour="products-add"
+              >
                 <Plus className="w-5 h-5 mr-2" />
                 {t('farmer.products.addProduct')}
               </Button>
@@ -516,7 +520,7 @@ const FarmerProducts: React.FC = () => {
             </div>
           </div>
 
-          <div className="rounded-xl border-2 border-gray-100 overflow-hidden">
+          <div className="rounded-xl border-2 border-gray-100 overflow-hidden" data-tour="products-table">
             <Table>
               <TableHeader className="bg-gray-50">
                 <TableRow>

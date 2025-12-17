@@ -4,6 +4,10 @@ import { auth, db } from '@/lib/firebase';
 import { doc, getDoc, setDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { LineUser, DatabaseService } from '@/lib/database';
 import { UserDataService } from '@/services/userDataService';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/use-toast';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 // LINE LIFF types
 interface LiffUser {
@@ -21,7 +25,7 @@ interface AuthContextType {
   isRefreshingData: boolean;
   isLiffReady: boolean;
   isInLineApp: boolean;
-  login: (profileOverride?: LiffUser, idToken?: string) => Promise<void>;
+  login: (profileOverride?: LiffUser, idToken?: string, options?: { force?: boolean }) => Promise<void>;
   loginWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string, displayName?: string, role?: 'farmer' | 'market') => Promise<void>;
   logout: () => Promise<void>;
@@ -69,11 +73,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [userProducts, setUserProducts] = useState<any[]>([]);
   const [userStores, setUserStores] = useState<any[]>([]);
   const [userMarketingMaterials, setUserMarketingMaterials] = useState<any[]>([]);
+  const [showLineIdPrompt, setShowLineIdPrompt] = useState(false);
+  const [showLineNudgeBar, setShowLineNudgeBar] = useState(false);
   const loginInProgressRef = useRef(false);
   const dataLoadingRef = useRef(false);
   const lastLoadTimeRef = useRef(0);
   const liffUserRef = useRef<LiffUser | null>(liffUser);
   const userRef = useRef<LineUser | null>(user);
+  const { toast } = useToast();
+  const { t } = useLanguage();
 
   useEffect(() => {
     liffUserRef.current = liffUser;
@@ -82,6 +90,77 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+
+  useEffect(() => {
+    const hasLiffLink = Boolean(liffUser?.userId);
+    if (user?.role === 'farmer' && !user.lineId && !hasLiffLink) {
+      setShowLineIdPrompt(true);
+      setShowLineNudgeBar(false);
+    } else {
+      setShowLineIdPrompt(false);
+      setShowLineNudgeBar(false);
+    }
+  }, [user, liffUser]);
+
+  const requestInitialLocation = async (): Promise<{ lat: number; lng: number } | null> => {
+    try {
+      if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+        console.warn('Geolocation not available in this environment');
+        return null;
+      }
+
+      const alreadyRequested = window.sessionStorage.getItem('farm2market_location_requested');
+      if (alreadyRequested === 'true') {
+        return null;
+      }
+
+      const confirmed = window.confirm(
+        'To help us automatically set your farm/market location and nearby stores, Farm2Market would like to use your current location. Do you want to allow location access?'
+      );
+
+      window.sessionStorage.setItem('farm2market_location_requested', 'true');
+
+      if (!confirmed) {
+        return null;
+      }
+
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(
+          resolve,
+          reject,
+          {
+            enableHighAccuracy: true,
+            timeout: 10000,
+            maximumAge: 0
+          }
+        );
+      });
+
+      const { latitude, longitude } = position.coords;
+      return { lat: latitude, lng: longitude };
+    } catch (error) {
+      console.warn('Failed to get user location:', error);
+      return null;
+    }
+  };
+
+  const handleLinkLine = async () => {
+    try {
+      await login(undefined, undefined, { force: true });
+      setShowLineIdPrompt(false);
+      toast({
+        title: t('line.link.toastLinked'),
+        description: t('line.link.toastLinkedDesc'),
+      });
+    } catch (error) {
+      console.error('Failed to link LINE', error);
+      toast({
+        title: t('line.link.toastLinkFailed'),
+        description: t('line.link.toastLinkFailedDesc'),
+        variant: 'destructive',
+      });
+    }
+  };
 
   // Persist user state to localStorage
   useEffect(() => {
@@ -458,6 +537,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       if (!userSnap.exists()) {
         console.log('Creating new user profile...');
+        const coords = await requestInitialLocation();
         // Create new user
         const newUser: LineUser = {
           id: profile.userId,
@@ -478,7 +558,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             totalMessages: 0,
             lastInteraction: Timestamp.now(),
             favoriteFeatures: []
-          }
+          },
+          ...(coords
+            ? {
+                location: {
+                  lat: coords.lat,
+                  lng: coords.lng,
+                  source: 'browser',
+                  updatedAt: Timestamp.now()
+                }
+              }
+            : {})
         };
         // Only add email if present
         if (profile.email) {
@@ -574,6 +664,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const snap = await getDoc(userRef);
       if (!snap.exists()) {
         const now = Timestamp.now();
+        const coords = await requestInitialLocation();
         const newUser: LineUser = {
           id: uid,
           lineUserId: uid,
@@ -586,7 +677,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           isActive: true,
           subscriptionTier: 'free',
           preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
-          metadata: { totalMessages: 0, lastInteraction: now, favoriteFeatures: [] }
+          metadata: { totalMessages: 0, lastInteraction: now, favoriteFeatures: [] },
+          ...(coords
+            ? {
+                location: {
+                  lat: coords.lat,
+                  lng: coords.lng,
+                  source: 'browser',
+                  updatedAt: now
+                }
+              }
+            : {})
         };
         await setDoc(userRef, newUser);
         setUser(newUser);
@@ -614,6 +715,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const uid = cred.user.uid;
     const now = Timestamp.now();
     const userRef = doc(db, 'line_users', uid);
+    const coords = await requestInitialLocation();
     const newUser: LineUser = {
       id: uid,
       lineUserId: uid,
@@ -626,7 +728,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       isActive: true,
       subscriptionTier: 'free',
       preferences: { language: 'zh-TW', notifications: true, marketingOptIn: false },
-      metadata: { totalMessages: 0, lastInteraction: now, favoriteFeatures: [] }
+      metadata: { totalMessages: 0, lastInteraction: now, favoriteFeatures: [] },
+      ...(coords
+        ? {
+            location: {
+              lat: coords.lat,
+              lng: coords.lng,
+              source: 'browser',
+              updatedAt: now
+            }
+          }
+        : {})
     };
     if (role) {
       newUser.role = role;
@@ -750,7 +862,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
-  const login = async (profileOverride?: LiffUser, lineIdToken?: string) => {
+  const login = async (profileOverride?: LiffUser, lineIdToken?: string, options?: { force?: boolean }) => {
     // Prevent re-entrancy/infinite loops
     if (loginInProgressRef.current) {
       console.log('Login already in progress, skipping...');
@@ -758,7 +870,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
 
     // If we already have a user session, do not re-login
-    if (user) {
+    if (user && !options?.force) {
       console.log('User already authenticated, skipping login');
       return;
     }
@@ -774,38 +886,36 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     
 
     try {
-      if (isInLineApp && isLiffReady) {
-      
-        try {
-          const liff = (await import('@line/liff')).default;
-          const liffId = import.meta.env.VITE_LIFF_ID;
+      const liff = (await import('@line/liff')).default;
+      const liffId = import.meta.env.VITE_LIFF_ID;
 
-          if (!liffId || liffId === 'your-liff-id') {
-            console.error('LIFF ID not configured. Please configure VITE_LIFF_ID in your environment variables.');
-            throw new Error('LINE Login not configured. Please contact administrator.');
-          }
-
-          liff.login();
-        } catch (error) {
-          console.error('LIFF login failed:', error);
-          alert('LINE login failed. Please try again.');
-        }
-      } else {
-        const profileToUse = profileOverride ?? liffUser;
-        if (profileToUse) {
-          console.log('Not in LINE app, using LINE profile from callback');
-          try {
-            await authenticateWithFirebase(lineIdToken ?? '', profileToUse);
-            return;
-          } catch (error) {
-            console.error('Authentication with existing LINE profile failed:', error);
-            throw new Error('Authentication failed. Please try again.');
-          }
-        }
-
-        console.log('No LINE profile available. Please use LINE Login.');
-        throw new Error('Please use LINE Login to access your account.');
+      if (!liffId || liffId === 'your-liff-id') {
+        console.error('LIFF ID not configured. Please configure VITE_LIFF_ID in your environment variables.');
+        throw new Error('LINE Login not configured. Please contact administrator.');
       }
+
+      const inLineClient = isInLineApp || liff.isInClient?.();
+      if (inLineClient && isLiffReady) {
+        liff.login();
+        return;
+      }
+
+      // Force LIFF web login when requested or when no profile is available
+      if (options?.force || !liffUser) {
+        await liff.init({ liffId });
+        liff.login();
+        return;
+      }
+
+      const profileToUse = profileOverride ?? liffUser;
+      if (profileToUse) {
+        console.log('Using existing LINE profile to authenticate');
+        await authenticateWithFirebase(lineIdToken ?? '', profileToUse);
+        return;
+      }
+
+      console.log('No LINE profile available. Please use LINE Login.');
+      throw new Error('Please use LINE Login to access your account.');
     } finally {
       loginInProgressRef.current = false;
       if (shouldManageLoadingState) {
@@ -928,6 +1038,61 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   return (
     <AuthContext.Provider value={value}>
       {children}
+      <Dialog
+        open={showLineIdPrompt}
+        onOpenChange={(open) => {
+          setShowLineIdPrompt(open);
+          if (!open) setShowLineNudgeBar(true);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('line.link.title')}</DialogTitle>
+            <DialogDescription>
+              {t('line.link.description')}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-gray-600 mb-2">
+            {t('line.link.body')}
+          </p>
+          <DialogFooter>
+            <Button onClick={handleLinkLine}>
+              {t('line.link.cta')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {showLineNudgeBar && !user?.lineId && (
+        <div className="fixed bottom-4 left-4 right-4 md:left-1/2 md:-translate-x-1/2 md:w-[420px] z-40">
+          <div className="bg-green-50 border border-green-200 shadow-lg rounded-lg p-3 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-green-800">
+              <span className="font-semibold text-sm">{t('line.link.nudgeTitle')}</span>
+              <span className="text-xs text-green-700">{t('line.link.nudgeBody')}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setShowLineIdPrompt(true);
+                  setShowLineNudgeBar(false);
+                }}
+              >
+                {t('line.link.nudgeReopen')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-green-700"
+                onClick={() => setShowLineNudgeBar(false)}
+              >
+                ✕
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </AuthContext.Provider>
   );
 };
@@ -941,4 +1106,3 @@ export const useAuth = (): AuthContextType => {
 };
 
 export default AuthContext;
-

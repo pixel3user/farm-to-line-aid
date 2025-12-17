@@ -3,6 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { featureFlags } from '@/config/featureFlags';
 import {
   Dialog,
   DialogContent,
@@ -27,6 +28,20 @@ import {
 const FarmerReferences: React.FC = () => {
   const { t } = useLanguage();
   const [activeModal, setActiveModal] = useState<string | null>(null);
+
+  if (!featureFlags.references) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('references.title') || 'References'}</CardTitle>
+          <CardDescription>Reference materials are hidden for the current demo build.</CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm text-gray-600">
+          Reach out if you need access to the compliance and LINE integration guides sooner.
+        </CardContent>
+      </Card>
+    );
+  }
 
   const referenceItems = [
     {
