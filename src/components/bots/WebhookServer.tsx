@@ -83,7 +83,7 @@ export default function WebhookServer({ lineConfig }: WebhookServerProps) {
             },
             {
               bounds: { x: 1250, y: 0, width: 1250, height: 1686 },
-              action: { type: 'message', text: 'Help' },
+              action: { type: 'postback', data: 'source=richmenu&action=help', displayText: 'Help', label: 'Help' },
             },
           ],
         },
@@ -289,4 +289,3 @@ export default function WebhookServer({ lineConfig }: WebhookServerProps) {
     </div>
   );
 }
-

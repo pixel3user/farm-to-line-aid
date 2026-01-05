@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import TopNavigation from './TopNavigation';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -9,6 +9,8 @@ import { Toaster } from '@/components/ui/toaster';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import MarketOnboarding from '@/components/MarketOnboarding';
 import MarketTutorial from '@/components/MarketTutorial';
+import { useAuth } from '@/contexts/AuthContext';
+import VoiceAssistantPopup from '@/components/VoiceAssistantPopup';
 import { 
   LayoutDashboard, 
   Trees, 
@@ -24,9 +26,20 @@ import {
 
 const MarketLayout: React.FC = () => {
   const { t } = useLanguage();
+  const { user, firebaseUser, liffUser } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isLiffApp, setIsLiffApp] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const showDesktopSidebar = !isMobile && !isLiffApp;
+  const showVoiceAssistant = Boolean(user || firebaseUser || liffUser);
+
+  useEffect(() => {
+    const userAgent = navigator.userAgent.toLowerCase();
+    const isInLine = userAgent.includes('line');
+    setIsLiffApp(isInLine);
+  }, []);
 
   const navigationItems = [
     { 
@@ -72,7 +85,7 @@ const MarketLayout: React.FC = () => {
     <div className="min-h-screen bg-gray-50">
       {/* Top Navigation */}
       <TopNavigation />
-      {isMobile && (
+      {isMobile && !isLiffApp && (
         <div className="sticky top-16 z-30 bg-white border-b shadow-sm">
           <div className="flex overflow-x-auto gap-2 px-3 py-2">
             {navigationItems.map((item) => {
@@ -104,47 +117,49 @@ const MarketLayout: React.FC = () => {
       )}
 
       {/* Sidebar */}
-      <div className={`fixed inset-y-0 left-0 z-30 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out md:translate-x-0 ${
-        sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-      }`} style={{ top: '64px' }}>
-        <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">{t('nav.markets')}</h2>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="md:hidden"
-            onClick={() => setSidebarOpen(false)}
-          >
-            <X className="w-5 h-5" />
-          </Button>
-        </div>
-
-        <nav className="mt-6 px-3">
-          <div className="space-y-1">
-            {navigationItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.key}
-                  to={item.href}
-                  className={`flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
-                    isActive(item.href)
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
-                  }`}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <Icon className="w-5 h-5 mr-3" />
-                  {item.label}
-                </Link>
-              );
-            })}
+      {showDesktopSidebar && (
+        <div className={`fixed inset-y-0 left-0 z-30 w-64 bg-white shadow-lg transform transition-transform duration-300 ease-in-out md:translate-x-0 ${
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        }`} style={{ top: '64px' }}>
+          <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200">
+            <h2 className="text-lg font-semibold text-gray-900">{t('nav.markets')}</h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="md:hidden"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <X className="w-5 h-5" />
+            </Button>
           </div>
-        </nav>
-      </div>
+
+          <nav className="mt-6 px-3">
+            <div className="space-y-1">
+              {navigationItems.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.key}
+                    to={item.href}
+                    className={`flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                      isActive(item.href)
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900'
+                    }`}
+                    onClick={() => setSidebarOpen(false)}
+                  >
+                    <Icon className="w-5 h-5 mr-3" />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          </nav>
+        </div>
+      )}
 
       {/* Main content */}
-      <div className="md:ml-64" style={{ marginTop: '64px' }}>
+      <div className={showDesktopSidebar ? 'md:ml-64' : ''} style={{ marginTop: '64px', paddingBottom: isLiffApp ? '80px' : undefined }}>
         {/* Page content */}
         <div className="p-4 sm:p-6 lg:p-8">
           <LocationReminder />
@@ -160,6 +175,34 @@ const MarketLayout: React.FC = () => {
       {/* Toast containers for protected routes */}
       <Toaster />
       <Sonner />
+      {showVoiceAssistant && <VoiceAssistantPopup />}
+
+      {isLiffApp && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40">
+          <div
+            className="grid"
+            style={{ gridTemplateColumns: `repeat(${navigationItems.length}, minmax(0, 1fr))` }}
+          >
+            {navigationItems.map((item) => {
+              const Icon = item.icon;
+              const active = isActive(item.href);
+              return (
+                <button
+                  key={item.key}
+                  className={`flex flex-col items-center gap-1 py-2 px-1 text-xs ${
+                    active ? 'text-blue-600 font-semibold' : 'text-gray-600'
+                  }`}
+                  onClick={() => navigate(item.href)}
+                  type="button"
+                >
+                  <Icon className="w-4 h-4" />
+                  <span className="text-[11px] leading-tight text-center">{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

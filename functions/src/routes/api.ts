@@ -11,9 +11,318 @@ import {
   mockGetUserProfile,
 } from "./lineAuth";
 import { LineBotAPI, RichMenuManager, LineMessage } from "../api/lineBot";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, LiveServerMessage, Modality, Session, Type } from "@google/genai";
+import type { FunctionDeclaration } from "@google/genai";
+import { executeVoiceAssistantToolCall, handleVoiceAssistantMessage } from "../lib/voiceAssistant";
 
 const router = express.Router();
+
+type LiveRelaySession = {
+  session: Session;
+  userId: string;
+  locale?: string;
+  createdAt: number;
+  lastUsedAt: number;
+  clients: Set<Response>;
+  toolCache: Map<string, { messages: Array<{ role: 'assistant' | 'system'; text: string }>; expiresAt: number }>;
+};
+
+const LIVE_SESSION_TTL_MS = 1000 * 60 * 15;
+const TOOL_CACHE_TTL_MS = 1000 * 60 * 2;
+const LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || "models/gemini-2.5-flash-native-audio-preview-12-2025";
+const LIVE_RESPONSE_MODALITIES: Modality[] = LIVE_MODEL.includes("native-audio")
+  ? [Modality.AUDIO]
+  : [Modality.AUDIO, Modality.TEXT];
+const liveSessions = new Map<string, LiveRelaySession>();
+const liveSessionsByUser = new Map<string, string>();
+
+const summarizeArgs = (args: unknown) => {
+  try {
+    return JSON.stringify(args ?? {}).slice(0, 300);
+  } catch {
+    return '[unserializable]';
+  }
+};
+
+const LINE_ID_TOKEN_FALLBACK_TTL_MS = 1000 * 60 * 50;
+const lineIdTokenCache = new Map<string, { userId: string; expiresAt: number }>();
+
+const getLineIdTokenFromRequest = (req: Request) => {
+  const headerToken = req.headers['x-line-id-token'];
+  if (typeof headerToken === 'string' && headerToken.trim()) {
+    return headerToken.trim();
+  }
+  const bodyToken = typeof req.body?.lineIdToken === 'string' ? req.body.lineIdToken.trim() : '';
+  return bodyToken;
+};
+
+const verifyLineIdToken = async (idToken: string): Promise<string | null> => {
+  if (!idToken) return null;
+  const cached = lineIdTokenCache.get(idToken);
+  if (cached) {
+    if (cached.expiresAt > Date.now()) {
+      return cached.userId;
+    }
+    lineIdTokenCache.delete(idToken);
+  }
+
+  const channelId = process.env.LINE_CHANNEL_ID || '';
+  if (!channelId) {
+    return null;
+  }
+
+  try {
+    const lineResponse = await fetch('https://api.line.me/oauth2/v2.1/verify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        id_token: idToken,
+        client_id: channelId,
+      }),
+    });
+
+    if (!lineResponse.ok) {
+      return null;
+    }
+
+    const lineUser = await lineResponse.json();
+    const userId = typeof lineUser.sub === 'string' ? lineUser.sub : '';
+    if (!userId) return null;
+    const expiresAt =
+      typeof lineUser.exp === 'number' ? lineUser.exp * 1000 : Date.now() + LINE_ID_TOKEN_FALLBACK_TTL_MS;
+    lineIdTokenCache.set(idToken, { userId, expiresAt });
+    return userId;
+  } catch {
+    return null;
+  }
+};
+
+const LIVE_FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
+  {
+    name: "show_product_tools",
+    description: "Show product management shortcuts and guidance.",
+    parameters: { type: Type.OBJECT, properties: {} },
+  },
+  {
+    name: "show_store_tools",
+    description: "Show store/CRM shortcuts and guidance.",
+    parameters: { type: Type.OBJECT, properties: {} },
+  },
+  {
+    name: "show_marketing_tools",
+    description: "Show marketing content creation shortcuts and guidance.",
+    parameters: { type: Type.OBJECT, properties: {} },
+  },
+  {
+    name: "show_analytics_tools",
+    description: "Show analytics shortcuts.",
+    parameters: { type: Type.OBJECT, properties: {} },
+  },
+  {
+    name: "open_dashboard",
+    description: "Open the Farm2Market LIFF dashboard for the user.",
+    parameters: { type: Type.OBJECT, properties: {} },
+  },
+  {
+    name: "show_help_options",
+    description: "Show help options and tips.",
+    parameters: { type: Type.OBJECT, properties: {} },
+  },
+  {
+    name: "product_list",
+    description: "List the user's products. If a limit is mentioned, include it in args.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        limit: { type: Type.INTEGER },
+      },
+    },
+  },
+  {
+    name: "product_create",
+    description: "Create a new product. Required: name, price (>0), unit, stock (>=0).",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        name: { type: Type.STRING },
+        price: { type: Type.NUMBER },
+        unit: { type: Type.STRING },
+        stock: { type: Type.NUMBER },
+        description: { type: Type.STRING },
+        category: { type: Type.STRING },
+        tags: { type: Type.ARRAY, items: { type: Type.STRING } },
+        imageUrl: { type: Type.STRING },
+      },
+    },
+  },
+  {
+    name: "store_list",
+    description: "List the user's stores. If a limit is mentioned, include it in args.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        limit: { type: Type.INTEGER },
+      },
+    },
+  },
+  {
+    name: "store_create",
+    description: "Create a new store. Ask for missing: name (required).",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        name: { type: Type.STRING },
+        type: { type: Type.STRING },
+        location: { type: Type.STRING },
+      },
+    },
+  },
+  {
+    name: "marketing_material_list",
+    description: "List recent marketing materials. If a limit is mentioned, include it in args.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        limit: { type: Type.INTEGER },
+      },
+    },
+  },
+  {
+    name: "analytics_get_user_stats",
+    description: "Get counts for products, stores, conversations for this user.",
+    parameters: { type: Type.OBJECT, properties: {} },
+  },
+  {
+    name: "user_set_role",
+    description: "Set the user role. Args: { role: \"farmer\" | \"market\" }.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        role: { type: Type.STRING },
+      },
+    },
+  },
+  {
+    name: "product_browse_public",
+    description: "Browse public products. Optional args: { limit?: number }",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        limit: { type: Type.INTEGER },
+      },
+    },
+  },
+  {
+    name: "store_browse_public",
+    description: "Browse public stores/buyers. Optional args: { limit?: number }",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        limit: { type: Type.INTEGER },
+      },
+    },
+  },
+  {
+    name: "marketplace_get_stats",
+    description: "Get public marketplace stats (counts of sellers/buyers/products/stores).",
+    parameters: { type: Type.OBJECT, properties: {} },
+  },
+  {
+    name: "product_search_public",
+    description: "Search products by name/category/tags/price.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        nameContains: { type: Type.STRING },
+        categoryEquals: { type: Type.STRING },
+        tagsAny: { type: Type.ARRAY, items: { type: Type.STRING } },
+        minPrice: { type: Type.NUMBER },
+        maxPrice: { type: Type.NUMBER },
+        limit: { type: Type.INTEGER },
+      },
+    },
+  },
+  {
+    name: "store_search_public",
+    description: "Search stores by name/type/location.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        nameContains: { type: Type.STRING },
+        typeEquals: { type: Type.STRING },
+        locationContains: { type: Type.STRING },
+        limit: { type: Type.INTEGER },
+      },
+    },
+  },
+];
+
+const buildLiveSystemInstruction = (locale?: string, pageContext?: string, pageRoute?: string) => {
+  const isTraditionalChinese = locale?.toLowerCase() === "zh-tw" || locale?.toLowerCase() === "zh_tw";
+  const contextLines: string[] = [];
+  if (pageRoute) {
+    contextLines.push(
+      isTraditionalChinese ? `目前頁面路徑：${pageRoute}` : `Current page route: ${pageRoute}`
+    );
+  }
+  if (pageContext) {
+    contextLines.push(
+      isTraditionalChinese ? `目前頁面資訊：${pageContext}` : `Current page context: ${pageContext}`
+    );
+  }
+  const contextNote = contextLines.length ? `\n${contextLines.join('\n')}` : '';
+  return {
+    parts: [
+      {
+        text: isTraditionalChinese
+          ? `你是繁體中文語音助理，協助農友管理產品、店家、行銷素材與營運分析。請用繁體中文回覆。不要透露思考過程或計畫步驟。使用工具後，請用一句到兩句話總結結果並提一個簡短的下一步問題。${contextNote}`
+          : `You are a helpful voice assistant for Farm2Market. Respond in concise English. Do not reveal reasoning or planning. After using a tool, summarize the result in 1-2 sentences and ask a brief follow-up question.${contextNote}`,
+      },
+    ],
+  };
+};
+
+const broadcastLive = (sessionId: string, payload: Record<string, unknown>) => {
+  const entry = liveSessions.get(sessionId);
+  if (!entry) return;
+  const data = `data: ${JSON.stringify(payload)}\n\n`;
+  for (const client of entry.clients) {
+    try {
+      client.write(data);
+    } catch (error) {
+      entry.clients.delete(client);
+    }
+  }
+};
+
+const closeLiveSession = (sessionId: string) => {
+  const entry = liveSessions.get(sessionId);
+  if (!entry) return;
+  entry.clients.forEach((client) => {
+    try {
+      client.end();
+    } catch {}
+  });
+  entry.clients.clear();
+  try {
+    entry.session.close();
+  } catch {}
+  liveSessions.delete(sessionId);
+  if (liveSessionsByUser.get(entry.userId) === sessionId) {
+    liveSessionsByUser.delete(entry.userId);
+  }
+};
+
+const pruneLiveSessions = () => {
+  const now = Date.now();
+  for (const [sessionId, entry] of liveSessions.entries()) {
+    if (now - entry.lastUsedAt > LIVE_SESSION_TTL_MS) {
+      closeLiveSession(sessionId);
+    }
+  }
+};
 
 // Basic root responder for health/debug
 router.get("/", (_req, res) => {
@@ -31,6 +340,25 @@ const useMockLineApis =
 const getServerTimestamp = async () => {
   const { default: admin } = await import("../lib/firebaseAdmin");
   return admin.firestore.FieldValue.serverTimestamp();
+};
+
+const getAuthorizedUserId = async (req: Request): Promise<string | null> => {
+  const authHeader = req.headers.authorization || "";
+  const match = authHeader.match(/^Bearer (.+)$/i);
+  if (match) {
+    try {
+      const { default: admin } = await import("../lib/firebaseAdmin");
+      const decoded = await admin.auth().verifyIdToken(match[1]);
+      return decoded?.uid || null;
+    } catch (error) {
+      console.warn("Voice assistant auth verification failed:", error);
+    }
+  }
+  const lineIdToken = getLineIdTokenFromRequest(req);
+  if (lineIdToken) {
+    return await verifyLineIdToken(lineIdToken);
+  }
+  return null;
 };
 
 type NormalizedOrderItem = {
@@ -363,7 +691,7 @@ router.post("/line/richmenu/deploy", async (req, res) => {
         },
         {
           bounds: { x: 1250, y: 0, width: 1250, height: 1686 },
-          action: { type: "message", text: "Help" },
+          action: { type: "postback", data: "source=richmenu&action=help", displayText: "Help" },
         },
       ],
     };
@@ -1231,7 +1559,452 @@ router.get('/health', async (_req, res) => {
   }
 });
 
+router.post('/voice/assistant', async (req: Request, res: Response) => {
+  try {
+    const message = typeof req.body?.message === 'string' ? req.body.message.trim() : '';
+    if (!message) {
+      return res.status(400).json({ error: 'Message is required.' });
+    }
+
+    let userId = await getAuthorizedUserId(req);
+    if (!userId) {
+      const allowUnsafe =
+        runtimeConfig.isEmulator ||
+        runtimeConfig.useMockLine ||
+        process.env.ALLOW_UNAUTH_VOICE === 'true';
+      const fallbackUserId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+      if (allowUnsafe && fallbackUserId) {
+        userId = fallbackUserId;
+      }
+    }
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const locale = typeof req.body?.locale === 'string' ? req.body.locale : undefined;
+    const pageContextRaw = typeof req.body?.pageContext === 'string' ? req.body.pageContext.trim() : '';
+    const pageContext = pageContextRaw ? pageContextRaw.slice(0, 2000) : undefined;
+    const pageRoute = typeof req.body?.pageRoute === 'string' ? req.body.pageRoute.trim() : undefined;
+    const response = await handleVoiceAssistantMessage({ message, userId, locale, pageContext, pageRoute });
+    res.json(response);
+  } catch (error) {
+    console.error('Voice assistant error:', error);
+    res.status(500).json({ error: 'Voice assistant failed.' });
+  }
+});
+
+router.post('/voice/tool', async (req: Request, res: Response) => {
+  try {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (!name) {
+      return res.status(400).json({ error: 'Tool name is required.' });
+    }
+
+    let userId = await getAuthorizedUserId(req);
+    if (!userId) {
+      const allowUnsafe =
+        runtimeConfig.isEmulator ||
+        runtimeConfig.useMockLine ||
+        process.env.ALLOW_UNAUTH_VOICE === 'true';
+      const fallbackUserId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+      if (allowUnsafe && fallbackUserId) {
+        userId = fallbackUserId;
+      }
+    }
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const args = typeof req.body?.args === 'object' && req.body?.args ? req.body.args : {};
+    const locale = typeof req.body?.locale === 'string' ? req.body.locale : undefined;
+    const startedAt = Date.now();
+    console.log('[voice-tool] start', {
+      name,
+      userId,
+      locale,
+      args: summarizeArgs(args),
+    });
+    const messages = await executeVoiceAssistantToolCall({ call: { name, args }, userId, locale });
+    console.log('[voice-tool] done', {
+      name,
+      userId,
+      ms: Date.now() - startedAt,
+      messages: messages.length,
+    });
+    res.json({ messages });
+  } catch (error) {
+    console.error('Voice tool execution error:', error);
+    res.status(500).json({ error: 'Voice tool execution failed.' });
+  }
+});
+
+router.post('/voice/live/session', async (req: Request, res: Response) => {
+  try {
+    pruneLiveSessions();
+    let userId = await getAuthorizedUserId(req);
+    if (!userId) {
+      const allowUnsafe =
+        runtimeConfig.isEmulator ||
+        runtimeConfig.useMockLine ||
+        process.env.ALLOW_UNAUTH_VOICE === 'true';
+      const fallbackUserId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+      if (allowUnsafe && fallbackUserId) {
+        userId = fallbackUserId;
+      }
+    }
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const apiKey =
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_GEMINI_API_KEY ||
+      process.env.GENERATIVE_LANGUAGE_API_KEY ||
+      '';
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Missing GEMINI_API_KEY on server.' });
+    }
+
+    const locale = typeof req.body?.locale === 'string' ? req.body.locale : undefined;
+    const pageContextRaw = typeof req.body?.pageContext === 'string' ? req.body.pageContext.trim() : '';
+    const pageContext = pageContextRaw ? pageContextRaw.slice(0, 2000) : '';
+    const pageRoute = typeof req.body?.pageRoute === 'string' ? req.body.pageRoute.trim() : '';
+    const previousSessionId = liveSessionsByUser.get(userId);
+    const sessionId = crypto.randomUUID();
+
+    const ai = new GoogleGenAI({ apiKey });
+    const session = await ai.live.connect({
+      model: LIVE_MODEL,
+      callbacks: {
+        onopen: () => {
+          console.log('[voice-live] socket open', { sessionId });
+          broadcastLive(sessionId, { type: 'status', status: 'open' });
+        },
+        onmessage: (message: LiveServerMessage) => {
+          void (async () => {
+            if (message.toolCall?.functionCalls?.length) {
+              console.log('[voice-live] toolCall received', {
+                sessionId,
+                userId,
+                count: message.toolCall.functionCalls.length,
+              });
+              const entry = liveSessions.get(sessionId);
+              const now = Date.now();
+              if (entry) {
+                for (const [key, value] of entry.toolCache.entries()) {
+                  if (value.expiresAt <= now) {
+                    entry.toolCache.delete(key);
+                  }
+                }
+              }
+
+              const responses = await Promise.all(
+                message.toolCall.functionCalls.map(async (call, index) => {
+                  const name = call.name || 'unknown';
+                  const args = call.args || {};
+                  const callId = call.id || '';
+                  const argsSummary = summarizeArgs(args);
+                  const callStart = Date.now();
+                  let messages: Array<{ role: 'assistant' | 'system'; text: string }> = [];
+                  if (!entry) {
+                    console.log('[voice-live] toolCall skipped (no session)', { name, id: callId });
+                    messages = [{ role: 'assistant', text: 'Session expired. Please reconnect.' }];
+                  } else if (index > 0) {
+                    console.log('[voice-live] toolCall skipped', { name, id: callId, reason: 'multiple' });
+                    messages = [
+                      {
+                        role: 'assistant',
+                        text: 'I can only run one tool at a time. Ask me to run the next step.',
+                      },
+                    ];
+                  } else {
+                    const signature = `${name}:${JSON.stringify(args)}`;
+                    const cached = entry.toolCache.get(signature);
+                    if (cached && cached.expiresAt > now) {
+                      console.log('[voice-live] toolCall cache hit', { name, id: callId });
+                      messages = cached.messages;
+                    } else {
+                      messages = await executeVoiceAssistantToolCall({
+                        call: { name, args },
+                        userId,
+                        locale,
+                      });
+                      entry.toolCache.set(signature, {
+                        messages,
+                        expiresAt: now + TOOL_CACHE_TTL_MS,
+                      });
+                    }
+                  }
+
+                  if (!call.id) {
+                    console.warn('[voice-live] toolCall missing id', { name, args: argsSummary });
+                    return null;
+                  }
+                  const text = messages.map((message) => message.text).filter(Boolean).join('\n').slice(0, 2000);
+                  console.log('[voice-live] toolCall done', {
+                    name,
+                    id: callId,
+                    ms: Date.now() - callStart,
+                    messages: messages.length,
+                  });
+                  return { id: call.id, name, response: { output: { text } } };
+                })
+              );
+              const validResponses = responses.filter(
+                (response): response is { id: string; name: string; response: { output: { text: string } } } =>
+                  Boolean(response && typeof response.id === 'string' && response.id)
+              );
+              const functionResponses = validResponses.map((r) => ({
+                id: r.id,
+                name: r.name,
+                response: r.response,
+              }));
+              if (functionResponses.length) {
+                for (const response of functionResponses) {
+                  try {
+                    console.log('[voice-live] sendToolResponse', {
+                      sessionId,
+                      count: 1,
+                      ids: [response.id],
+                    });
+                    session.sendToolResponse({ functionResponses: response });
+                  } catch (error) {
+                    console.warn('sendToolResponse failed', error);
+                  }
+                }
+              } else {
+                console.warn('[voice-live] sendToolResponse skipped (no responses)', { sessionId });
+              }
+            }
+
+            const parts = message.serverContent?.modelTurn?.parts || [];
+            for (const part of parts) {
+              if (part?.text && LIVE_RESPONSE_MODALITIES.includes(Modality.TEXT)) {
+                broadcastLive(sessionId, { type: 'text', text: part.text });
+              }
+              if (part?.inlineData?.data) {
+                broadcastLive(sessionId, {
+                  type: 'audio',
+                  data: part.inlineData.data,
+                  mimeType: part.inlineData.mimeType,
+                });
+              }
+            }
+
+            if (message.serverContent?.turnComplete) {
+              broadcastLive(sessionId, { type: 'turnComplete' });
+            }
+          })();
+        },
+        onerror: (error: ErrorEvent) => {
+          console.warn('[voice-live] socket error', { sessionId, message: error.message });
+          broadcastLive(sessionId, { type: 'status', status: 'error', message: error.message });
+          closeLiveSession(sessionId);
+        },
+        onclose: (event: CloseEvent) => {
+          console.log('[voice-live] socket closed', { sessionId, reason: event.reason, code: event.code });
+          broadcastLive(sessionId, { type: 'status', status: 'closed', reason: event.reason });
+          closeLiveSession(sessionId);
+        },
+      },
+      config: {
+        responseModalities: LIVE_RESPONSE_MODALITIES,
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: "Zephyr" },
+          },
+        },
+        tools: [{ functionDeclarations: LIVE_FUNCTION_DECLARATIONS }],
+        systemInstruction: buildLiveSystemInstruction(
+          locale,
+          pageContext || undefined,
+          pageRoute || undefined
+        ),
+      },
+    });
+
+    liveSessions.set(sessionId, {
+      session,
+      userId,
+      locale,
+      createdAt: Date.now(),
+      lastUsedAt: Date.now(),
+      clients: new Set(),
+      toolCache: new Map(),
+    });
+    liveSessionsByUser.set(userId, sessionId);
+    if (previousSessionId && previousSessionId !== sessionId) {
+      console.log('[voice-live] closing previous session', { userId, previousSessionId });
+      closeLiveSession(previousSessionId);
+    }
+
+    console.log('[voice-live] session created', {
+      sessionId,
+      userId,
+      locale,
+      model: LIVE_MODEL,
+      modalities: LIVE_RESPONSE_MODALITIES.map((value) => value.toString()),
+    });
+
+    res.json({ sessionId });
+  } catch (error) {
+    console.error('Live session error:', error);
+    res.status(500).json({ error: 'Failed to create live session.' });
+  }
+});
+
+router.get('/voice/live/stream', (req: Request, res: Response) => {
+  const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : '';
+  const entry = liveSessions.get(sessionId);
+  if (!entry) {
+    res.status(404).json({ error: 'Session not found.' });
+    return;
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  (res as any).flushHeaders?.();
+
+  entry.clients.add(res);
+  entry.lastUsedAt = Date.now();
+  res.write(`data: ${JSON.stringify({ type: 'status', status: 'stream-open' })}\n\n`);
+
+  const pingInterval = setInterval(() => {
+    res.write(': ping\n\n');
+  }, 15000);
+
+  req.on('close', () => {
+    clearInterval(pingInterval);
+    entry.clients.delete(res);
+  });
+});
+
+router.post('/voice/live/input', async (req: Request, res: Response) => {
+  try {
+    pruneLiveSessions();
+    const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : '';
+    const entry = liveSessions.get(sessionId);
+    if (!entry) {
+      return res.status(404).json({ error: 'Session not found.' });
+    }
+
+    const authUserId = await getAuthorizedUserId(req);
+    if (authUserId && authUserId !== entry.userId) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const audioBase64 =
+      typeof req.body?.audioBase64 === 'string' ? req.body.audioBase64.trim() : '';
+    const text = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+    entry.lastUsedAt = Date.now();
+
+    if (audioBase64) {
+      const mimeType =
+        typeof req.body?.mimeType === 'string' ? req.body.mimeType : 'audio/pcm;rate=16000';
+      entry.session.sendRealtimeInput({ media: { data: audioBase64, mimeType } });
+      return res.json({ ok: true });
+    }
+
+    if (text) {
+      entry.session.sendClientContent({ turns: [text] });
+      return res.json({ ok: true });
+    }
+
+    return res.status(400).json({ error: 'No input provided.' });
+  } catch (error) {
+    console.error('Live input error:', error);
+    res.status(500).json({ error: 'Live input failed.' });
+  }
+});
+
+router.post('/voice/live/close', async (req: Request, res: Response) => {
+  const sessionId = typeof req.body?.sessionId === 'string' ? req.body.sessionId : '';
+  if (!sessionId) {
+    return res.status(400).json({ error: 'Session ID required.' });
+  }
+  closeLiveSession(sessionId);
+  res.json({ ok: true });
+});
+
+router.post('/voice/transcribe', async (req: Request, res: Response) => {
+  try {
+    const audioBase64 =
+      typeof req.body?.audioBase64 === 'string' ? req.body.audioBase64.trim() : '';
+    if (!audioBase64) {
+      return res.status(400).json({ error: 'Audio data is required.' });
+    }
+
+    let userId = await getAuthorizedUserId(req);
+    if (!userId) {
+      const allowUnsafe =
+        runtimeConfig.isEmulator ||
+        runtimeConfig.useMockLine ||
+        process.env.ALLOW_UNAUTH_VOICE === 'true';
+      const fallbackUserId = typeof req.body?.userId === 'string' ? req.body.userId.trim() : '';
+      if (allowUnsafe && fallbackUserId) {
+        userId = fallbackUserId;
+      }
+    }
+
+    if (!userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const apiKey =
+      process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_GEMINI_API_KEY ||
+      process.env.GENERATIVE_LANGUAGE_API_KEY ||
+      '';
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Missing GEMINI_API_KEY on server.' });
+    }
+
+    const mimeType = typeof req.body?.mimeType === 'string' ? req.body.mimeType : 'audio/wav';
+    const locale = typeof req.body?.locale === 'string' ? req.body.locale : '';
+    const isTraditionalChinese = locale.toLowerCase() === 'zh-tw' || locale.toLowerCase() === 'zh_tw';
+    const prompt = isTraditionalChinese
+      ? '請逐字轉錄這段語音。只輸出轉錄文字，不要加入任何說明。'
+      : 'Transcribe this audio verbatim. Output only the transcript and nothing else.';
+
+    const ai = new GoogleGenAI({ apiKey });
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType,
+                data: audioBase64,
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const transcript =
+      response.text ||
+      response.candidates?.[0]?.content?.parts
+        ?.map((part: any) => (typeof part?.text === 'string' ? part.text : ''))
+        .join('') ||
+      '';
+
+    res.json({ transcript: transcript.trim() });
+  } catch (error) {
+    console.error('Voice transcription error:', error);
+    res.status(500).json({ error: 'Voice transcription failed.' });
+  }
+});
+
 router.post('/marketing/generate-stream', async (req: Request, res: Response) => {
+  const requestId = `marketing-stream:${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -1241,10 +2014,12 @@ router.post('/marketing/generate-stream', async (req: Request, res: Response) =>
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_GEMINI_API_KEY ||
     process.env.GENERATIVE_LANGUAGE_API_KEY ||
+    process.env.VITE_GEMINI_API_KEY ||
     '';
   if (!apiKey) {
     res.status(500).write(JSON.stringify({ type: 'error', message: 'Missing GEMINI_API_KEY on server.' }) + '\n');
     res.end();
+    console.error(`[${requestId}] Missing GEMINI_API_KEY env; aborting request.`);
     return;
   }
 
@@ -1252,16 +2027,33 @@ router.post('/marketing/generate-stream', async (req: Request, res: Response) =>
     prompt?: string;
     product?: { name?: string; category?: string; description?: string };
     image?: { base64?: string; mimeType?: string };
+    imageUrl?: string;
+    language?: string;
   };
 
   const product = body.product ?? {};
   const userPrompt = (body.prompt ?? '').trim();
+  const languageInput = (body.language ?? '').toString();
+  const normalizedLanguage = languageInput.toLowerCase();
+  const isTraditionalChinese = normalizedLanguage === 'zh-tw' || normalizedLanguage === 'zh_tw';
+
+  const systemInstructionText = isTraditionalChinese
+    ? '將此產品照片提升至電商行銷品質：修正光線/對比/白平衡，去除灰塵/雜訊，略微銳化，使用乾淨純白背景並加上柔和自然陰影。**不得以任何方式更改產品或包裝**（不得編輯標籤/文字/標誌/顏色/形狀/大小）。'
+    : 'Enhance this product photo to e-commerce marketing quality: correct lighting/contrast/white balance, remove dust/noise, sharpen slightly, clean pure white background with a soft natural shadow. **Do not change the product or packaging in any way** (no edits to label/text/logo/colors/shape/size).';
+
   const prompt = [
     userPrompt || 'Create marketing-ready product image and matching marketing copy.',
     'Output marketing text (headline, caption, call-to-action, hashtags) and return an image.',
     product?.name ? `Product name: ${product.name}` : null,
     product?.category ? `Category: ${product.category}` : null,
-    product?.description ? `Description: ${product.description}` : null
+    product?.description ? `Description: ${product.description}` : null,
+    isTraditionalChinese
+      ? '以繁體中文撰寫標題、文案、CTA、Hashtag 與設計重點，語氣友善專業，並強調產地與新鮮度。'
+      : 'Provide the headline, caption, CTA, hashtags, and design notes in English.',
+    isTraditionalChinese ? '生成的影像請符合台灣/華人市場的美感與情境。' : null,
+    isTraditionalChinese
+      ? '輸出文字內容時僅提供最終促銷文案，勿加入額外說明、步驟或 JSON。'
+      : 'Only output the final promotional copy ready for the product detail page—do not include explanations, steps, or JSON.'
   ]
     .filter(Boolean)
     .join('\n');
@@ -1273,12 +2065,29 @@ router.post('/marketing/generate-stream', async (req: Request, res: Response) =>
     responseModalities: ['IMAGE', 'TEXT'],
     systemInstruction: [
       {
-        text: 'Improve the uploaded image and make the product looks like a marketing ready pictures of the product.'
+        text: systemInstructionText
       }
     ]
   };
 
   const parts: any[] = [{ text: prompt }];
+  let hasImage = Boolean(body.image?.base64);
+  if (!hasImage && body.imageUrl) {
+    try {
+      const imageResponse = await fetch(body.imageUrl);
+      if (imageResponse.ok) {
+        const mimeType = imageResponse.headers.get('content-type') || 'image/png';
+        const bytes = Buffer.from(await imageResponse.arrayBuffer());
+        const base64 = bytes.toString('base64');
+        body.image = { base64, mimeType };
+        hasImage = true;
+      } else {
+        console.warn(`[${requestId}] Unable to fetch image from URL: ${body.imageUrl}`);
+      }
+    } catch (error) {
+      console.warn(`[${requestId}] Failed to download image from URL: ${body.imageUrl}`, error);
+    }
+  }
   if (body.image?.base64) {
     parts.push({
       inlineData: {
@@ -1290,6 +2099,14 @@ router.post('/marketing/generate-stream', async (req: Request, res: Response) =>
 
   const contents: any[] = [{ role: 'user', parts }];
 
+  console.log(
+    `[${requestId}] Generating marketing stream for product="${product?.name || 'N/A'}" promptLength=${prompt.length} imageAttached=${hasImage} language=${languageInput || 'default'}`
+  );
+
+  let chunkIndex = 0;
+  let streamedTextChars = 0;
+  let streamedImages = 0;
+
   try {
     const response = await ai.models.generateContentStream({
       model,
@@ -1298,11 +2115,15 @@ router.post('/marketing/generate-stream', async (req: Request, res: Response) =>
     });
 
     for await (const chunk of response) {
+      chunkIndex += 1;
       const candidate = chunk?.candidates?.[0];
       const chunkParts = candidate?.content?.parts ?? [];
 
       for (const part of chunkParts) {
         if (part?.inlineData?.data) {
+          streamedImages += 1;
+          const dataLength = part.inlineData.data?.length ?? 0;
+          console.log(`[${requestId}] chunk=${chunkIndex} received image part #${streamedImages} bytes=${dataLength}`);
           res.write(
             JSON.stringify({
               type: 'image',
@@ -1314,13 +2135,19 @@ router.post('/marketing/generate-stream', async (req: Request, res: Response) =>
       }
 
       if (chunk?.text) {
+        streamedTextChars += chunk.text.length;
+        console.log(`[${requestId}] chunk=${chunkIndex} received text chars=${chunk.text.length} total=${streamedTextChars}`);
         res.write(JSON.stringify({ type: 'text', text: chunk.text }) + '\n');
       }
     }
 
     res.write(JSON.stringify({ type: 'done' }) + '\n');
     res.end();
+    console.log(
+      `[${requestId}] completed stream chunks=${chunkIndex} totalTextChars=${streamedTextChars} totalImages=${streamedImages}`
+    );
   } catch (error) {
+    console.error(`[${requestId}] Error while streaming marketing output`, error);
     res.write(JSON.stringify({ type: 'error', message: (error as Error).message }) + '\n');
     res.end();
   }

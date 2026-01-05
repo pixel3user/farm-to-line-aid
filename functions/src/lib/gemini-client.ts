@@ -13,6 +13,7 @@ interface ConversationPlanInput {
   history?: ConversationHistoryItem[];
   user?: { displayName?: string; role?: 'farmer' | 'market'; locale?: 'zh-TW' | 'en' };
   sessionUserId?: string; // ensure per-user session separation
+  context?: { pageRoute?: string; pageContext?: string };
 }
 
 interface ConversationPlan {
@@ -322,22 +323,36 @@ function buildConversationContents(history: ConversationHistoryItem[] | undefine
   return contents;
 }
 
-function getUserContextPrompt(user?: { displayName?: string; role?: 'farmer' | 'market'; locale?: 'zh-TW' | 'en' }): string {
-  if (!user) return 'Keep most interactions inside LINE chat; minimize external links.';
+function getUserContextPrompt(
+  user?: { displayName?: string; role?: 'farmer' | 'market'; locale?: 'zh-TW' | 'en' },
+  context?: { pageRoute?: string; pageContext?: string }
+): string {
+  if (!user && !context) return 'Keep most interactions inside LINE chat; minimize external links.';
   const parts: string[] = ['Keep most interactions inside LINE chat; minimize external links.'];
   if (user.displayName) parts.push(`User displayName: ${user.displayName}`);
   if (user.role) parts.push(`User role: ${user.role === 'farmer' ? 'farmer/seller' : 'market buyer/owner'}`);
   if (user.locale) parts.push(`User locale preference: ${user.locale}`);
+  if (context?.pageRoute) parts.push(`Current page route: ${context.pageRoute}`);
+  if (context?.pageContext) {
+    parts.push(`Current page context: ${context.pageContext}`);
+    parts.push('When asked, provide a short overview, navigation help, and key actions for the current page.');
+  }
   return parts.join('\n');
 }
 
-async function requestConversationPlan(message: string, history?: ConversationHistoryItem[], user?: { displayName?: string; role?: 'farmer' | 'market'; locale?: 'zh-TW' | 'en' }, sessionUserId?: string): Promise<ConversationPlan> {
+async function requestConversationPlan(
+  message: string,
+  history?: ConversationHistoryItem[],
+  user?: { displayName?: string; role?: 'farmer' | 'market'; locale?: 'zh-TW' | 'en' },
+  sessionUserId?: string,
+  context?: { pageRoute?: string; pageContext?: string }
+): Promise<ConversationPlan> {
   const client = getGeminiClient();
   const lang = detectLanguageFromMessage(message);
   const langPrompt = lang === 'zh-TW'
     ? '回覆使用繁體中文。'
     : 'Respond in English.';
-  const userContext = getUserContextPrompt(user);
+  const userContext = getUserContextPrompt(user, context);
   const sessionNote = sessionUserId ? `\nSession: line_user_id=${sessionUserId}` : '';
   const response = await client.models.generateContent({
     model: GEMINI_MODEL,
@@ -383,7 +398,13 @@ async function requestConversationPlan(message: string, history?: ConversationHi
   throw new Error('Gemini returned no actionable content.');
 }
 
-export async function generateConversationPlan({ message, history, user, sessionUserId }: ConversationPlanInput): Promise<ConversationPlan> {
+export async function generateConversationPlan({
+  message,
+  history,
+  user,
+  sessionUserId,
+  context,
+}: ConversationPlanInput): Promise<ConversationPlan> {
   const trimmed = message.trim();
   if (!trimmed) {
     return {
@@ -401,14 +422,17 @@ export async function generateConversationPlan({ message, history, user, session
   }
 
   try {
-    return await requestConversationPlan(trimmed, history, user, sessionUserId);
+    return await requestConversationPlan(trimmed, history, user, sessionUserId, context);
   } catch (error) {
     console.error('[gemini-client] Gemini conversation plan failed:', error);
     // Retry with explicit instruction to ask a clarifying question
     try {
       return await requestConversationPlan(
         trimmed + '\n\n(如果目前資訊不足，請先提出一個簡短澄清問題，並附上 2–4 個 quick replies。)',
-        history
+        history,
+        user,
+        sessionUserId,
+        context
       );
     } catch {
       return {

@@ -64,11 +64,21 @@ const onboardingConfig = {
   areas: [
     {
       bounds: { x: 0, y: 0, width: 1250, height: 1686 },
-      action: { type: 'postback', data: 'action=set_role&role=farmer', label: '我是農友' },
+      action: {
+        type: 'postback',
+        data: 'source=richmenu&action=set_role&role=farmer',
+        label: '我是農友',
+        displayText: '✅ 我是農友',
+      },
     },
     {
       bounds: { x: 1250, y: 0, width: 1250, height: 1686 },
-      action: { type: 'postback', data: 'action=set_role&role=market', label: '我是市場買家' },
+      action: {
+        type: 'postback',
+        data: 'source=richmenu&action=set_role&role=market',
+        label: '我是市場買家',
+        displayText: '✅ 我是市場買家',
+      },
     },
   ],
 };
@@ -83,7 +93,7 @@ const farmerConfig = {
     { bounds: { x: 833, y: 0, width: 834, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=products&role=farmer`, label: '產品管理' } },
     { bounds: { x: 1667, y: 0, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=stores&role=farmer`, label: '店家列表' } },
     { bounds: { x: 0, y: 843, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=marketing&role=farmer`, label: '行銷工具' } },
-    { bounds: { x: 833, y: 843, width: 834, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=analytics&role=farmer`, label: '數據分析' } },
+    { bounds: { x: 833, y: 843, width: 834, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=products&action=add&role=farmer`, label: '新增產品' } },
     { bounds: { x: 1667, y: 843, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=help&role=farmer`, label: '幫助中心' } },
   ],
 };

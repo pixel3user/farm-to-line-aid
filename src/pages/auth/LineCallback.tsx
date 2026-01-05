@@ -15,7 +15,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 
 const LineCallback: React.FC = () => {
   const navigate = useNavigate();
-  const { login, setLiffProfile } = useAuth();
+  const { login, setLiffProfile, setLineIdToken } = useAuth();
   const { t } = useLanguage();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [error, setError] = useState<string>('');
@@ -48,6 +48,9 @@ const LineCallback: React.FC = () => {
         setLoginResult(loginResult);
         if (loginResult?.profile) {
           setLiffProfileRef.current(loginResult.profile);
+        }
+        if (loginResult?.idToken) {
+          setLineIdToken(loginResult.idToken);
         }
 
         await loginRef.current(loginResult?.profile, loginResult?.idToken);

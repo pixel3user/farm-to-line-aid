@@ -1,17 +1,27 @@
 import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import {
+  buildPostOnboardingRedirectPath,
+  savePostOnboardingRedirect
+} from '@/lib/postOnboardingRedirect';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requiredRole?: 'farmer' | 'market';
+  allowedRoles?: Array<'farmer' | 'market'>;
 }
 
-const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole }) => {
+const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole, allowedRoles }) => {
   const { user, isLoading } = useAuth();
   const location = useLocation();
 
   const isAdmin = !!user?.isAdmin;
+  const availableRoles = allowedRoles?.length
+    ? allowedRoles
+    : requiredRole
+    ? [requiredRole]
+    : undefined;
 
   // Show loading while checking authentication
   if (isLoading) {
@@ -27,17 +37,18 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole 
 
   // If not authenticated, redirect to sign in
   if (!user) {
+    savePostOnboardingRedirect(buildPostOnboardingRedirectPath(location));
     return <Navigate to="/auth/signin" state={{ from: location }} replace />;
   }
 
   // If no role selected and not admin, redirect to role selection
   if (!user.role && !isAdmin) {
+    savePostOnboardingRedirect(buildPostOnboardingRedirectPath(location));
     return <Navigate to="/auth/role-selection" replace />;
   }
 
-  // If role is required and doesn't match, redirect to appropriate dashboard,
-  // but allow admin users to access all areas.
-  if (requiredRole && user.role !== requiredRole && !isAdmin) {
+  // If specific roles are required and doesn't include the user, redirect unless admin
+  if (availableRoles && (!user.role || !availableRoles.includes(user.role)) && !isAdmin) {
     const targetPath = user.role ? `/${user.role}` : '/';
     return <Navigate to={targetPath} replace />;
   }

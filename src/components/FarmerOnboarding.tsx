@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
@@ -19,6 +20,11 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { CheckCircle2, Circle, CircleDot, Leaf, Loader2, Package, Store as StoreIcon } from 'lucide-react';
 import { storage } from '@/lib/firebase';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import {
+  buildPostOnboardingRedirectPath,
+  consumePostOnboardingRedirect,
+  isRedirectAllowedForRole
+} from '@/lib/postOnboardingRedirect';
 
 type StepKey = 'profile' | 'store' | 'product' | 'done';
 
@@ -37,6 +43,8 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
     isLoading,
     isRefreshingData
   } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useLanguage();
   const { toast } = useToast();
   const [profileForm, setProfileForm] = useState({
@@ -122,6 +130,16 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
     if (needsProduct) return 'product';
     return 'done';
   }, [needsProfile, needsStore, needsProduct]);
+
+  useEffect(() => {
+    if (!user || user.role !== 'farmer') return;
+    if (currentStep !== 'done') return;
+    const redirect = consumePostOnboardingRedirect();
+    if (!redirect || !isRedirectAllowedForRole(redirect, 'farmer')) return;
+    const currentPath = buildPostOnboardingRedirectPath(location);
+    if (redirect === currentPath) return;
+    navigate(redirect, { replace: true });
+  }, [currentStep, location, navigate, user]);
 
   const activeStepIndex = steps.findIndex((step) => step.key === currentStep);
   const displayedStep = viewStep || currentStep;

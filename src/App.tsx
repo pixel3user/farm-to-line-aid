@@ -48,11 +48,11 @@ const App = () => {
             <Route path="/auth/role-selection" element={<AppLayout><RoleSelection /></AppLayout>} />
             <Route path="/payments/line-pay/result" element={<AppLayout><LinePayResult /></AppLayout>} />
         
-        {/* Farmer routes - only farmers and admins can access */}
+        {/* Farmer routes - farmers and markets can access */}
         <Route
           path="/farmer"
           element={
-            <ProtectedRoute requiredRole="farmer">
+            <ProtectedRoute allowedRoles={['farmer', 'market']}>
               <FarmerLayout />
             </ProtectedRoute>
           }
@@ -66,11 +66,11 @@ const App = () => {
           <Route path="delivery" element={<FarmerDeliverySchedule />} />
         </Route>
 
-        {/* Market routes - only markets and admins can access */}
+        {/* Market routes - farmers and markets can access */}
         <Route
           path="/market"
           element={
-            <ProtectedRoute requiredRole="market">
+            <ProtectedRoute allowedRoles={['farmer', 'market']}>
               <MarketLayout />
             </ProtectedRoute>
           }

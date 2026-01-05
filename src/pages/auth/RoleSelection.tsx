@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -12,9 +12,14 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
+import {
+  consumePostOnboardingRedirect,
+  isRedirectAllowedForRole
+} from '@/lib/postOnboardingRedirect';
 
 const RoleSelection: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, refreshUserData } = useAuth();
   const { t } = useLanguage();
   const [selectedRole, setSelectedRole] = useState<'farmer' | 'market' | null>(null);
@@ -52,8 +57,13 @@ const RoleSelection: React.FC = () => {
       const hasRole = user.role === 'farmer' || user.role === 'market';
 
       if (hasEmail && hasName && hasRole) {
-        // User already has all details, redirect to their dashboard
-        navigate(`/${user.role}`, { replace: true });
+        const redirect = consumePostOnboardingRedirect();
+        if (redirect && isRedirectAllowedForRole(redirect, user.role)) {
+          navigate(redirect, { replace: true });
+        } else {
+          // User already has all details, redirect to their dashboard
+          navigate(`/${user.role}`, { replace: true });
+        }
         return;
       }
 
@@ -129,9 +139,12 @@ const RoleSelection: React.FC = () => {
       // Refresh user data to get updated profile
       await refreshUserData();
       // Redirect immediately; ProtectedRoute will pass once role is set
-      navigate(`/${role}`, { replace: true });
-
-      // Wait for context to reflect role; navigation handled in useEffect below
+      const redirect = consumePostOnboardingRedirect();
+      if (redirect && isRedirectAllowedForRole(redirect, role)) {
+        navigate(redirect, { replace: true });
+      } else {
+        navigate(`/${role}`, { replace: true });
+      }
     } catch (error) {
       console.error('Failed to update user role:', error);
     } finally {
@@ -140,10 +153,15 @@ const RoleSelection: React.FC = () => {
   };
 
   useEffect(() => {
-    if (selectedRole && user?.role === selectedRole) {
-      navigate(`/${selectedRole}`, { replace: true });
+    if (selectedRole && user?.role === selectedRole && location.pathname.startsWith('/auth')) {
+      const redirect = consumePostOnboardingRedirect();
+      if (redirect && isRedirectAllowedForRole(redirect, selectedRole)) {
+        navigate(redirect, { replace: true });
+      } else {
+        navigate(`/${selectedRole}`, { replace: true });
+      }
     }
-  }, [user?.role, selectedRole, navigate]);
+  }, [user?.role, selectedRole, navigate, location.pathname]);
 
   if (!user) {
     return (

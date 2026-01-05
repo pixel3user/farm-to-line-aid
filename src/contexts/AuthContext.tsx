@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import { useLanguage } from '@/contexts/LanguageContext';
+import resolveApiBaseUrl from '@/lib/api';
 
 // LINE LIFF types
 interface LiffUser {
@@ -21,6 +22,7 @@ interface AuthContextType {
   user: LineUser | null;
   firebaseUser: FirebaseUser | null;
   liffUser: LiffUser | null;
+  lineIdToken: string | null;
   isLoading: boolean;
   isRefreshingData: boolean;
   isLiffReady: boolean;
@@ -31,6 +33,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   refreshUserData: () => Promise<void>;
   setLiffProfile: (profile: LiffUser) => void;
+  setLineIdToken: (token: string | null) => void;
   updateUserProfile: (updates: Partial<LineUser>) => Promise<void>;
   updateUserPreferences: (preferences: Partial<LineUser['preferences']>) => Promise<void>;
   userStats: any;
@@ -61,6 +64,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     try {
       const savedLiffUser = localStorage.getItem('farm2market_liff_user');
       return savedLiffUser ? JSON.parse(savedLiffUser) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [lineIdToken, setLineIdTokenState] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('farm2market_line_id_token');
     } catch {
       return null;
     }
@@ -180,6 +190,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, [liffUser]);
 
+  useEffect(() => {
+    if (lineIdToken) {
+      localStorage.setItem('farm2market_line_id_token', lineIdToken);
+    } else {
+      localStorage.removeItem('farm2market_line_id_token');
+    }
+  }, [lineIdToken]);
+
+  const setLineIdToken = (token: string | null) => {
+    setLineIdTokenState(token && token.trim() ? token.trim() : null);
+  };
+
   // Initialize LIFF
   useEffect(() => {
     const initializeLiff = async () => {
@@ -190,9 +212,24 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         
         // Check if we're in LINE app environment
         const userAgent = navigator.userAgent.toLowerCase();
-        const isInLine = userAgent.includes('line');
-        console.log('User agent:', userAgent, 'Is in LINE:', isInLine);
-        setIsInLineApp(isInLine);
+        const uaInLine = userAgent.includes('line');
+        const liffId = import.meta.env.VITE_LIFF_ID;
+        const hasLiffId = Boolean(liffId && liffId !== 'your-liff-id');
+        let liff: typeof import('@line/liff').default | null = null;
+        let inLineClient = uaInLine;
+        console.log('User agent:', userAgent, 'Is in LINE (UA):', uaInLine);
+
+        if (hasLiffId) {
+          try {
+            liff = (await import('@line/liff')).default;
+            const liffInClient = typeof liff.isInClient === 'function' ? liff.isInClient() : false;
+            inLineClient = inLineClient || liffInClient;
+          } catch (error) {
+            console.warn('LIFF SDK load failed:', error);
+          }
+        }
+
+        setIsInLineApp(inLineClient);
 
         // If we have a saved user, check if we should restore it
         if (user && liffUser) {
@@ -207,6 +244,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             console.log('Using saved user, loading data...');
             setIsLiffReady(true);
             setIsLoading(false);
+            if (inLineClient && hasLiffId) {
+              try {
+                const liffInstance = liff ?? (await import('@line/liff')).default;
+                await liffInstance.init({ liffId });
+                if (typeof liffInstance.isLoggedIn === 'function' && liffInstance.isLoggedIn()) {
+                  const token = typeof liffInstance.getIDToken === 'function' ? liffInstance.getIDToken() : '';
+                  if (token) {
+                    setLineIdToken(token);
+                  }
+                }
+              } catch (error) {
+                console.warn('LIFF token refresh skipped:', error);
+              }
+            }
             try {
               await loadUserData(liffUser.userId);
             } catch (error) {
@@ -224,14 +275,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const linePictureUrl = urlParams.get('pictureUrl');
         console.log('URL params:', { lineUserId, lineDisplayName, linePictureUrl });
 
-        if (isInLine) {
+        if (inLineClient) {
           console.log('In LINE app, initializing LIFF...');
           try {
-            // Dynamic import of LIFF SDK
-            const liff = (await import('@line/liff')).default;
-            
-            const liffId = import.meta.env.VITE_LIFF_ID;
-            if (!liffId || liffId === 'your-liff-id') {
+            if (!hasLiffId || !liff) {
               console.warn('LIFF ID not configured, using fallback authentication');
               setIsLiffReady(true);
               // Fallback: treat as web user with LINE redirect params
@@ -269,12 +316,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                 statusMessage: profile.statusMessage
               });
               
-              // Get ID token for Firebase authentication
-              const idToken = liff.getIDToken();
-              if (idToken) {
-                await authenticateWithFirebase(idToken, profile);
-              } else {
-                console.log('No ID token available, using profile fallback authentication');
+            // Get ID token for Firebase authentication
+            const idToken = liff.getIDToken();
+            if (idToken) {
+              setLineIdToken(idToken);
+              await authenticateWithFirebase(idToken, profile);
+            } else {
+              console.log('No ID token available, using profile fallback authentication');
                 await authenticateWithFirebase('', profile);
               }
             } else {
@@ -504,7 +552,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (shouldAttemptFirebaseSignIn) {
         try {
           console.log('Exchanging LIFF ID token for Firebase custom token...');
-          const response = await fetch('/api/auth/line', {
+          const apiBaseUrl = resolveApiBaseUrl();
+          const response = await fetch(`${apiBaseUrl}/api/auth/line`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -863,6 +912,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const login = async (profileOverride?: LiffUser, lineIdToken?: string, options?: { force?: boolean }) => {
+    if (lineIdToken) {
+      setLineIdToken(lineIdToken);
+    }
     // Prevent re-entrancy/infinite loops
     if (loginInProgressRef.current) {
       console.log('Login already in progress, skipping...');
@@ -938,12 +990,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Clear all state and localStorage
       setUser(null);
       setLiffUser(null);
+      setLineIdToken(null);
       setUserStats(null);
       setUserProducts([]);
       setUserStores([]);
       setUserMarketingMaterials([]);
       localStorage.removeItem('farm2market_user');
       localStorage.removeItem('farm2market_liff_user');
+      localStorage.removeItem('farm2market_line_id_token');
     } catch (error) {
       console.error('Logout failed:', error);
     }
@@ -1017,6 +1071,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     user,
     firebaseUser,
     liffUser,
+    lineIdToken,
     isLoading,
     isRefreshingData,
     isLiffReady,
@@ -1027,6 +1082,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     logout,
     refreshUserData,
     setLiffProfile: (profile: LiffUser) => setLiffUser(profile),
+    setLineIdToken,
     updateUserProfile,
     updateUserPreferences,
     userStats,

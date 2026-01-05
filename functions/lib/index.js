@@ -40,7 +40,13 @@ exports.health = exports.webhook = exports.api = void 0;
 const functions = __importStar(require("firebase-functions"));
 const app_1 = __importDefault(require("./app"));
 const REGION = 'asia-east1';
-exports.api = functions.region(REGION).https.onRequest(app_1.default);
+const apiRuntime = functions.region(REGION).runWith({
+    timeoutSeconds: 300,
+    memory: '1GB',
+    minInstances: 1,
+    maxInstances: Number(process.env.API_MAX_INSTANCES || 5),
+});
+exports.api = apiRuntime.https.onRequest(app_1.default);
 exports.webhook = functions.region(REGION).https.onRequest((req, res) => {
     req.url = '/api/webhook';
     return (0, app_1.default)(req, res);

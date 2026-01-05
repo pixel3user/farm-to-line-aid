@@ -6,7 +6,12 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import TopNavigation from './TopNavigation';
 import { useAuth } from '@/contexts/AuthContext';
+import VoiceAssistantPopup from '@/components/VoiceAssistantPopup';
 import LocationReminder from '@/components/LocationReminder';
+import {
+  buildPostOnboardingRedirectPath,
+  savePostOnboardingRedirect
+} from '@/lib/postOnboardingRedirect';
 
 const queryClient = new QueryClient();
 
@@ -17,11 +22,13 @@ interface AppLayoutProps {
 const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, isLoading } = useAuth();
+  const { user, firebaseUser, liffUser, isLoading } = useAuth();
   const userRole = user?.role;
+  const showVoiceAssistant = Boolean(user || firebaseUser || liffUser);
 
   useEffect(() => {
     if (!isLoading && user && !userRole && location.pathname !== '/auth/role-selection') {
+      savePostOnboardingRedirect(buildPostOnboardingRedirectPath(location));
       navigate('/auth/role-selection', { replace: true });
     }
   }, [isLoading, user, userRole, location.pathname, navigate]);
@@ -37,6 +44,7 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           </main>
           <Toaster />
           <Sonner />
+          {showVoiceAssistant && <VoiceAssistantPopup />}
         </div>
       </TooltipProvider>
     </QueryClientProvider>

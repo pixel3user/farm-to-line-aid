@@ -1,10 +1,12 @@
 import React, { useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Textarea } from '@/components/ui/textarea';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useToast } from '@/hooks/use-toast';
 import {
   Table,
   TableBody,
@@ -22,10 +24,12 @@ import {
   DialogTrigger
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Copy, Eye, EyeOff, Filter, MoreHorizontal, Plus, RefreshCw, Search, Edit, Trash2, Upload, X, Image as ImageIcon } from 'lucide-react';
+import { Clipboard, Download, Eye, EyeOff, Filter, Loader2, MoreHorizontal, Plus, RefreshCw, Search, Sparkles, Edit, Trash2, Upload, X, Image as ImageIcon } from 'lucide-react';
 import { Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { DatabaseService, Product } from '@/lib/database';
+import resolveApiBaseUrl from '@/lib/api';
+import { getMarketingCopy, languageLabel } from '@/lib/marketingCopy';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -55,9 +59,45 @@ const formatDate = (timestamp?: Timestamp) => {
   }
 };
 
+type MarketingProduct = Partial<Product> & { id: string; name: string; photos?: string[] };
+
+const readImageFile = (file: File) =>
+  new Promise<{ previewUrl: string; base64: string; mimeType: string }>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('Unable to read image file.'));
+        return;
+      }
+      const previewUrl = reader.result;
+      const base64 = previewUrl.split(',')[1] ?? '';
+      if (!base64) {
+        reject(new Error('Unable to extract image data.'));
+        return;
+      }
+      resolve({ previewUrl, base64, mimeType: file.type || 'image/png' });
+    };
+    reader.onerror = () => reject(new Error('Unable to read image file.'));
+    reader.readAsDataURL(file);
+  });
+
+const base64ToUint8Array = (base64: string) => {
+  const normalized = base64.replace(/^data:.+;base64,/, '');
+  const binaryString = atob(normalized);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i += 1) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+};
+
 const FarmerProducts: React.FC = () => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const navigate = useNavigate();
+  const { toast } = useToast();
   const { user, userProducts, refreshUserData, isLoading, isRefreshingData } = useAuth();
+  const copy = useMemo(() => getMarketingCopy(language), [language]);
   const [searchParams, setSearchParams] = useSearchParams();
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -65,12 +105,17 @@ const FarmerProducts: React.FC = () => {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isEnhancementDialogOpen, setIsEnhancementDialogOpen] = useState(false);
+  const [createdProductForMarketing, setCreatedProductForMarketing] = useState<MarketingProduct | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isUploadingImages, setIsUploadingImages] = useState(false);
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
   const previousUserIdRef = useRef<string | null>(null);
+  const createImageInputRef = useRef<HTMLInputElement | null>(null);
+  const enhancementFileInputRef = useRef<HTMLInputElement | null>(null);
+  const enhancementAbortRef = useRef<AbortController | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     category: 'general',
@@ -79,6 +124,7 @@ const FarmerProducts: React.FC = () => {
     stock: 0,
     description: ''
   });
+  const [createImages, setCreateImages] = useState<File[]>([]);
   const [editFormData, setEditFormData] = useState({
     name: '',
     category: 'general',
@@ -88,6 +134,31 @@ const FarmerProducts: React.FC = () => {
     description: '',
     images: [] as string[]
   });
+  const createImagePreviews = useMemo(
+    () => createImages.map((file) => ({ file, url: URL.createObjectURL(file) })),
+    [createImages]
+  );
+  const [enhancementPrompt, setEnhancementPrompt] = useState('');
+  const [enhancementUploadedImage, setEnhancementUploadedImage] = useState<{
+    name: string;
+    previewUrl: string;
+    base64: string;
+    mimeType: string;
+  } | null>(null);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [enhancementOutputText, setEnhancementOutputText] = useState('');
+  const [enhancementOutputImages, setEnhancementOutputImages] = useState<Array<{ base64: string; mimeType: string }>>([]);
+  const [enhancementError, setEnhancementError] = useState<string | null>(null);
+  const [enhancementCopied, setEnhancementCopied] = useState(false);
+  const [isApplyingAssets, setIsApplyingAssets] = useState(false);
+  const [showResultScreen, setShowResultScreen] = useState(false);
+  const storedProductImageUrl =
+    createdProductForMarketing?.images?.[0] || createdProductForMarketing?.photos?.[0] || '';
+  const enhancementErrorBlock = enhancementError ? (
+    <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive-foreground">
+      {enhancementError}
+    </div>
+  ) : null;
 
   const products = (userProducts || []) as Product[];
 
@@ -133,6 +204,20 @@ const FarmerProducts: React.FC = () => {
     }
   }, [userProducts]);
 
+  React.useEffect(() => {
+    return () => {
+      createImagePreviews.forEach((preview) => URL.revokeObjectURL(preview.url));
+    };
+  }, [createImagePreviews]);
+
+  React.useEffect(() => {
+    if (!createdProductForMarketing?.id || !userProducts?.length) return;
+    const match = (userProducts as Product[]).find((product) => product.id === createdProductForMarketing.id);
+    if (match) {
+      setCreatedProductForMarketing((prev) => (prev ? { ...prev, ...match } : match));
+    }
+  }, [userProducts, createdProductForMarketing?.id]);
+
   const categories = useMemo(() => {
     const unique = new Set<string>();
     products.forEach((product) => {
@@ -163,6 +248,69 @@ const FarmerProducts: React.FC = () => {
     }
   }, [searchParams, setSearchParams]);
 
+  const uploadProductImages = async (files: File[], userId: string, productId: string) => {
+    const uploadPromises = files.map(async (file) => {
+      const timestamp = Date.now();
+      const fileName = `products/${userId}/${productId}/${timestamp}-${file.name}`;
+      const storageRef = ref(storage, fileName);
+      await uploadBytes(storageRef, file);
+      return getDownloadURL(storageRef);
+    });
+
+    return Promise.all(uploadPromises);
+  };
+
+  const handleCreateImageSelect = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const nextFiles = Array.from(files);
+    setCreateImages((prev) => [...prev, ...nextFiles].slice(0, 10));
+    if (createImageInputRef.current) {
+      createImageInputRef.current.value = '';
+    }
+  };
+
+  const handleRemoveCreateImage = (index: number) => {
+    setCreateImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const resetEnhancementState = () => {
+    enhancementAbortRef.current?.abort();
+    setEnhancementPrompt('');
+    setEnhancementUploadedImage(null);
+    setEnhancementOutputText('');
+    setEnhancementOutputImages([]);
+    setEnhancementError(null);
+    setEnhancementCopied(false);
+    setIsEnhancing(false);
+    setIsApplyingAssets(false);
+    setShowResultScreen(false);
+    if (enhancementFileInputRef.current) {
+      enhancementFileInputRef.current.value = '';
+    }
+  };
+
+  const closeEnhancementDialog = () => {
+    resetEnhancementState();
+    setCreatedProductForMarketing(null);
+    setIsEnhancementDialogOpen(false);
+  };
+
+  const handleEnhancementSkip = () => {
+    closeEnhancementDialog();
+  };
+
+  const handleEnhancementViewProducts = () => {
+    closeEnhancementDialog();
+    if (createdProductForMarketing) {
+      navigate(`/market/products?product=${createdProductForMarketing.id}`);
+    }
+  };
+
+  const handleEnhancementAddAnother = () => {
+    closeEnhancementDialog();
+    setIsDialogOpen(true);
+  };
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!user?.id) return;
@@ -179,15 +327,42 @@ const FarmerProducts: React.FC = () => {
         images: [],
         tags: []
       });
+      let uploadedImageUrls: string[] = [];
+      if (createImages.length > 0) {
+        setIsUploadingImages(true);
+        try {
+          const imageUrls = await uploadProductImages(createImages, user.id, result.id);
+          uploadedImageUrls = imageUrls;
+          await DatabaseService.updateProduct(result.id, { images: imageUrls });
+        } catch (error) {
+          console.error('Failed to upload images for new product:', error);
+          alert(t('farmer.products.imageUploadFailed'));
+        } finally {
+          setIsUploadingImages(false);
+        }
+      }
       console.log('Product created successfully:', result);
       await refreshUserData();
       setLastRefreshTime(new Date());
 
       setIsDialogOpen(false);
       setFormData({ name: '', category: 'general', unit: '', price: 0, stock: 0, description: '' });
+      setCreateImages([]);
+      setCreatedProductForMarketing({
+        id: result.id,
+        name: formData.name,
+        category: formData.category,
+        description: formData.description,
+        unit: formData.unit,
+        price: Number(formData.price),
+        stock: Number(formData.stock),
+        images: uploadedImageUrls
+      });
+      resetEnhancementState();
+      setIsEnhancementDialogOpen(true);
     } catch (error) {
       console.error('Failed to create product:', error);
-      alert('Failed to create product. Please try again.');
+      alert(t('farmer.products.createError'));
     } finally {
       setIsSubmitting(false);
     }
@@ -233,7 +408,7 @@ const FarmerProducts: React.FC = () => {
       setSelectedProduct(null);
     } catch (error) {
       console.error('Failed to delete product:', error);
-      alert('Failed to delete product. Please try again.');
+      alert(t('farmer.products.deleteError'));
     } finally {
       setIsDeleting(false);
     }
@@ -244,21 +419,12 @@ const FarmerProducts: React.FC = () => {
     
     setIsUploadingImages(true);
     try {
-      const uploadPromises = Array.from(files).map(async (file) => {
-        const timestamp = Date.now();
-        const fileName = `products/${user.id}/${selectedProduct.id}/${timestamp}-${file.name}`;
-        const storageRef = ref(storage, fileName);
-        await uploadBytes(storageRef, file);
-        const downloadURL = await getDownloadURL(storageRef);
-        return downloadURL;
-      });
-
-      const newImageUrls = await Promise.all(uploadPromises);
+      const newImageUrls = await uploadProductImages(Array.from(files), user.id, selectedProduct.id);
       const updatedImages = [...editFormData.images, ...newImageUrls].slice(0, 10); // Limit to 10 images
       setEditFormData(prev => ({ ...prev, images: updatedImages }));
     } catch (error) {
       console.error('Failed to upload images:', error);
-      alert('Failed to upload images. Please try again.');
+      alert(t('farmer.products.uploadError'));
     } finally {
       setIsUploadingImages(false);
     }
@@ -291,9 +457,314 @@ const FarmerProducts: React.FC = () => {
       setSelectedProduct(null);
     } catch (error) {
       console.error('Failed to update product:', error);
-      alert('Failed to update product. Please try again.');
+      alert(t('farmer.products.updateError'));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleEnhancementUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const MAX_BYTES = 8 * 1024 * 1024;
+    if (file.size > MAX_BYTES) {
+      toast({
+        title: copy.imageTooLargeTitle,
+        description: copy.imageTooLargeDesc,
+        variant: 'destructive'
+      });
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      const data = await readImageFile(file);
+      setEnhancementUploadedImage({ name: file.name, ...data });
+    } catch (err) {
+      toast({
+        title: copy.uploadFailedTitle,
+        description: (err as Error).message,
+        variant: 'destructive'
+      });
+      event.target.value = '';
+    }
+  };
+
+  const clearEnhancementUpload = () => {
+    setEnhancementUploadedImage(null);
+    if (enhancementFileInputRef.current) {
+      enhancementFileInputRef.current.value = '';
+    }
+  };
+
+  const stopEnhancement = () => {
+    enhancementAbortRef.current?.abort();
+  };
+
+  const generateEnhancement = async () => {
+    if (!createdProductForMarketing) {
+      toast({
+        title: copy.selectProductToastTitle,
+        description: copy.selectProductToastDesc
+      });
+      return;
+    }
+
+    const fallbackImageUrl = storedProductImageUrl || undefined;
+    if (!enhancementUploadedImage && !fallbackImageUrl && !createdProductForMarketing.description?.trim()) {
+      toast({
+        title: copy.requireDescriptionTitle,
+        description: copy.requireDescriptionDesc,
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    setEnhancementOutputText('');
+    setEnhancementOutputImages([]);
+    setEnhancementError(null);
+    setEnhancementCopied(false);
+    setShowResultScreen(true);
+    setIsEnhancing(true);
+
+    enhancementAbortRef.current?.abort();
+    const controller = new AbortController();
+    enhancementAbortRef.current = controller;
+
+    try {
+      let imagePayload:
+        | {
+            base64: string;
+            mimeType: string;
+          }
+        | undefined = enhancementUploadedImage
+        ? {
+            base64: enhancementUploadedImage.base64,
+            mimeType: enhancementUploadedImage.mimeType
+          }
+        : undefined;
+      const imageUrlPayload = !imagePayload && fallbackImageUrl ? fallbackImageUrl : undefined;
+
+      if (!imagePayload && !fallbackImageUrl && !createdProductForMarketing.description?.trim()) {
+        toast({
+          title: copy.requireDescriptionTitle,
+          description: copy.requireDescriptionDesc,
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      const apiBaseUrl = resolveApiBaseUrl();
+      const response = await fetch(`${apiBaseUrl}/api/marketing/generate-stream`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          prompt: enhancementPrompt,
+          language,
+          product: {
+            name: createdProductForMarketing.name,
+            category: createdProductForMarketing.category,
+            description: createdProductForMarketing.description
+          },
+          image: imagePayload
+            ? {
+                base64: imagePayload.base64,
+                mimeType: imagePayload.mimeType
+              }
+            : undefined,
+          imageUrl: imageUrlPayload
+        })
+      });
+
+      if (!response.ok || !response.body) {
+        const text = await response.text();
+        throw new Error(text || `Request failed (${response.status})`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          let event: { type: string; text?: string; mimeType?: string; base64?: string; message?: string };
+          try {
+            event = JSON.parse(trimmed) as { type: string; text?: string; mimeType?: string; base64?: string; message?: string };
+          } catch {
+            continue;
+          }
+
+          if (event.type === 'text' && event.text) {
+            setEnhancementOutputText((prev) => prev + event.text);
+          } else if (event.type === 'image' && event.base64 && event.mimeType) {
+            setEnhancementOutputImages((prev) => [...prev, { base64: event.base64!, mimeType: event.mimeType! }]);
+          } else if (event.type === 'error' && event.message) {
+            setEnhancementError(event.message);
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        setEnhancementError((err as Error).message);
+      }
+    } finally {
+      setIsEnhancing(false);
+    }
+
+    const hasImagePayload = Boolean(enhancementUploadedImage || fallbackImageUrl);
+    if (!hasImagePayload && !createdProductForMarketing.description?.trim()) {
+      toast({
+        title: copy.requireDescriptionTitle,
+        description: copy.requireDescriptionDesc,
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleEnhancementCopy = async () => {
+    if (!enhancementOutputText.trim()) return;
+    try {
+      await navigator.clipboard.writeText(enhancementOutputText);
+      setEnhancementCopied(true);
+      toast({
+        title: copy.copyToastTitle,
+        description: copy.copyToastDesc
+      });
+      setTimeout(() => setEnhancementCopied(false), 1500);
+    } catch (err) {
+      toast({
+        title: copy.copyToastErrorTitle,
+        description: (err as Error).message,
+        variant: 'destructive'
+      });
+    }
+  };
+
+  const handleDownloadEnhancementImage = (image: { base64: string; mimeType: string }, index: number) => {
+    const dataUrl = `data:${image.mimeType};base64,${image.base64}`;
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = `marketing-image-${index + 1}.png`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleResultBack = () => {
+    setShowResultScreen(false);
+  };
+
+  const handleApplyEnhancementAssets = async () => {
+    if (!createdProductForMarketing) {
+      toast({
+        title: copy.selectProductToastTitle,
+        description: copy.selectProductToastDesc
+      });
+      return;
+    }
+
+    const trimmed = enhancementOutputText.trim();
+    if (!trimmed && enhancementOutputImages.length === 0) {
+      toast({
+        title: copy.applyAssetsButton,
+        description: copy.applyTextMissing,
+        variant: 'destructive'
+      });
+      return;
+    }
+
+    setIsApplyingAssets(true);
+    let uploadedImageUrl: string | null = null;
+    let imagePayload = enhancementOutputImages.length > 0 ? enhancementOutputImages[0] : null;
+
+    if (imagePayload) {
+      if (!user?.id) {
+        toast({
+          title: copy.applyImageError,
+          description: copy.missingUserError,
+          variant: 'destructive'
+        });
+        imagePayload = null;
+      } else if (!storage) {
+        toast({
+          title: copy.applyImageError,
+          description: copy.storageUnavailableError,
+          variant: 'destructive'
+        });
+        imagePayload = null;
+      }
+    }
+
+    if (imagePayload) {
+      try {
+        const bytes = base64ToUint8Array(imagePayload.base64);
+        const extension = imagePayload.mimeType?.split('/')?.[1]?.split('+')?.[0] || 'png';
+        const fileName = `products/${user!.id}/${createdProductForMarketing.id}/marketing-${Date.now()}.${extension}`;
+        const storageRef = ref(storage, fileName);
+        await uploadBytes(storageRef, bytes, { contentType: imagePayload.mimeType || 'image/png' });
+        uploadedImageUrl = await getDownloadURL(storageRef);
+      } catch (err) {
+        console.error('Failed to attach marketing image to product', err);
+        toast({
+          title: copy.applyImageError,
+          description: (err as Error).message,
+          variant: 'destructive'
+        });
+        imagePayload = null;
+      }
+    }
+
+    const updateData: Record<string, any> = {};
+    if (trimmed) {
+      updateData.description = trimmed;
+    }
+
+    if (uploadedImageUrl) {
+      const existing =
+        (Array.isArray(createdProductForMarketing.images) && createdProductForMarketing.images.length > 0
+          ? createdProductForMarketing.images
+          : Array.isArray(createdProductForMarketing.photos)
+            ? createdProductForMarketing.photos
+            : []) ?? [];
+      const updatedImages = Array.from(new Set([uploadedImageUrl, ...existing]));
+      updateData.images = updatedImages;
+      updateData.photos = updatedImages;
+    }
+
+    try {
+      if (Object.keys(updateData).length === 0) {
+        throw new Error('No assets to apply.');
+      }
+      await DatabaseService.updateProduct(createdProductForMarketing.id, updateData as any);
+      setCreatedProductForMarketing((prev) => (prev ? { ...prev, ...updateData } : prev));
+      toast({
+        title: copy.applyAssetsSuccess,
+        description: createdProductForMarketing.name
+      });
+      if (typeof refreshUserData === 'function') {
+        await refreshUserData();
+      }
+    } catch (err) {
+      console.error('Failed to apply enhancement assets to product', err);
+      toast({
+        title: copy.applyTextError,
+        description: (err as Error).message,
+        variant: 'destructive'
+      });
+    } finally {
+      setIsApplyingAssets(false);
     }
   };
 
@@ -334,7 +805,7 @@ const FarmerProducts: React.FC = () => {
           <p className="text-gray-600">{t('farmer.products.catalogDescription')}</p>
           {lastRefreshTime && (
             <p className="text-sm text-gray-500 mt-1">
-              Last updated: {lastRefreshTime.toLocaleTimeString()}
+              {t('farmer.products.lastUpdated').replace('{time}', lastRefreshTime.toLocaleTimeString())}
             </p>
           )}
         </div>
@@ -346,7 +817,7 @@ const FarmerProducts: React.FC = () => {
             disabled={isLoading || isRefreshingData}
           >
             <RefreshCw className={`w-5 h-5 mr-2 ${(isLoading || isRefreshingData) ? 'animate-spin' : ''}`} />
-            {isLoading || isRefreshingData ? 'Refreshing...' : 'Refresh'}
+            {isLoading || isRefreshingData ? t('farmer.products.refreshing') : t('common.refresh')}
           </Button>
           <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
             <DialogTrigger asChild>
@@ -440,6 +911,62 @@ const FarmerProducts: React.FC = () => {
                   className="w-full min-h-[100px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
                 />
               </div>
+
+              <div className="space-y-3">
+                <label className="block text-sm font-semibold text-gray-700">{t('farmer.products.photos')}</label>
+                <input
+                  ref={createImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={(event) => handleCreateImageSelect(event.target.files)}
+                  className="hidden"
+                  disabled={isSubmitting || isUploadingImages || createImages.length >= 10}
+                />
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => createImageInputRef.current?.click()}
+                    disabled={isSubmitting || isUploadingImages || createImages.length >= 10}
+                    className="gap-2"
+                  >
+                    <Upload className="w-4 h-4" />
+                    {t('farmer.products.uploadPhotos')}
+                  </Button>
+                  <span className="text-sm text-gray-500">
+                    {createImages.length > 0
+                      ? `${createImages.length} ${t('farmer.products.photosSelected')}`
+                      : t('farmer.products.noPhotosSelected')}
+                  </span>
+                </div>
+                {createImagePreviews.length > 0 && (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {createImagePreviews.map((preview, index) => (
+                      <div key={`${preview.file.name}-${index}`} className="group overflow-hidden rounded-lg border bg-white">
+                        <div className="relative h-24 w-full overflow-hidden">
+                          <img
+                            src={preview.url}
+                            alt={preview.file.name}
+                            className="h-full w-full object-cover transition duration-200 group-hover:scale-105"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveCreateImage(index)}
+                            className="absolute right-2 top-2 rounded-full bg-white/90 p-1 text-gray-600 shadow-sm hover:bg-white"
+                            aria-label={t('farmer.products.removeImage').replace('{name}', preview.file.name)}
+                          >
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                        <div className="px-2 py-1 text-xs text-gray-600">
+                          <span className="block truncate">{preview.file.name}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               
               <div className="flex justify-end space-x-3 pt-4 border-t">
                 <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} className="px-6">
@@ -447,7 +974,7 @@ const FarmerProducts: React.FC = () => {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isSubmitting || isLoading || isRefreshingData}
+                  disabled={isSubmitting || isLoading || isRefreshingData || isUploadingImages}
                   className="px-6 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800"
                 >
                   {isSubmitting ? (
@@ -474,7 +1001,7 @@ const FarmerProducts: React.FC = () => {
             </div>
             {t('farmer.products.catalog')}
           </CardTitle>
-          <CardDescription className="text-base">Filtered directly from Firestore collections with real-time updates</CardDescription>
+          <CardDescription className="text-base">{t('farmer.products.catalogLiveDescription')}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
@@ -540,7 +1067,7 @@ const FarmerProducts: React.FC = () => {
                     <TableCell colSpan={8} className="text-center py-12">
                       <div className="flex flex-col items-center space-y-3">
                         <div className="w-8 h-8 border-4 border-green-200 border-t-green-600 rounded-full animate-spin"></div>
-                        <p className="text-gray-500 font-medium">Loading products...</p>
+                        <p className="text-gray-500 font-medium">{t('farmer.products.loading')}</p>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -618,7 +1145,7 @@ const FarmerProducts: React.FC = () => {
                           className="bg-red-600 text-white hover:bg-red-700 border-red-600 hover:border-red-700"
                         >
                           <Edit className="w-4 h-4 mr-1" />
-                          Modify
+                          {t('farmer.products.modify')}
                         </Button>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
@@ -632,7 +1159,7 @@ const FarmerProducts: React.FC = () => {
                               className="text-red-600 focus:text-red-600"
                             >
                               <Trash2 className="w-4 h-4 mr-2" />
-                              Delete
+                              {t('common.delete')}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -666,34 +1193,34 @@ const FarmerProducts: React.FC = () => {
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader className="pb-4">
-            <DialogTitle className="text-2xl font-bold">Modify Product</DialogTitle>
-            <DialogDescription className="text-base">View and edit your product details</DialogDescription>
+            <DialogTitle className="text-2xl font-bold">{t('farmer.products.modifyProduct')}</DialogTitle>
+            <DialogDescription className="text-base">{t('farmer.products.modifyDescription')}</DialogDescription>
           </DialogHeader>
           <form className="space-y-6" onSubmit={handleEditSubmit}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <label className="block text-sm font-semibold text-gray-700">Product Name *</label>
+                <label className="block text-sm font-semibold text-gray-700">{t('farmer.products.productName')} *</label>
                 <Input
                   value={editFormData.name}
                   onChange={(event) => setEditFormData((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="Product name"
+                  placeholder={t('farmer.products.productNamePlaceholder')}
                   className="h-11"
                   required
                 />
               </div>
               <div className="space-y-2">
-                <label className="block text-sm font-semibold text-gray-700">Category</label>
+                <label className="block text-sm font-semibold text-gray-700">{t('farmer.products.category')}</label>
                 <Select value={editFormData.category} onValueChange={(value) => setEditFormData((prev) => ({ ...prev, category: value }))}>
                   <SelectTrigger className="h-11">
-                    <SelectValue placeholder="Select category" />
+                    <SelectValue placeholder={t('farmer.products.selectCategory')} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="eggs">Eggs</SelectItem>
-                    <SelectItem value="poultry">Poultry</SelectItem>
-                    <SelectItem value="vegetables">Vegetables</SelectItem>
-                    <SelectItem value="fruits">Fruits</SelectItem>
-                    <SelectItem value="dairy">Dairy</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
+                    <SelectItem value="eggs">{t('farmer.products.eggs')}</SelectItem>
+                    <SelectItem value="poultry">{t('farmer.products.poultry')}</SelectItem>
+                    <SelectItem value="vegetables">{t('farmer.products.vegetables')}</SelectItem>
+                    <SelectItem value="fruits">{t('farmer.products.fruits')}</SelectItem>
+                    <SelectItem value="dairy">{t('farmer.products.dairy')}</SelectItem>
+                    <SelectItem value="other">{t('farmer.products.other')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -701,35 +1228,35 @@ const FarmerProducts: React.FC = () => {
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="space-y-2">
-                <label className="block text-sm font-semibold text-gray-700">Unit</label>
+                <label className="block text-sm font-semibold text-gray-700">{t('farmer.products.unit')}</label>
                 <Input
                   value={editFormData.unit}
                   onChange={(event) => setEditFormData((prev) => ({ ...prev, unit: event.target.value }))}
-                  placeholder="Unit"
+                  placeholder={t('farmer.products.unitPlaceholder')}
                   className="h-11"
                 />
               </div>
               <div className="space-y-2">
-                <label className="block text-sm font-semibold text-gray-700">Price *</label>
+                <label className="block text-sm font-semibold text-gray-700">{t('farmer.products.price')} *</label>
                 <Input
                   type="number"
                   min="0"
                   step="0.01"
                   value={editFormData.price}
                   onChange={(event) => setEditFormData((prev) => ({ ...prev, price: Number(event.target.value) }))}
-                  placeholder="Price"
+                  placeholder={t('farmer.products.pricePlaceholder')}
                   className="h-11"
                   required
                 />
               </div>
               <div className="space-y-2">
-                <label className="block text-sm font-semibold text-gray-700">Stock Quantity *</label>
+                <label className="block text-sm font-semibold text-gray-700">{t('farmer.products.stockQuantity')} *</label>
                 <Input
                   type="number"
                   min="0"
                   value={editFormData.stock}
                   onChange={(event) => setEditFormData((prev) => ({ ...prev, stock: Number(event.target.value) }))}
-                  placeholder="Stock"
+                  placeholder={t('farmer.products.stockPlaceholder')}
                   className="h-11"
                   required
                 />
@@ -737,18 +1264,18 @@ const FarmerProducts: React.FC = () => {
             </div>
             
             <div className="space-y-2">
-              <label className="block text-sm font-semibold text-gray-700">Description</label>
+              <label className="block text-sm font-semibold text-gray-700">{t('farmer.products.description')}</label>
               <textarea
                 value={editFormData.description}
                 onChange={(event) => setEditFormData((prev) => ({ ...prev, description: event.target.value }))}
-                placeholder="Product description"
+                placeholder={t('farmer.products.descriptionPlaceholder')}
                 className="w-full min-h-[100px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
               />
             </div>
 
             {/* Image Upload Section */}
             <div className="space-y-4">
-              <label className="block text-sm font-semibold text-gray-700">Product Photos</label>
+              <label className="block text-sm font-semibold text-gray-700">{t('farmer.products.photos')}</label>
               
               {/* Image Upload Area */}
               <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-green-500 transition-colors">
@@ -765,13 +1292,13 @@ const FarmerProducts: React.FC = () => {
                   {isUploadingImages ? (
                     <div className="flex flex-col items-center">
                       <div className="w-8 h-8 border-4 border-green-200 border-t-green-600 rounded-full animate-spin mb-2"></div>
-                      <p className="text-sm text-gray-600">Uploading images...</p>
+                      <p className="text-sm text-gray-600">{t('farmer.products.uploadingImages')}</p>
                     </div>
                   ) : (
                     <div className="flex flex-col items-center">
                       <Upload className="w-8 h-8 text-gray-400 mb-2" />
-                      <p className="text-sm text-gray-600">Click to upload photos or drag and drop</p>
-                      <p className="text-xs text-gray-400 mt-1">PNG, JPG, GIF up to 10MB (max 10 images)</p>
+                      <p className="text-sm text-gray-600">{t('farmer.products.uploadPrompt')}</p>
+                      <p className="text-xs text-gray-400 mt-1">{t('farmer.products.uploadHint')}</p>
                     </div>
                   )}
                 </label>
@@ -802,7 +1329,7 @@ const FarmerProducts: React.FC = () => {
               {editFormData.images.length === 0 && (
                 <div className="text-center py-8 text-gray-400">
                   <ImageIcon className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                  <p className="text-sm">No images uploaded yet</p>
+                  <p className="text-sm">{t('farmer.products.noImagesUploaded')}</p>
                 </div>
               )}
             </div>
@@ -819,7 +1346,7 @@ const FarmerProducts: React.FC = () => {
                 disabled={isSubmitting || isUploadingImages}
               >
                 <Trash2 className="w-4 h-4 mr-2" />
-                Delete Product
+                {t('farmer.products.deleteProduct')}
               </Button>
               <div className="flex space-x-3">
                 <Button 
@@ -832,7 +1359,7 @@ const FarmerProducts: React.FC = () => {
                   className="px-6"
                   disabled={isSubmitting || isUploadingImages}
                 >
-                  Cancel
+                  {t('farmer.products.cancel')}
                 </Button>
                 <Button
                   type="submit"
@@ -842,10 +1369,10 @@ const FarmerProducts: React.FC = () => {
                   {isSubmitting ? (
                     <div className="flex items-center">
                       <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                      Saving...
+                      {t('farmer.products.saving')}
                     </div>
                   ) : (
-                    'Save Changes'
+                    t('farmer.products.saveChanges')
                   )}
                 </Button>
               </div>
@@ -858,13 +1385,13 @@ const FarmerProducts: React.FC = () => {
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Product</AlertDialogTitle>
+            <AlertDialogTitle>{t('farmer.products.deleteProduct')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{selectedProduct?.name}"? This action cannot be undone.
+              {t('farmer.products.deleteConfirm').replace('{name}', selectedProduct?.name ?? '')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isDeleting}>{t('farmer.products.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteConfirm}
               disabled={isDeleting}
@@ -873,15 +1400,282 @@ const FarmerProducts: React.FC = () => {
               {isDeleting ? (
                 <div className="flex items-center">
                   <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
-                  Deleting...
+                  {t('farmer.products.deleting')}
                 </div>
               ) : (
-                'Delete'
+                t('common.delete')
               )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={isEnhancementDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeEnhancementDialog();
+          } else {
+            setIsEnhancementDialogOpen(true);
+          }
+        }}
+      >
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="text-2xl font-semibold">{t('farmer.products.aiEnhanceTitle')}</DialogTitle>
+            <DialogDescription>{t('farmer.products.aiEnhanceDescription')}</DialogDescription>
+          </DialogHeader>
+
+          {!createdProductForMarketing ? (
+            <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+              {t('common.loading')}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {showResultScreen ? (
+                <div className="flex flex-col items-center gap-6">
+                  {enhancementErrorBlock}
+                  <div className="w-full max-w-4xl space-y-4">
+                    {isEnhancing && !enhancementOutputText && enhancementOutputImages.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center gap-3 rounded-xl border bg-background p-8 shadow-sm">
+                        <Loader2 className="h-10 w-10 animate-spin text-green-600" />
+                        <p className="text-sm text-muted-foreground">{copy.resultLoading}</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="rounded-xl border bg-background p-4 shadow-sm">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <h3 className="text-base font-semibold text-foreground">{copy.outputCardTitle}</h3>
+                              <p className="text-sm text-muted-foreground">{copy.outputCardDescription}</p>
+                            </div>
+                            {enhancementOutputText ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleEnhancementCopy}
+                                className="flex items-center gap-2"
+                              >
+                                <Clipboard className="h-4 w-4" />
+                                {enhancementCopied ? copy.copyButtonCopied : copy.copyButtonIdle}
+                              </Button>
+                            ) : null}
+                          </div>
+                          <div className="mt-4 space-y-3">
+                            {isEnhancing && !enhancementOutputText ? (
+                              <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+                                {copy.resultGenerating}
+                              </div>
+                            ) : enhancementOutputText ? (
+                              <div className="rounded-lg border bg-background p-4 text-sm leading-relaxed whitespace-pre-line">
+                                {enhancementOutputText}
+                              </div>
+                            ) : (
+                              <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+                                {copy.noTextYet}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border bg-background p-4 shadow-sm">
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <h3 className="text-base font-semibold text-foreground">{copy.imageGalleryTitle}</h3>
+                              <p className="text-sm text-muted-foreground">{copy.imageGalleryDescription}</p>
+                            </div>
+                          </div>
+                          <div className="mt-4">
+                            {enhancementOutputImages.length > 0 ? (
+                              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                                {enhancementOutputImages.map((img, index) => {
+                                  const dataUrl = `data:${img.mimeType};base64,${img.base64}`;
+                                  return (
+                                    <div key={index} className="overflow-hidden rounded-xl border bg-muted/30 p-3">
+                                      <div className="relative mb-3 aspect-square overflow-hidden rounded-lg bg-background">
+                                        <img src={dataUrl} alt={`Generated ${index + 1}`} className="h-full w-full object-cover" />
+                                      </div>
+                                      <div className="flex flex-wrap gap-2">
+                                        <Button variant="outline" size="sm" onClick={() => handleDownloadEnhancementImage(img, index)}>
+                                          <Download className="mr-2 h-4 w-4" />
+                                          {copy.downloadButton}
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+                                {isEnhancing ? copy.resultGenerating : copy.noImageYet}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-3">
+                    <Button
+                      onClick={handleApplyEnhancementAssets}
+                      disabled={
+                        isApplyingAssets ||
+                        (!enhancementOutputText.trim() && enhancementOutputImages.length === 0)
+                      }
+                      className="flex items-center gap-2"
+                    >
+                      {isApplyingAssets ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                      {isApplyingAssets ? copy.applyAssetsSaving : copy.applyAssetsButton}
+                    </Button>
+                    <Button variant="outline" onClick={handleResultBack}>
+                      {copy.resultBackButton}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {enhancementErrorBlock}
+                  <div className="rounded-xl border bg-muted/30 p-4">
+                    <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
+                      <Sparkles className="h-4 w-4 text-green-600" />
+                      <span className="text-base">{createdProductForMarketing.name}</span>
+                      {createdProductForMarketing.category ? (
+                        <Badge variant="outline" className="text-xs capitalize">
+                          {createdProductForMarketing.category}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {createdProductForMarketing.description || copy.productSummaryNoDesc}
+                    </p>
+                    <dl className="mt-3 grid gap-3 text-xs text-muted-foreground sm:grid-cols-3">
+                      <div>
+                        <dt className="font-medium text-foreground">{copy.priceLabel}</dt>
+                        <dd>
+                          {new Intl.NumberFormat('zh-TW', {
+                            style: 'currency',
+                            currency: 'TWD',
+                            maximumFractionDigits: 0
+                          }).format(createdProductForMarketing.price ?? 0)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="font-medium text-foreground">{copy.unitLabel}</dt>
+                        <dd>{createdProductForMarketing.unit || 'unit'}</dd>
+                      </div>
+                      <div>
+                        <dt className="font-medium text-foreground">{copy.stockLabel}</dt>
+                        <dd>{createdProductForMarketing.stock ?? 0}</dd>
+                      </div>
+                    </dl>
+                  </div>
+
+                  <div className="rounded-xl border bg-background p-4 shadow-sm">
+                    <div className="space-y-1">
+                      <h3 className="text-base font-semibold text-foreground">{copy.generatorTitle}</h3>
+                      <p className="text-sm text-muted-foreground">{copy.generatorDescription}</p>
+                    </div>
+
+                    <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground">{copy.referenceImageLabel}</label>
+                        <input
+                          ref={enhancementFileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleEnhancementUpload}
+                          className="hidden"
+                        />
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => enhancementFileInputRef.current?.click()}
+                            className="flex items-center gap-2"
+                          >
+                            <ImageIcon className="h-4 w-4" />
+                            {enhancementUploadedImage ? copy.changeImageButton : copy.uploadImageButton}
+                          </Button>
+                          {enhancementUploadedImage ? (
+                            <Button type="button" variant="ghost" onClick={clearEnhancementUpload} className="flex items-center gap-2">
+                              <X className="h-4 w-4" />
+                              {copy.removeImageButton}
+                            </Button>
+                          ) : null}
+                          <span className="text-xs text-muted-foreground">
+                            {enhancementUploadedImage ? enhancementUploadedImage.name : copy.uploadHint}
+                          </span>
+                        </div>
+                        {enhancementUploadedImage?.previewUrl ? (
+                          <div className="overflow-hidden rounded-lg border bg-background p-2">
+                            <img
+                              src={enhancementUploadedImage.previewUrl}
+                              alt={enhancementUploadedImage.name}
+                              className="h-40 w-full object-cover"
+                            />
+                          </div>
+                        ) : storedProductImageUrl ? (
+                          <div className="overflow-hidden rounded-lg border bg-background p-2">
+                            <img
+                              src={storedProductImageUrl}
+                              alt={createdProductForMarketing?.name || 'Product'}
+                              className="h-40 w-full object-cover"
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {t('farmer.products.usingStoredImage')}
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground">{copy.promptLabel}</label>
+                        <Textarea
+                          value={enhancementPrompt}
+                          onChange={(event) => setEnhancementPrompt(event.target.value)}
+                          placeholder={copy.promptPlaceholder}
+                          rows={5}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {copy.languageNote(languageLabel(language))}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button onClick={generateEnhancement} disabled={isEnhancing} className="flex items-center gap-2">
+                        {isEnhancing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                        {isEnhancing ? copy.generatingLabel : copy.generateCTA}
+                      </Button>
+                      {isEnhancing ? (
+                        <Button type="button" variant="outline" onClick={stopEnhancement}>
+                          {copy.stopLabel}
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+                  <Button variant="outline" onClick={handleEnhancementViewProducts}>
+                    {t('farmer.products.postCreateView')}
+                  </Button>
+                  <Button variant="outline" onClick={handleEnhancementAddAnother}>
+                    {t('farmer.products.postCreateAddAnother')}
+                  </Button>
+                </div>
+                <Button variant="ghost" onClick={handleEnhancementSkip}>
+                  {t('farmer.products.aiEnhanceSkip')}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

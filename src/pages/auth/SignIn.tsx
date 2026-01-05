@@ -16,6 +16,10 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import LineLoginButton from '@/components/LineLoginButton';
+import {
+  consumePostOnboardingRedirect,
+  isRedirectAllowedForRole
+} from '@/lib/postOnboardingRedirect';
 
 const SignIn: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -33,7 +37,12 @@ const SignIn: React.FC = () => {
   useEffect(() => {
     if (user) {
       if (user.role === 'farmer' || user.role === 'market') {
-        navigate(`/${user.role}`);
+        const redirect = consumePostOnboardingRedirect();
+        if (redirect && isRedirectAllowedForRole(redirect, user.role)) {
+          navigate(redirect, { replace: true });
+        } else {
+          navigate(`/${user.role}`);
+        }
       } else {
         navigate('/auth/role-selection');
       }

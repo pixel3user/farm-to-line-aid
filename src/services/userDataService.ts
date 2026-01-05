@@ -8,7 +8,9 @@ import {
   doc,
   getDoc,
   updateDoc,
-  Timestamp 
+  Timestamp,
+  FirestoreError,
+  QueryConstraint
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Product, Store, Conversation, MarketingMaterial, LineUser } from '@/lib/database';
@@ -135,39 +137,53 @@ export class UserDataService {
       }
 
       console.log('UserDataService: Fetching products for user:', userId);
-      
-      // Use the most reliable approach: get all products and filter manually
-      const allProductsSnapshot = await getDocs(collection(db, 'products'));
-      console.log('UserDataService: Total products in database:', allProductsSnapshot.size);
-      
-      const userProducts = allProductsSnapshot.docs
-        .filter(doc => {
-          const data = doc.data();
-          const matches = data.userId === userId;
-          if (matches) {
-            console.log('UserDataService: Found matching product:', { id: doc.id, userId: data.userId, name: data.name });
-          }
-          return matches;
-        })
-        .map(doc => {
-          const data = doc.data();
-          console.log('UserDataService: Processing product:', { id: doc.id, ...data });
-          return {
-            ...data as Product,
-            id: doc.id
-          };
-        })
-        .sort((a, b) => {
-          // Sort by createdAt descending
-          const aTime = a.createdAt?.toMillis?.() || 0;
-          const bTime = b.createdAt?.toMillis?.() || 0;
-          return bTime - aTime;
-        })
-        .slice(0, limitCount || 50);
-      
-      console.log('UserDataService: Final products array for user:', userProducts.length, userProducts);
-      return userProducts;
+
+      const constraints: QueryConstraint[] = [
+        where('userId', '==', userId),
+        orderBy('createdAt', 'desc'),
+      ];
+
+      if (limitCount && Number.isFinite(limitCount)) {
+        constraints.push(limit(limitCount));
+      }
+
+      const q = query(collection(db, 'products'), ...constraints);
+      const snapshot = await getDocs(q);
+
+      const products = snapshot.docs.map((doc) => ({
+        ...(doc.data() as Product),
+        id: doc.id,
+      }));
+
+      console.log('UserDataService: Final products array for user:', products.length, products);
+      return limitCount && Number.isFinite(limitCount) ? products.slice(0, limitCount) : products;
     } catch (error) {
+      const firestoreError = error as FirestoreError;
+      if (firestoreError?.code === 'failed-precondition') {
+        console.warn('UserDataService: Query requires index, falling back to client-side filtering');
+        try {
+          if (!db) {
+            return [];
+          }
+          const snapshot = await getDocs(collection(db, 'products'));
+          const filtered = snapshot.docs
+            .filter((doc) => doc.data()?.userId === userId)
+            .map((doc) => ({
+              ...(doc.data() as Product),
+              id: doc.id,
+            }))
+            .sort((a, b) => {
+              const aTime = a.createdAt?.toMillis?.() || 0;
+              const bTime = b.createdAt?.toMillis?.() || 0;
+              return bTime - aTime;
+            });
+          return limitCount && Number.isFinite(limitCount) ? filtered.slice(0, limitCount) : filtered;
+        } catch (fallbackError) {
+          console.error('UserDataService: Fallback product fetch failed:', fallbackError);
+          return [];
+        }
+      }
+
       console.error('UserDataService: Error fetching user products:', error);
       return [];
     }

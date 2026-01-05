@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Sheet, SheetContent, SheetTrigger } from '@/components/ui/sheet';
@@ -12,6 +12,8 @@ import { Toaster } from '@/components/ui/toaster';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import FarmerOnboarding from '@/components/FarmerOnboarding';
 import FarmerTutorial from '@/components/FarmerTutorial';
+import { useAuth } from '@/contexts/AuthContext';
+import VoiceAssistantPopup from '@/components/VoiceAssistantPopup';
 import { 
   LayoutDashboard, 
   Package, 
@@ -31,10 +33,14 @@ import {
 
 const FarmerLayout: React.FC = () => {
   const { t } = useLanguage();
+  const { user, firebaseUser, liffUser } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLiffApp, setIsLiffApp] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const showDesktopSidebar = !isMobile && !isLiffApp;
+  const showVoiceAssistant = Boolean(user || firebaseUser || liffUser);
 
   useEffect(() => {
     // Check if running inside LINE LIFF
@@ -122,7 +128,7 @@ const FarmerLayout: React.FC = () => {
       {/* Top Navigation */}
       <TopNavigation />
       {/* Mobile Navigation */}
-      {isMobile ? (
+      {isMobile && !isLiffApp ? (
         <div className="sticky top-16 z-30 bg-white border-b shadow-sm">
           <div className="flex overflow-x-auto gap-2 px-3 py-2">
             {navigationItems.map((item) => {
@@ -143,7 +149,7 @@ const FarmerLayout: React.FC = () => {
             })}
           </div>
         </div>
-      ) : (
+      ) : showDesktopSidebar ? (
         /* Desktop Sidebar */
         <div className="fixed inset-y-0 left-0 z-30 w-64 bg-white shadow-lg" style={{ top: '64px' }}>
           <div className="flex items-center justify-between h-16 px-6 border-b border-gray-200">
@@ -218,10 +224,10 @@ const FarmerLayout: React.FC = () => {
             </div>
           )}
         </div>
-      )}
+      ) : null}
 
       {/* Main content */}
-      <div className={isMobile ? '' : 'md:ml-64'} style={{ marginTop: '64px' }}>
+      <div className={showDesktopSidebar ? 'md:ml-64' : ''} style={{ marginTop: '64px', paddingBottom: isLiffApp ? '80px' : undefined }}>
         {/* Page content */}
         <div className="p-3 sm:p-4 md:p-6 lg:p-8">
           <LocationReminder />
@@ -237,27 +243,32 @@ const FarmerLayout: React.FC = () => {
       {/* Toast containers for protected routes */}
       <Toaster />
       <Sonner />
+      {showVoiceAssistant && <VoiceAssistantPopup />}
 
       {/* Mobile Bottom Navigation for LIFF */}
-      {isMobile && isLiffApp && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-2 z-40">
-          <div className="flex justify-around">
-            <Button variant="ghost" size="sm" className="flex flex-col items-center gap-1 p-2">
-              <LayoutDashboard className="w-4 h-4" />
-              <span className="text-xs">儀表板</span>
-            </Button>
-            <Button variant="ghost" size="sm" className="flex flex-col items-center gap-1 p-2">
-              <Package className="w-4 h-4" />
-              <span className="text-xs">產品</span>
-            </Button>
-            <Button variant="ghost" size="sm" className="flex flex-col items-center gap-1 p-2">
-              <Store className="w-4 h-4" />
-              <span className="text-xs">店家</span>
-            </Button>
-            <Button variant="ghost" size="sm" className="flex flex-col items-center gap-1 p-2">
-              <BarChart3 className="w-4 h-4" />
-              <span className="text-xs">分析</span>
-            </Button>
+      {isLiffApp && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40">
+          <div
+            className="grid"
+            style={{ gridTemplateColumns: `repeat(${navigationItems.length}, minmax(0, 1fr))` }}
+          >
+            {navigationItems.map((item) => {
+              const Icon = item.icon;
+              const active = isActive(item.href);
+              return (
+                <button
+                  key={item.key}
+                  className={`flex flex-col items-center gap-1 py-2 px-1 text-xs ${
+                    active ? 'text-green-600 font-semibold' : 'text-gray-600'
+                  }`}
+                  onClick={() => navigate(item.href)}
+                  type="button"
+                >
+                  <Icon className="w-4 h-4" />
+                  <span className="text-[11px] leading-tight text-center">{item.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}

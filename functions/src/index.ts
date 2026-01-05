@@ -3,7 +3,14 @@ import app from './app';
 
 const REGION = 'asia-east1';
 
-export const api = functions.region(REGION).https.onRequest(app);
+const apiRuntime = functions.region(REGION).runWith({
+  timeoutSeconds: 300,
+  memory: '1GB',
+  minInstances: 1,
+  maxInstances: Number(process.env.API_MAX_INSTANCES || 5),
+});
+
+export const api = apiRuntime.https.onRequest(app);
 
 export const webhook = functions.region(REGION).https.onRequest((req, res) => {
   req.url = '/api/webhook';

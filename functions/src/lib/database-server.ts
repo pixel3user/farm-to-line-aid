@@ -415,6 +415,65 @@ export class DatabaseService {
     await ref.update({ images, updatedAt: nowTimestamp() });
   }
 
+  static async updateProduct(
+    userId: string,
+    productId: string,
+    updates: Partial<ProductRecord>
+  ): Promise<void> {
+    if (!userId || !productId) {
+      throw new Error('userId and productId are required to update a product');
+    }
+    const ref = firestore.collection('products').doc(productId);
+    const snapshot = await ref.get();
+    if (!snapshot.exists) {
+      return;
+    }
+    const data = snapshot.data() as ProductRecord;
+    if (data.userId !== userId) {
+      throw new Error('Permission denied to update this product');
+    }
+
+    const payload: Record<string, unknown> = {};
+
+    if (typeof updates.name === 'string' && updates.name.trim()) {
+      payload.name = updates.name.trim();
+    }
+    if (typeof updates.description === 'string') {
+      payload.description = updates.description;
+    }
+    if (typeof updates.category === 'string' && updates.category.trim()) {
+      payload.category = updates.category.trim();
+    }
+    if (typeof updates.unit === 'string' && updates.unit.trim()) {
+      payload.unit = updates.unit.trim();
+    }
+    if (typeof updates.price === 'number' && !Number.isNaN(updates.price)) {
+      payload.price = updates.price;
+    }
+    if (typeof updates.stock === 'number' && !Number.isNaN(updates.stock)) {
+      payload.stock = updates.stock;
+    }
+    if (Array.isArray(updates.images)) {
+      payload.images = updates.images;
+    }
+    if (Array.isArray(updates.tags)) {
+      payload.tags = updates.tags;
+    }
+    if (typeof updates.isActive === 'boolean') {
+      payload.isActive = updates.isActive;
+    }
+    if (updates.geminiData !== undefined) {
+      payload.geminiData = updates.geminiData;
+    }
+
+    if (!Object.keys(payload).length) {
+      return;
+    }
+
+    payload.updatedAt = nowTimestamp();
+    await ref.update(payload);
+  }
+
   static async getLatestProductByUser(userId: string): Promise<ProductRecord | null> {
     const snapshot = await firestore
       .collection('products')

@@ -33,8 +33,9 @@ const TopNavigation: React.FC = () => {
   const role = user?.role;
   const isAdmin = !!user?.isAdmin;
 
-  const canAccessFarmer = isAdmin || role === 'farmer';
-  const canAccessMarket = isAdmin || role === 'market';
+  const hasRoleAccess = isAdmin || role === 'farmer' || role === 'market';
+  const canAccessFarmer = hasRoleAccess;
+  const canAccessMarket = hasRoleAccess;
 
   const navigationItems = [
     { label: t('nav.home'), href: '/', key: 'home' },

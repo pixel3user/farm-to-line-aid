@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +18,11 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Building2, CheckCircle2, Circle, CircleDot, Leaf, Loader2, ShoppingBag, Users } from 'lucide-react';
 import { LineUser } from '@/lib/database';
 import { cn } from '@/lib/utils';
+import {
+  buildPostOnboardingRedirectPath,
+  consumePostOnboardingRedirect,
+  isRedirectAllowedForRole
+} from '@/lib/postOnboardingRedirect';
 
 type BusinessType = NonNullable<LineUser['marketProfile']>['businessType'] extends infer T
   ? T extends string
@@ -39,6 +45,8 @@ const MarketOnboarding: React.FC<MarketOnboardingProps> = ({ children }) => {
     refreshUserData,
     updateUserProfile
   } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useLanguage();
 
   const [profileForm, setProfileForm] = useState({
@@ -135,6 +143,16 @@ const MarketOnboarding: React.FC<MarketOnboardingProps> = ({ children }) => {
     if (needsIntent) return 'needs';
     return 'done';
   }, [needsProfile, needsBusiness, needsIntent]);
+
+  useEffect(() => {
+    if (!user || user.role !== 'market') return;
+    if (currentStep !== 'done') return;
+    const redirect = consumePostOnboardingRedirect();
+    if (!redirect || !isRedirectAllowedForRole(redirect, 'market')) return;
+    const currentPath = buildPostOnboardingRedirectPath(location);
+    if (redirect === currentPath) return;
+    navigate(redirect, { replace: true });
+  }, [currentStep, location, navigate, user]);
 
   const activeStepIndex = steps.findIndex((step) => step.key === currentStep);
   const displayedStep = viewStep || currentStep;
