@@ -12,10 +12,16 @@ import {
 import { lineAuthService, LineLoginResult } from '@/lib/lineAuth';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
+import {
+  clearPostOnboardingRedirect,
+  getPostOnboardingRedirect,
+  isRedirectAllowedForRole,
+  savePostOnboardingRedirect
+} from '@/lib/postOnboardingRedirect';
 
 const LineCallback: React.FC = () => {
   const navigate = useNavigate();
-  const { login, setLiffProfile, setLineIdToken } = useAuth();
+  const { login, setLiffProfile, setLineIdToken, user } = useAuth();
   const { t } = useLanguage();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [error, setError] = useState<string>('');
@@ -57,12 +63,25 @@ const LineCallback: React.FC = () => {
         if (!isMounted) return;
         
         setStatus('success');
-        
-        setTimeout(() => {
-          if (isMounted) {
-            navigate('/auth/role-selection');
+
+        const sessionRedirect = getPostOnboardingRedirect();
+        const lineRedirect = loginResult?.redirectPath;
+        if (!sessionRedirect && lineRedirect) {
+          savePostOnboardingRedirect(lineRedirect);
+        }
+
+        if (user?.role) {
+          const candidate = sessionRedirect || lineRedirect;
+          if (candidate && isRedirectAllowedForRole(candidate, user.role)) {
+            clearPostOnboardingRedirect();
+            navigate(candidate, { replace: true });
+            return;
           }
-        }, 2000);
+          navigate(`/${user.role}`, { replace: true });
+          return;
+        }
+
+        navigate('/auth/role-selection', { replace: true });
         
       } catch (error) {
         if (!isMounted) return;

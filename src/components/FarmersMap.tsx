@@ -67,9 +67,11 @@ const FarmersMap: React.FC<FarmersMapProps> = ({ farmers }) => {
             attribution="&copy; OpenStreetMap contributors, &copy; CARTO"
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
           />
-          {farmersWithLocation.map((farmer) => (
+          {farmersWithLocation.map((farmer, index) => {
+            const key = farmer.id || farmer.lineUserId || `farmer-marker-${index}`;
+            return (
             <Marker
-              key={farmer.id}
+              key={key}
               position={[farmer.location!.lat, farmer.location!.lng]}
             >
               <Popup>
@@ -85,7 +87,8 @@ const FarmersMap: React.FC<FarmersMapProps> = ({ farmers }) => {
                 </div>
               </Popup>
             </Marker>
-          ))}
+            );
+          })}
         </MapContainer>
       </CardContent>
     </Card>
@@ -93,7 +96,6 @@ const FarmersMap: React.FC<FarmersMapProps> = ({ farmers }) => {
 };
 
 export default FarmersMap;
-
 
 
 

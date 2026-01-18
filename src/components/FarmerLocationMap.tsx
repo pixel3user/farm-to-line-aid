@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 import { Icon } from 'leaflet';
 import { useAuth } from '@/contexts/AuthContext';
@@ -20,6 +20,7 @@ const DEFAULT_CENTER: [number, number] = [25.033, 121.5654]; // Taipei
 const FarmerLocationMap: React.FC = () => {
   const { user } = useAuth();
   const { t } = useLanguage();
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const hasLocation = !!user?.location;
   const center: [number, number] = hasLocation
@@ -45,13 +46,23 @@ const FarmerLocationMap: React.FC = () => {
   }
 
   return (
-    <Card className="w-full h-80">
-      <CardContent className="p-0 h-full">
+    <Card className="w-full h-80 overflow-hidden">
+      <CardContent className="p-0 h-full relative overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setIsFullscreen(true)}
+          className="absolute inset-0 z-20 flex items-center justify-center bg-white/20 backdrop-blur-[1px]"
+          aria-label={t('farmer.location.map.openFullscreen')}
+        >
+          <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-gray-700 shadow-sm">
+            {t('farmer.location.map.openFullscreen')}
+          </span>
+        </button>
         <MapContainer
           center={center}
           zoom={13}
           style={{ height: '100%', width: '100%' }}
-          className="rounded-lg"
+          className="rounded-lg z-0 pointer-events-none"
         >
           <TileLayer
             attribution="&copy; OpenStreetMap contributors, &copy; CARTO"
@@ -70,15 +81,49 @@ const FarmerLocationMap: React.FC = () => {
             </Popup>
           </Marker>
         </MapContainer>
+        {isFullscreen && (
+          <div className="fixed inset-0 z-50 bg-white">
+            <div className="absolute right-4 top-4 z-10">
+              <button
+                type="button"
+                onClick={() => setIsFullscreen(false)}
+                className="rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-gray-700 shadow-md"
+                aria-label={t('farmer.location.map.closeFullscreen')}
+              >
+                {t('farmer.location.map.closeFullscreen')}
+              </button>
+            </div>
+            <MapContainer
+              center={center}
+              zoom={13}
+              style={{ height: '100%', width: '100%' }}
+              className="z-0"
+            >
+              <TileLayer
+                attribution="&copy; OpenStreetMap contributors, &copy; CARTO"
+                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+              />
+              <Marker position={center}>
+                <Popup>
+                  <div className="text-sm">
+                    <p className="font-semibold text-gray-900 mb-1">
+                      {user?.displayName || t('farmer.location.map.you')}
+                    </p>
+                    <p className="text-gray-600">
+                      {t('farmer.location.map.description')}
+                    </p>
+                  </div>
+                </Popup>
+              </Marker>
+            </MapContainer>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
 };
 
 export default FarmerLocationMap;
-
-
-
 
 
 

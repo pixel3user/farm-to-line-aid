@@ -22,7 +22,6 @@ const HISTORY_TEXT_LIMIT = 2000;
 const IMAGE_COLLECTION = 'images';
 const PRODUCT_DRAFTS_COLLECTION = 'product_drafts';
 const SESSION_IDLE_MS = 10 * 60 * 1000; // 10 minutes
-const RICH_MENU_ACTION_LOCK_MS = 20 * 1000;
 
 export class WebhookHandler {
   private lineBot: LineBotAPI;
@@ -233,11 +232,11 @@ export class WebhookHandler {
         ...(introMessage ? [{ type: 'text' as const, text: introMessage }] : []),
         {
           type: 'text' as const,
-          text: '正在開啟您的 Farm2Market 控制台...',
+          text: 'Launching your Farm2Market dashboard...',
         },
         {
           type: 'text' as const,
-          text: `點擊下方連結開啟您的 Farm2Market 控制台：\n\n${webAppUrl}`,
+          text: `Tap the link below to open your Farm2Market control panel:\n\n${webAppUrl}`,
         },
       ];
 
@@ -248,7 +247,7 @@ export class WebhookHandler {
       const errorMessage: LineMessage[] = [
         {
           type: 'text' as const,
-          text: '目前無法開啟控制台，請稍後再試。',
+          text: 'Unable to open the dashboard right now. Please try again shortly.',
         },
       ];
       await this.lineBot.replyMessage(event.replyToken, errorMessage);
@@ -840,25 +839,25 @@ export class WebhookHandler {
         { type: 'text', text: analysis, quickReply: { items: [ { type: 'action', action: { type: 'postback', label: '用於最新建立的產品', data: 'action=product_image_use_latest' } } ] } },
         {
           type: 'template',
-          altText: '圖片操作選項',
+          altText: 'Image actions',
           template: {
             type: 'buttons',
-            title: '使用這張圖片',
-            text: '選擇要對這張圖片執行的操作。',
+            title: 'Use this image',
+            text: 'Choose what to do next with your image.',
             actions: [
               {
                 type: 'postback',
-                label: '建立海報',
+                label: 'Create flyer',
                 data: `action=create_flyer&image=${encodeURIComponent(filePath)}`,
               },
               {
                 type: 'postback',
-                label: '貨架標籤',
+                label: 'Shelf card',
                 data: `action=create_shelf_card&image=${encodeURIComponent(filePath)}`,
               },
               {
                 type: 'postback',
-                label: '食譜卡片',
+                label: 'Recipe card',
                 data: `action=create_recipe_card&image=${encodeURIComponent(filePath)}`,
               },
             ],
@@ -873,7 +872,7 @@ export class WebhookHandler {
       const fallback: LineMessage[] = [
         {
           type: 'text' as const,
-          text: '抱歉，我無法處理這張圖片。請重試或傳送其他照片。',
+          text: 'Sorry, I could not process that image. Please try again or send a different photo.',
         },
       ];
       await this.lineBot.replyMessage(event.replyToken, fallback);
@@ -885,31 +884,31 @@ export class WebhookHandler {
     return [
       {
         type: 'text' as const,
-        text: `📦 產品工具總覽
+        text: `📦 Product tools overview
 
-• 快速新增或編輯產品
-• 即時追蹤庫存與補貨風險
-• AI 自動排程補貨提醒
-• 優化產品照片與描述
+• Add or edit products in seconds
+• Track live inventory and restock risk
+• Let AI schedule replenishment reminders
+• Improve product photos and descriptions
 
-請選擇下方選項繼續。`,
+Choose an option below to continue.`,
       },
       {
         type: 'template' as const,
-        altText: '產品工具快速選單',
+        altText: 'Product tools quick menu',
         contents: {
           type: 'buttons',
-          title: '產品工具',
-          text: '需要什麼協助？',
+          title: 'Product tools',
+          text: 'What can I help you with?',
           actions: [
             {
               type: 'uri',
-              label: '管理產品',
+              label: 'Manage products',
               uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=products`
             },
             {
               type: 'postback',
-              label: '庫存分析',
+              label: 'Inventory insights',
               data: 'action=stock_analysis'
             }
           ]
@@ -931,31 +930,31 @@ export class WebhookHandler {
     return [
       {
         type: 'text' as const,
-        text: `🏪 店家拓展工具
+        text: `🏪 Store outreach tools
 
-• 發現附近零售商
-• 一鍵發送專業自我介紹
-• 追蹤關係狀態與下一步
-• 檢視訂單頻率與後續追蹤
+• Discover nearby retailers
+• Send polished introductions in one tap
+• Track relationship status and next steps
+• Review order frequency and follow-ups
 
-請選擇下方需要的協助。`,
+Select what you need help with below.`,
       },
       {
         type: 'template' as const,
-        altText: '店家拓展快速選單',
+        altText: 'Store outreach quick menu',
         contents: {
           type: 'buttons',
-          title: '店家拓展',
-          text: '選擇快速操作',
+          title: 'Store outreach',
+          text: 'Pick a shortcut',
           actions: [
             {
               type: 'uri',
-              label: '尋找新買家',
+              label: 'Find new buyers',
               uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores&action=find`
             },
             {
               type: 'uri',
-              label: '管理客戶關係',
+              label: 'Manage CRM',
               uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores`
             }
           ]
@@ -977,31 +976,31 @@ export class WebhookHandler {
     return [
       {
         type: 'text' as const,
-        text: `📱 行銷工作室
+        text: `📱 Marketing studio
 
-• 自動生成產品海報
-• 快速撰寫社群文案
-• 建立食譜或貨架標籤
-• 收集活動構想與時程
+• Auto-generate product flyers
+• Draft social captions in seconds
+• Build recipe or shelf cards
+• Collect campaign ideas and schedules
 
-告訴我想建立什麼內容。`,
+Let me know what you want to create.`,
       },
       {
         type: 'template' as const,
-        altText: '行銷工具快速選單',
+        altText: 'Marketing tools quick menu',
         contents: {
           type: 'buttons',
-          title: '行銷工具',
-          text: '選擇創意任務',
+          title: 'Marketing tools',
+          text: 'Choose a creative task',
           actions: [
             {
               type: 'uri',
-              label: '生成活動',
+              label: 'Generate campaign',
               uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=marketing&action=generate`
             },
             {
               type: 'uri',
-              label: '文案協助',
+              label: 'Copywriting help',
               uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=marketing&action=copywriting`
             }
           ]
@@ -1203,17 +1202,17 @@ export class WebhookHandler {
     return [
       {
         type: 'text' as const,
-        text: `🤖 Farm2Market AI 快速指南
+        text: `🤖 Farm2Market AI quick guide
 
-📦 產品管理：同步產品清單與庫存
-🏪 店家拓展：尋找並培養買家
-📱 行銷工具：自動生成內容與海報
-📈 數據分析：追蹤表現與提醒
+📦 Product management: keep listings and inventory synced
+🏪 Store outreach: find and nurture buyers
+📱 Marketing tools: auto-generate content and flyers
+📈 Analytics: track performance and reminders
 
-小技巧：
-• 上傳產品照片即可獲得即時行銷素材
-• AI 提醒會標示下一步最佳行動
-• 支援繁體中文與英文回應`,
+Tips:
+• Upload product photos to get instant marketing assets
+• AI reminders highlight the next best action
+• Supports Traditional Chinese and English responses`,
       }
     ];
   }
@@ -1326,126 +1325,105 @@ export class WebhookHandler {
       return;
     }
 
-    const userId = event.source?.userId;
-    const richMenuActionKey = userId ? this.getRichMenuActionKey(postbackData) : null;
-    if (userId && richMenuActionKey) {
-      const acquired = await this.acquireRichMenuActionLock(userId, richMenuActionKey);
-      if (!acquired) {
-        await this.lineBot.replyMessage(event.replyToken, [
-          { type: 'text', text: '此選單操作正在處理中，請稍候再試。' },
-        ]);
-        return;
-      }
-    }
-
-    try {
-      switch (postbackData.action) {
-        case 'product_draft_skip':
-        case 'product_draft_generic':
-        case 'product_draft_cancel': {
-          if (!event.source?.userId) return;
-          const userId = event.source.userId;
-          const draft = await this.getLatestProductDraft(userId);
-          if (!draft) {
-            await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text', text: '目前沒有待確認的產品草稿。' } ]);
-            break;
-          }
-
-          if (postbackData.action === 'product_draft_cancel') {
-            await admin.firestore()
-              .collection('line_users').doc(userId)
-              .collection(PRODUCT_DRAFTS_COLLECTION).doc(draft.id)
-              .update({ status: 'cancelled', updatedAt: admin.firestore.FieldValue.serverTimestamp() });
-            await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text', text: '已取消建立此產品。' } ]);
-            break;
-          }
-
-          let imageUrl: string | undefined;
-          if (postbackData.action === 'product_draft_generic') {
-            imageUrl = this.getGenericProductImageUrl(draft.data?.name as string | undefined, draft.data?.category as string | undefined);
-          }
-
-          const messages = await this.finalizeProductDraft(event.replyToken!, userId, draft.id, draft.data, imageUrl, undefined);
-          await this.persistConversation({ replyToken: event.replyToken!, text: `[Product draft finalized: ${draft.id}]`, userId, rawEvent: event }, messages);
+    switch (postbackData.action) {
+      case 'product_draft_skip':
+      case 'product_draft_generic':
+      case 'product_draft_cancel': {
+        if (!event.source?.userId) return;
+        const userId = event.source.userId;
+        const draft = await this.getLatestProductDraft(userId);
+        if (!draft) {
+          await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text', text: '目前沒有待確認的產品草稿。' } ]);
           break;
         }
-        case 'set_role':
-          try {
-            if (event.source?.userId && (postbackData.role === 'farmer' || postbackData.role === 'market')) {
-              const role = postbackData.role as 'farmer' | 'market';
-              await DatabaseService.updateLineUserRole(event.source.userId, role);
-              const roleName = role === 'farmer' ? '賣家/農友' : '市場/買家';
-              const messages: LineMessage[] = [
-                { type: 'text' as const, text: `已設定角色為：${roleName}。` },
-                ...MessageTemplates.roleNextSteps(role),
-              ];
-              await this.lineBot.replyMessage(event.replyToken, messages);
-              await this.applyRoleRichMenu(event.source.userId, role);
-            }
-          } catch (e) {
-            await this.lineBot.replyMessage(event.replyToken, [
-              { type: 'text' as const, text: '設定角色時發生問題，請稍後再試。' },
-            ]);
-          }
-          break;
-        case 'help':
-          await this.handleHelpInquiry(event.replyToken, '以下是快速指南：');
-          break;
-        case 'send_intro':
-          await this.handleSendIntro(event.replyToken, postbackData.store);
-          break;
-        case 'send_reorder_reminder':
-          await this.handleSendReorderReminder(event.replyToken, postbackData.store, postbackData.product);
-          break;
-        case 'create_flyer':
-          await this.handleCreateFlyer(event.replyToken, postbackData.image);
-          break;
-        case 'create_shelf_card':
-          await this.handleCreateShelfCard(event.replyToken, postbackData.image);
-          break;
-        case 'create_recipe_card':
-          await this.handleCreateRecipeCard(event.replyToken, postbackData.image);
-          break;
-        case 'product_image_bind': {
-          if (!event.source?.userId) break;
-          const productId = postbackData.productId || 'latest';
+
+        if (postbackData.action === 'product_draft_cancel') {
           await admin.firestore()
-            .collection('line_users').doc(event.source.userId)
-            .collection('settings')
-            .doc('image_binding')
-            .set({ productId, createdAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-          await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text', text: '好的，下一張您傳的照片會套用到該產品。' } ]);
+            .collection('line_users').doc(userId)
+            .collection(PRODUCT_DRAFTS_COLLECTION).doc(draft.id)
+            .update({ status: 'cancelled', updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+          await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text', text: '已取消建立此產品。' } ]);
           break;
         }
-        case 'product_image_use_latest': {
-          if (!event.source?.userId) break;
-          await admin.firestore()
-            .collection('line_users').doc(event.source.userId)
-            .collection('settings')
-            .doc('image_binding')
-            .set({ productId: 'latest', createdAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
-          await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text', text: '收到！下一張照片會用於您最新的產品。' } ]);
-          break;
+
+        let imageUrl: string | undefined;
+        if (postbackData.action === 'product_draft_generic') {
+          imageUrl = this.getGenericProductImageUrl(draft.data?.name as string | undefined, draft.data?.category as string | undefined);
         }
-        case 'snooze_reminder':
-          await this.handleSnoozeReminder(event.replyToken, postbackData.store);
-          break;
-        default:
-          console.log('Unhandled postback action:', postbackData.action);
+
+        const messages = await this.finalizeProductDraft(event.replyToken!, userId, draft.id, draft.data, imageUrl, undefined);
+        await this.persistConversation({ replyToken: event.replyToken!, text: `[Product draft finalized: ${draft.id}]`, userId, rawEvent: event }, messages);
+        break;
       }
-    } finally {
-      if (userId && richMenuActionKey) {
-        await this.releaseRichMenuActionLock(userId, richMenuActionKey);
+      case 'set_role':
+        try {
+          if (event.source?.userId && (postbackData.role === 'farmer' || postbackData.role === 'market')) {
+            const role = postbackData.role as 'farmer' | 'market';
+            await DatabaseService.updateLineUserRole(event.source.userId, role);
+            const roleName = role === 'farmer' ? '賣家/農友' : '市場/買家';
+            const messages: LineMessage[] = [
+              { type: 'text' as const, text: `已設定角色為：${roleName}。` },
+              ...MessageTemplates.roleNextSteps(role),
+            ];
+            await this.lineBot.replyMessage(event.replyToken, messages);
+            await this.applyRoleRichMenu(event.source.userId, role);
+          }
+        } catch (e) {
+          await this.lineBot.replyMessage(event.replyToken, [
+            { type: 'text' as const, text: '設定角色時發生問題，請稍後再試。' },
+          ]);
+        }
+        break;
+      case 'send_intro':
+        await this.handleSendIntro(event.replyToken, postbackData.store);
+        break;
+      case 'send_reorder_reminder':
+        await this.handleSendReorderReminder(event.replyToken, postbackData.store, postbackData.product);
+        break;
+      case 'create_flyer':
+        await this.handleCreateFlyer(event.replyToken, postbackData.image);
+        break;
+      case 'create_shelf_card':
+        await this.handleCreateShelfCard(event.replyToken, postbackData.image);
+        break;
+      case 'create_recipe_card':
+        await this.handleCreateRecipeCard(event.replyToken, postbackData.image);
+        break;
+      case 'product_image_bind': {
+        if (!event.source?.userId) break;
+        const productId = postbackData.productId || 'latest';
+        await admin.firestore()
+          .collection('line_users').doc(event.source.userId)
+          .collection('settings')
+          .doc('image_binding')
+          .set({ productId, createdAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text', text: '好的，下一張您傳的照片會套用到該產品。' } ]);
+        break;
       }
+      case 'product_image_use_latest': {
+        if (!event.source?.userId) break;
+        await admin.firestore()
+          .collection('line_users').doc(event.source.userId)
+          .collection('settings')
+          .doc('image_binding')
+          .set({ productId: 'latest', createdAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        await this.lineBot.replyMessage(event.replyToken!, [ { type: 'text', text: '收到！下一張照片會用於您最新的產品。' } ]);
+        break;
+      }
+      case 'snooze_reminder':
+        await this.handleSnoozeReminder(event.replyToken, postbackData.store);
+        break;
+      default:
+        console.log('Unhandled postback action:', postbackData.action);
     }
   }
 
   private async handleSendIntro(replyToken: string, storeName?: string): Promise<void> {
     const message = {
       type: 'text' as const,
-      text: `以下是您可以與${storeName || '買家'}分享的自我介紹：
+      text: `Here is an introduction you can share with ${storeName || 'your buyer'}:
 
-您好！我們是 Farm2Market AI，致力於協助簡化訂單流程、保持產品新鮮度，並提供穩定品質。請告訴我您的需求，我會為您準備一切。`,
+Hello! We are Farm2Market AI — ready to help streamline orders, keep products fresh, and deliver consistent quality. Let me know what you need and I’ll prepare everything for you.`,
     };
 
     await this.lineBot.replyMessage(replyToken, [message]);
@@ -1454,9 +1432,9 @@ export class WebhookHandler {
   private async handleSendReorderReminder(replyToken: string, storeName?: string, productName?: string): Promise<void> {
     const message = {
       type: 'text' as const,
-      text: `已為${storeName || '客戶'}草擬補貨提醒：
+      text: `Reorder reminder drafted for ${storeName || 'your customer'}:
 
-您好！友善提醒您，現在是補貨${productName || '您偏好的商品'}的好時機。請告訴我需要的數量，我會立即為您處理。`,
+Hi there! Just a friendly reminder that it's a great time to restock ${productName || 'your preferred items'}. Let me know the quantities you need and I’ll take care of it right away.`,
     };
 
     await this.lineBot.replyMessage(replyToken, [message]);
@@ -1465,7 +1443,7 @@ export class WebhookHandler {
   private async handleCreateFlyer(replyToken: string, imageId?: string): Promise<void> {
     const message = {
       type: 'text' as const,
-      text: '我會使用這張圖片建立行銷海報，並在稍後傳送預覽給您。',
+      text: 'I will create a marketing flyer with this image and send you a preview shortly.',
     };
 
     await this.lineBot.replyMessage(replyToken, [message]);
@@ -1474,7 +1452,7 @@ export class WebhookHandler {
   private async handleCreateShelfCard(replyToken: string, imageId?: string): Promise<void> {
     const message = {
       type: 'text' as const,
-      text: '貨架標籤製作中！我會格式化價格與重點，並在完成後分享最終標籤。',
+      text: 'A shelf card is on the way! I will format the pricing and highlights and share the final card soon.',
     };
 
     await this.lineBot.replyMessage(replyToken, [message]);
@@ -1483,7 +1461,7 @@ export class WebhookHandler {
   private async handleCreateRecipeCard(replyToken: string, imageId?: string): Promise<void> {
     const message = {
       type: 'text' as const,
-      text: '好主意！我會準備一張以這個產品為特色的食譜卡片，完成後會傳送草稿給您。',
+      text: 'Great idea! I’ll prepare a recipe card featuring this product and send a draft once it is ready.',
     };
 
     await this.lineBot.replyMessage(replyToken, [message]);
@@ -1492,7 +1470,7 @@ export class WebhookHandler {
   private async handleSnoozeReminder(replyToken: string, storeName?: string): Promise<void> {
     const message = {
       type: 'text' as const,
-      text: `了解。我會暫停${storeName || '此店家'}的提醒，並在需要再次追蹤時通知您。`,
+      text: `Understood. I’ll snooze reminders for ${storeName || 'this store'} and let you know when it is time to follow up again.`,
     };
 
     await this.lineBot.replyMessage(replyToken, [message]);
@@ -1508,65 +1486,6 @@ export class WebhookHandler {
     }
     
     return result;
-  }
-
-  private getRichMenuActionKey(postbackData: Record<string, string>): string | null {
-    if (postbackData.source !== 'richmenu') {
-      return null;
-    }
-
-    const action = postbackData.action || 'unknown';
-    const target =
-      postbackData.role ||
-      postbackData.tab ||
-      postbackData.label ||
-      postbackData.intent ||
-      '';
-
-    return target ? `${action}:${target}` : action;
-  }
-
-  private getRichMenuActionLockRef(userId: string, actionKey: string) {
-    const safeKey = encodeURIComponent(actionKey);
-    return admin.firestore().collection('line_users').doc(userId).collection('action_locks').doc(safeKey);
-  }
-
-  private async acquireRichMenuActionLock(userId: string, actionKey: string): Promise<boolean> {
-    const ref = this.getRichMenuActionLockRef(userId, actionKey);
-    const now = Date.now();
-    const expiresAt = admin.firestore.Timestamp.fromMillis(now + RICH_MENU_ACTION_LOCK_MS);
-
-    try {
-      const acquired = await admin.firestore().runTransaction(async (tx) => {
-        const snap = await tx.get(ref);
-        if (snap.exists) {
-          const existingExpiry = (snap.data() as any)?.expiresAt?.toMillis?.() ?? 0;
-          if (existingExpiry > now) {
-            return false;
-          }
-        }
-
-        tx.set(ref, {
-          actionKey,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
-          expiresAt,
-        });
-        return true;
-      });
-
-      return acquired;
-    } catch (error) {
-      console.warn('[WebhookHandler] Failed to acquire rich menu lock; allowing action', error);
-      return true;
-    }
-  }
-
-  private async releaseRichMenuActionLock(userId: string, actionKey: string): Promise<void> {
-    try {
-      await this.getRichMenuActionLockRef(userId, actionKey).delete();
-    } catch (error) {
-      console.warn('[WebhookHandler] Failed to release rich menu lock', error);
-    }
   }
 
   // Image binding helpers
@@ -1787,7 +1706,7 @@ export class WebhookHandler {
           systemInstruction: [
             {
               text:
-                '將此產品照片提升至電商行銷品質：修正光線/對比/白平衡，去除灰塵/雜訊，略微銳化，使用乾淨純白背景並加上柔和自然陰影。**不得以任何方式更改產品或包裝**（不得編輯標籤/文字/標誌/顏色/形狀/大小）。',
+                '請優化上傳的產品照片，使其符合台灣或華人市場的行銷美感，並輸出可直接貼在產品頁的繁體中文促銷文案。僅回傳文案與影像，不要附加額外說明。',
             },
           ],
         } as any,

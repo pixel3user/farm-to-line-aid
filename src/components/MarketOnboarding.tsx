@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
+import useDebouncedValue from '@/hooks/useDebouncedValue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -15,8 +16,9 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Building2, CheckCircle2, Circle, CircleDot, Leaf, Loader2, ShoppingBag, Users } from 'lucide-react';
-import { LineUser } from '@/lib/database';
+import { Building2, CheckCircle2, Circle, CircleDot, Leaf, Loader2, MapPin, ShoppingBag, Users } from 'lucide-react';
+import { AddressCandidate, lookupAddress, reverseLookupAddress, resolveYamatoZip } from '@/lib/address';
+import { DatabaseService, LineUser, Store } from '@/lib/database';
 import { cn } from '@/lib/utils';
 import {
   buildPostOnboardingRedirectPath,
@@ -42,6 +44,7 @@ const MarketOnboarding: React.FC<MarketOnboardingProps> = ({ children }) => {
     isLoading,
     isRefreshingData,
     userStats,
+    userStores,
     refreshUserData,
     updateUserProfile
   } = useAuth();
@@ -60,6 +63,11 @@ const MarketOnboarding: React.FC<MarketOnboardingProps> = ({ children }) => {
     deliveryRegions: user?.marketProfile?.deliveryRegions || '',
     deliveryNotes: user?.marketProfile?.deliveryNotes || ''
   });
+  const [storeAddressForm, setStoreAddressForm] = useState({
+    address: '',
+    postNumber: '',
+    yamatoZipCode: ''
+  });
   const [needsForm, setNeedsForm] = useState({
     procurementNeeds: (user?.marketProfile?.procurementNeeds || []).join(', '),
     budgetNotes: user?.marketProfile?.budgetNotes || '',
@@ -71,8 +79,18 @@ const MarketOnboarding: React.FC<MarketOnboardingProps> = ({ children }) => {
   });
   const [formError, setFormError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isStoreAddressSearching, setIsStoreAddressSearching] = useState(false);
+  const [isStoreAddressVerifying, setIsStoreAddressVerifying] = useState(false);
+  const [storeAddressSuggestions, setStoreAddressSuggestions] = useState<AddressCandidate[]>([]);
+  const [storeAddressLookupError, setStoreAddressLookupError] = useState<string | null>(null);
+  const [storeAddressVerifyError, setStoreAddressVerifyError] = useState<string | null>(null);
   const [viewStep, setViewStep] = useState<StepKey | null>(null);
   const initialLoadRequestedRef = useRef(false);
+  const storeAddressRef = useRef('');
+  const storeAutoFillRef = useRef<string | null>(null);
+  const storeLookupIdRef = useRef(0);
+  const storeAddressInitializedRef = useRef(false);
+  const debouncedStoreAddress = useDebouncedValue(storeAddressForm.address, 400);
 
   useEffect(() => {
     setProfileForm({
@@ -99,14 +117,40 @@ const MarketOnboarding: React.FC<MarketOnboardingProps> = ({ children }) => {
   }, [user?.displayName, user?.email, user?.marketProfile]);
 
   useEffect(() => {
+    storeAddressRef.current = storeAddressForm.address;
+  }, [storeAddressForm.address]);
+
+  useEffect(() => {
+    if (storeAddressInitializedRef.current) return;
+    const existingStore = (userStores || []).find((store) => store.userId === user?.id) ?? (userStores || [])[0];
+    if (!existingStore) return;
+    const address = existingStore.pickup?.address || existingStore.location || '';
+    if (!address) return;
+    setStoreAddressForm({
+      address,
+      postNumber: existingStore.pickup?.postNumber || '',
+      yamatoZipCode: existingStore.pickup?.yamatoZipCode || ''
+    });
+    storeAddressInitializedRef.current = true;
+  }, [user?.id, userStores]);
+
+  useEffect(() => {
     if (user?.role === 'market' && user?.id && !initialLoadRequestedRef.current && !isRefreshingData) {
       initialLoadRequestedRef.current = true;
       refreshUserData().catch((error) => console.error('MarketOnboarding: refresh failed', error));
     }
   }, [user?.role, user?.id, isRefreshingData, refreshUserData]);
 
+  const hasBuyerStoreLocation = useMemo(() => {
+    return (userStores || []).some(
+      (store: Store) => Boolean((store.pickup?.address || store.location || '').trim())
+    );
+  }, [userStores]);
+
   const needsProfile = user?.role === 'market' && (!profileForm.displayName || !profileForm.email);
-  const needsBusiness = user?.role === 'market' && (!user?.marketProfile?.businessName || !user?.marketProfile?.businessType);
+  const needsBusiness =
+    user?.role === 'market' &&
+    (!user?.marketProfile?.businessName || !user?.marketProfile?.businessType || !hasBuyerStoreLocation);
   const needsIntent =
     user?.role === 'market' && (!user?.marketProfile?.procurementNeeds || user.marketProfile.procurementNeeds.length === 0);
 
@@ -167,6 +211,170 @@ const MarketOnboarding: React.FC<MarketOnboardingProps> = ({ children }) => {
   const waitingForData =
     user?.role === 'market' &&
     (isLoading || isRefreshingData || (!userStats && !initialLoadRequestedRef.current));
+
+  const mapBusinessTypeToStoreType = (type: BusinessType): Store['type'] => {
+    switch (type) {
+      case 'restaurant':
+        return 'restaurant';
+      case 'retailer':
+        return 'supermarket';
+      case 'ecommerce':
+        return 'online_store';
+      default:
+        return 'other';
+    }
+  };
+
+  const requestCurrentLocation = () =>
+    new Promise<{ lat: number; lng: number }>((resolve, reject) => {
+      if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+        reject(new Error(t('onboarding.market.store.geoUnavailable')));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (position) => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }),
+        () => reject(new Error(t('onboarding.market.store.geoDenied')))
+      );
+    });
+
+  const handleLookupStoreAddress = async () => {
+    const query = storeAddressForm.address.trim();
+    if (!query) {
+      setStoreAddressLookupError(t('onboarding.market.store.lookupRequired'));
+      return;
+    }
+    setIsStoreAddressSearching(true);
+    setStoreAddressLookupError(null);
+    try {
+      const result = await lookupAddress(query);
+      if (result.candidates.length === 0) {
+        setStoreAddressLookupError(t('onboarding.market.store.lookupEmpty'));
+      }
+      setStoreAddressSuggestions(result.candidates);
+      const topCandidate = result.candidates[0];
+      if (topCandidate?.address && topCandidate.address.startsWith(query)) {
+        storeAutoFillRef.current = topCandidate.address;
+        setStoreAddressForm((prev) => ({
+          ...prev,
+          address: topCandidate.address,
+          postNumber: '',
+          yamatoZipCode: ''
+        }));
+      }
+    } catch (error: any) {
+      setStoreAddressLookupError(error?.message || t('onboarding.market.store.lookupFailed'));
+    } finally {
+      setIsStoreAddressSearching(false);
+    }
+  };
+
+  const handleUseLocationForStore = async () => {
+    setIsStoreAddressSearching(true);
+    setStoreAddressLookupError(null);
+    try {
+      const { lat, lng } = await requestCurrentLocation();
+      const result = await reverseLookupAddress(lat, lng);
+      if (result.candidates.length === 0) {
+        setStoreAddressLookupError(t('onboarding.market.store.lookupEmpty'));
+      }
+      setStoreAddressSuggestions(result.candidates);
+      const topCandidate = result.candidates[0];
+      if (topCandidate?.address) {
+        storeAutoFillRef.current = topCandidate.address;
+        setStoreAddressForm((prev) => ({
+          ...prev,
+          address: topCandidate.address,
+          postNumber: '',
+          yamatoZipCode: ''
+        }));
+      }
+    } catch (error: any) {
+      setStoreAddressLookupError(error?.message || t('onboarding.market.store.lookupFailed'));
+    } finally {
+      setIsStoreAddressSearching(false);
+    }
+  };
+
+  const applyStoreSuggestion = (candidate: AddressCandidate) => {
+    setStoreAddressForm((prev) => ({
+      ...prev,
+      address: candidate.address,
+      postNumber: '',
+      yamatoZipCode: ''
+    }));
+    setStoreAddressSuggestions([]);
+    setStoreAddressLookupError(null);
+    setStoreAddressVerifyError(null);
+  };
+
+  const handleVerifyStoreAddress = async () => {
+    const address = storeAddressForm.address.trim();
+    if (!address) {
+      setStoreAddressVerifyError(t('onboarding.market.store.addressRequired'));
+      return;
+    }
+    setStoreAddressVerifyError(null);
+    setIsStoreAddressVerifying(true);
+    try {
+      const result = await resolveYamatoZip(address);
+      setStoreAddressForm((prev) => ({
+        ...prev,
+        address: result.normalizedAddress || prev.address,
+        postNumber: result.postNumber,
+        yamatoZipCode: result.yamatoZipCode
+      }));
+      setStoreAddressSuggestions([]);
+    } catch (error: any) {
+      setStoreAddressVerifyError(error?.message || t('onboarding.market.store.verifyFailed'));
+    } finally {
+      setIsStoreAddressVerifying(false);
+    }
+  };
+
+  useEffect(() => {
+    const query = debouncedStoreAddress.trim();
+    if (query.length < 3) {
+      storeLookupIdRef.current += 1;
+      setStoreAddressSuggestions([]);
+      setStoreAddressLookupError(null);
+      return;
+    }
+    if (storeAutoFillRef.current === query) {
+      storeAutoFillRef.current = null;
+      return;
+    }
+    const lookupId = (storeLookupIdRef.current += 1);
+    setStoreAddressLookupError(null);
+    lookupAddress(query)
+      .then((result) => {
+        if (storeLookupIdRef.current !== lookupId) return;
+        if (storeAddressRef.current.trim() !== query) return;
+        setStoreAddressSuggestions(result.candidates);
+        if (result.candidates.length === 0) {
+          setStoreAddressLookupError(t('onboarding.market.store.lookupEmpty'));
+          return;
+        }
+        const topCandidate = result.candidates[0];
+        if (
+          topCandidate?.address &&
+          topCandidate.address !== storeAddressRef.current.trim() &&
+          topCandidate.address.startsWith(query)
+        ) {
+          storeAutoFillRef.current = topCandidate.address;
+          setStoreAddressForm((prev) => ({
+            ...prev,
+            address: topCandidate.address,
+            postNumber: '',
+            yamatoZipCode: ''
+          }));
+        }
+      })
+      .catch((error: any) => {
+        if (storeLookupIdRef.current !== lookupId) return;
+        if (storeAddressRef.current.trim() !== query) return;
+        setStoreAddressLookupError(error?.message || t('onboarding.market.store.lookupFailed'));
+      });
+  }, [debouncedStoreAddress, t]);
 
   const handleBackStep = () => {
     if (displayedStepIndex > 0) {
@@ -230,11 +438,136 @@ const MarketOnboarding: React.FC<MarketOnboardingProps> = ({ children }) => {
     });
   };
 
+  const upsertBuyerStore = async (
+    address: string,
+    postNumber: string,
+    yamatoZipCode: string,
+    lat?: number,
+    lng?: number,
+    placeId?: string
+  ) => {
+    if (!user?.id) return;
+
+    const storeName = businessForm.businessName.trim() || profileForm.displayName.trim() || user.displayName || 'Buyer';
+    const storeType = mapBusinessTypeToStoreType(businessForm.businessType);
+    const contact: Store['contact'] = {};
+    if (profileForm.displayName.trim()) contact.name = profileForm.displayName.trim();
+    if (profileForm.phone.trim()) contact.phone = profileForm.phone.trim();
+    if (profileForm.email.trim()) contact.email = profileForm.email.trim();
+    const hasContact = Object.keys(contact).length > 0;
+
+    const pickup: Store['pickup'] = {
+      address,
+      yamatoZipCode,
+      postNumber,
+      contactName: contact.name || storeName,
+      lat,
+      lng,
+      placeId
+    };
+    if (contact.phone) {
+      pickup.contactTel = contact.phone;
+    }
+    if (yamatoZipCode) {
+      pickup.verifiedAt = new Date().toISOString();
+    }
+
+    const existingStore =
+      (userStores || []).find((store) => store.userId === user.id) ?? (userStores || [])[0];
+
+    if (existingStore?.id) {
+      const updates: Partial<Store> = {
+        name: storeName,
+        type: storeType,
+        location: address
+      };
+      if (hasContact) {
+        updates.contact = contact;
+      }
+      if (pickup) {
+        updates.pickup = pickup;
+      }
+      await DatabaseService.updateStore(existingStore.id, updates);
+    } else {
+      await DatabaseService.createStore(user.id, {
+        name: storeName,
+        type: storeType,
+        location: address,
+        contact: hasContact ? contact : undefined,
+        pickup,
+        metadata: {
+          notes: []
+        }
+      });
+    }
+  };
+
   const saveBusiness = async () => {
     if (!businessForm.businessName.trim()) {
       setFormError(t('onboarding.market.business.required'));
       return;
     }
+
+    if (!storeAddressForm.address.trim()) {
+      setFormError(t('onboarding.market.store.addressRequired'));
+      return;
+    }
+
+    let address = storeAddressForm.address.trim();
+    let postNumber = storeAddressForm.postNumber.trim();
+    let yamatoZipCode = storeAddressForm.yamatoZipCode.trim();
+    let geoLat: number | undefined;
+    let geoLng: number | undefined;
+    let geoPlaceId: string | undefined;
+
+    if (!yamatoZipCode) {
+      setIsStoreAddressVerifying(true);
+      setStoreAddressVerifyError(null);
+      try {
+        const result = await resolveYamatoZip(address);
+        address = result.normalizedAddress || address;
+        postNumber = result.postNumber;
+        yamatoZipCode = result.yamatoZipCode;
+        setStoreAddressForm((prev) => ({
+          ...prev,
+          address,
+          postNumber,
+          yamatoZipCode
+        }));
+        setStoreAddressSuggestions([]);
+      } catch (error: any) {
+        setStoreAddressVerifyError(error?.message || t('onboarding.market.store.verifyFailed'));
+        return;
+      } finally {
+        setIsStoreAddressVerifying(false);
+      }
+    }
+
+    if (!yamatoZipCode) {
+      setFormError(t('onboarding.market.store.verifyRequired'));
+      return;
+    }
+
+    try {
+      const geocodeResult = await lookupAddress(address, 1);
+      const candidate = geocodeResult.candidates[0];
+      if (candidate?.address) {
+        address = candidate.address;
+        geoLat = candidate.lat;
+        geoLng = candidate.lng;
+        geoPlaceId = candidate.placeId;
+        setStoreAddressForm((prev) => ({
+          ...prev,
+          address,
+          postNumber,
+          yamatoZipCode
+        }));
+      }
+    } catch (error) {
+      console.warn('MarketOnboarding: failed to geocode store address, using verified address', error);
+    }
+
+    await upsertBuyerStore(address, postNumber, yamatoZipCode, geoLat, geoLng, geoPlaceId);
 
     await updateUserProfile({
       marketProfile: {
@@ -387,6 +720,132 @@ const MarketOnboarding: React.FC<MarketOnboardingProps> = ({ children }) => {
                   <SelectItem value="other">{t('common.other')}</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-4 rounded-lg border border-gray-200 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-800">
+                    {t('onboarding.market.store.verifyTitle')}
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    {t('onboarding.market.store.verifyHint')}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleUseLocationForStore}
+                    disabled={isStoreAddressSearching}
+                    className="gap-2"
+                  >
+                    {isStoreAddressSearching ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        {t('onboarding.market.store.searching')}
+                      </>
+                    ) : (
+                      <>
+                        <MapPin className="w-4 h-4" />
+                        {t('onboarding.market.store.useLocation')}
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleLookupStoreAddress}
+                    disabled={isStoreAddressSearching || !storeAddressForm.address.trim()}
+                  >
+                    {t('onboarding.market.store.search')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleVerifyStoreAddress}
+                    disabled={isStoreAddressVerifying || !storeAddressForm.address.trim()}
+                    className="gap-2"
+                  >
+                    {isStoreAddressVerifying ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        {t('onboarding.market.store.verifying')}
+                      </>
+                    ) : (
+                      t('onboarding.market.store.verify')
+                    )}
+                  </Button>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2 md:col-span-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    {t('onboarding.market.store.addressLabel')}
+                  </label>
+                  <Input
+                    value={storeAddressForm.address}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      storeAddressInitializedRef.current = true;
+                      setStoreAddressForm((prev) => ({
+                        ...prev,
+                        address: nextValue,
+                        postNumber: '',
+                        yamatoZipCode: ''
+                      }));
+                      setStoreAddressLookupError(null);
+                      setStoreAddressVerifyError(null);
+                      setStoreAddressSuggestions([]);
+                    }}
+                    placeholder={t('onboarding.market.store.addressPlaceholder')}
+                  />
+                  {storeAddressSuggestions.length > 0 && (
+                    <div className="rounded-md border border-gray-200 bg-white p-2">
+                      <p className="text-xs text-gray-500">
+                        {t('onboarding.market.store.suggestions')}
+                      </p>
+                      <div className="flex flex-col gap-2 mt-2">
+                        {storeAddressSuggestions.map((candidate, index) => (
+                          <button
+                            key={`${candidate.address}-${index}`}
+                            type="button"
+                            onClick={() => applyStoreSuggestion(candidate)}
+                            className="rounded-md border border-gray-200 px-3 py-2 text-left text-sm text-gray-700 hover:border-blue-400 hover:bg-blue-50"
+                          >
+                            {candidate.address}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {storeAddressLookupError && (
+                    <div className="text-sm text-red-600">{storeAddressLookupError}</div>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    {t('onboarding.market.store.postNumber')}
+                  </label>
+                  <Input
+                    value={storeAddressForm.postNumber}
+                    readOnly
+                    placeholder={t('onboarding.market.store.postNumberPlaceholder')}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    {t('onboarding.market.store.yamatoZip')}
+                  </label>
+                  <Input
+                    value={storeAddressForm.yamatoZipCode}
+                    readOnly
+                    placeholder={t('onboarding.market.store.yamatoZipPlaceholder')}
+                  />
+                </div>
+              </div>
+              {storeAddressVerifyError && (
+                <div className="text-sm text-red-600">{storeAddressVerifyError}</div>
+              )}
             </div>
             <div className="space-y-2">
               <label className="text-sm font-semibold text-gray-700">
@@ -667,7 +1126,7 @@ const MarketOnboarding: React.FC<MarketOnboardingProps> = ({ children }) => {
                 )}
                 <p className="text-sm text-gray-500">{t('onboarding.market.reminder')}</p>
               </div>
-              <Button type="submit" disabled={isSaving}>
+              <Button type="submit" disabled={isSaving || isStoreAddressVerifying}>
                 {isSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 {t('onboarding.market.save')}
               </Button>

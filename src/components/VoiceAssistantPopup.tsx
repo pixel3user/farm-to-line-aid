@@ -1,14 +1,222 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
-import { Mic, X, Loader2, Square } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  Mic,
+  X,
+  Loader2,
+  Square,
+  PlayCircle,
+  Package,
+  ListChecks,
+  PlusCircle,
+  TrendingUp,
+  Search,
+  Image,
+  MapPin,
+  FileText,
+  Sparkles,
+  BarChart3,
+  Store,
+  LayoutDashboard,
+  UserCheck,
+  Edit,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import resolveApiBaseUrl from '@/lib/api';
+import { DIALOG_TOGGLE_EVENT } from '@/lib/dialogEvents';
 
-type Message = { id: number; role: 'user' | 'assistant' | 'system'; text: string; ts: number };
+type TextEntry = {
+  id: number;
+  role: 'user' | 'assistant' | 'system';
+  text: string;
+  ts: number;
+  kind: 'text';
+};
+
+type ToolUiIcon = 'list' | 'add' | 'edit' | 'stock' | 'search' | 'spark' | 'stats';
+
+type ToolUiItem = {
+  title: string;
+  description: string;
+  prompt: string;
+  icon: ToolUiIcon;
+};
+
+type ToolUiAction = {
+  label: string;
+  prompt?: string;
+  href?: string;
+};
+
+type ToolUiProduct = {
+  id?: string;
+  name: string;
+  price?: number;
+  unit?: string;
+  stock?: number;
+  category?: string;
+  imageUrl?: string;
+  imageCount?: number;
+  description?: string;
+  pickup?: {
+    address?: string;
+    contactName?: string;
+    contactTel?: string;
+    contactMobile?: string;
+    postNumber?: string;
+    yamatoZipCode?: string;
+  };
+  href?: string;
+};
+
+type ToolUiStore = {
+  id?: string;
+  name: string;
+  type?: string;
+  location?: string;
+  status?: string;
+  href?: string;
+};
+
+type ToolUiMarketingItem = {
+  id?: string;
+  title: string;
+  type?: string;
+  imageUrl?: string;
+  href?: string;
+  date?: string;
+};
+
+type ToolUiStat = {
+  label: string;
+  value: string | number;
+  hint?: string;
+};
+
+type ToolUiEmptyState = {
+  title: string;
+  description: string;
+  actions?: ToolUiAction[];
+};
+
+type ToolUiToolkit = {
+  kind: 'product_tools' | 'store_tools' | 'marketing_tools' | 'analytics_tools' | 'help_options';
+  title: string;
+  description: string;
+  items: ToolUiItem[];
+  actions: ToolUiAction[];
+};
+
+type ToolUiProductList = {
+  kind: 'product_list';
+  title: string;
+  description?: string;
+  context: 'mine' | 'market';
+  items: ToolUiProduct[];
+  actions?: ToolUiAction[];
+  emptyState?: ToolUiEmptyState;
+};
+
+type ToolUiProductCreated = {
+  kind: 'product_created';
+  title: string;
+  description?: string;
+  product: ToolUiProduct;
+  actions?: ToolUiAction[];
+};
+
+type ToolUiProductUpdated = {
+  kind: 'product_updated';
+  title: string;
+  description?: string;
+  product: ToolUiProduct;
+  actions?: ToolUiAction[];
+};
+
+type ToolUiStoreList = {
+  kind: 'store_list';
+  title: string;
+  description?: string;
+  context: 'mine' | 'market';
+  items: ToolUiStore[];
+  actions?: ToolUiAction[];
+  emptyState?: ToolUiEmptyState;
+};
+
+type ToolUiStoreCreated = {
+  kind: 'store_created';
+  title: string;
+  description?: string;
+  store: ToolUiStore;
+  actions?: ToolUiAction[];
+};
+
+type ToolUiMarketingList = {
+  kind: 'marketing_list';
+  title: string;
+  description?: string;
+  items: ToolUiMarketingItem[];
+  actions?: ToolUiAction[];
+  emptyState?: ToolUiEmptyState;
+};
+
+type ToolUiStats = {
+  kind: 'stats';
+  title: string;
+  description?: string;
+  items: ToolUiStat[];
+  actions?: ToolUiAction[];
+};
+
+type ToolUiMarketplaceStats = {
+  kind: 'marketplace_stats';
+  title: string;
+  description?: string;
+  items: ToolUiStat[];
+  actions?: ToolUiAction[];
+};
+
+type ToolUiDashboard = {
+  kind: 'dashboard_link';
+  title: string;
+  description?: string;
+  url: string;
+  actionLabel: string;
+};
+
+type ToolUiRole = {
+  kind: 'role_set';
+  title: string;
+  description?: string;
+  role: 'farmer' | 'market';
+  actions?: ToolUiAction[];
+};
+
+type ToolUi =
+  | ToolUiToolkit
+  | ToolUiProductList
+  | ToolUiProductCreated
+  | ToolUiProductUpdated
+  | ToolUiStoreList
+  | ToolUiStoreCreated
+  | ToolUiMarketingList
+  | ToolUiStats
+  | ToolUiMarketplaceStats
+  | ToolUiDashboard
+  | ToolUiRole;
+
+type ToolCardEntry = {
+  id: number;
+  ts: number;
+  kind: 'tool-card';
+  card: ToolUi;
+};
+
+type ChatEntry = TextEntry | ToolCardEntry;
 
 type Status = 'idle' | 'connecting' | 'ready' | 'listening' | 'processing' | 'error';
 
@@ -26,6 +234,7 @@ type SpeechRecognitionInstance = {
 
 type VoiceAssistantResponse = {
   messages?: Array<{ role: 'assistant' | 'system'; text: string }>;
+  ui?: ToolUi;
   error?: string;
 };
 
@@ -38,7 +247,10 @@ type LiveEventPayload = {
   type: 'text' | 'tool' | 'status' | 'audio' | 'turnComplete';
   text?: string;
   name?: string;
+  toolCallId?: string;
   messages?: Array<{ role: 'assistant' | 'system'; text: string }>;
+  phase?: 'start' | 'done' | 'error';
+  ui?: ToolUi;
   status?: string;
   reason?: string;
   message?: string;
@@ -50,6 +262,7 @@ const TARGET_SAMPLE_RATE = 16000;
 const MIC_LEVEL_GAIN = 6;
 const MIC_LEVEL_SMOOTHING = 0.7;
 const LIVE_CHUNK_INTERVAL_MS = 200;
+const LAUNCHER_HIDE_THRESHOLD_PX = 24;
 
 const STATUS_LABELS = {
   'zh-TW': {
@@ -101,6 +314,7 @@ const COPY = {
     reconnect: '重新啟動',
     connecting: '連線中',
     launcherCaption: 'AI 語音助理',
+    startTutorial: '開始導覽',
   },
   en: {
     popupTitle: 'Voice Assistant',
@@ -132,6 +346,100 @@ const COPY = {
     reconnect: 'Restart',
     connecting: 'Connecting',
     launcherCaption: 'AI Voice Assistant',
+    startTutorial: 'Start tutorial',
+  },
+} as const;
+
+const TOOL_ICON_MAP = {
+  list: ListChecks,
+  add: PlusCircle,
+  edit: Edit,
+  stock: TrendingUp,
+  search: Search,
+  spark: Sparkles,
+  stats: BarChart3,
+} as const;
+
+const TOOL_ACCENTS = {
+  list: {
+    border: 'border-sky-200/70',
+    bg: 'bg-sky-100/80',
+    text: 'text-sky-700',
+  },
+  add: {
+    border: 'border-emerald-200/70',
+    bg: 'bg-emerald-100/80',
+    text: 'text-emerald-700',
+  },
+  edit: {
+    border: 'border-teal-200/70',
+    bg: 'bg-teal-100/80',
+    text: 'text-teal-700',
+  },
+  stock: {
+    border: 'border-amber-200/70',
+    bg: 'bg-amber-100/80',
+    text: 'text-amber-700',
+  },
+  search: {
+    border: 'border-indigo-200/70',
+    bg: 'bg-indigo-100/80',
+    text: 'text-indigo-700',
+  },
+  spark: {
+    border: 'border-fuchsia-200/70',
+    bg: 'bg-fuchsia-100/80',
+    text: 'text-fuchsia-700',
+  },
+  stats: {
+    border: 'border-orange-200/70',
+    bg: 'bg-orange-100/80',
+    text: 'text-orange-700',
+  },
+} as const;
+
+const CARD_STYLES = {
+  product: {
+    border: 'border-emerald-100/80',
+    header: 'from-emerald-600 via-emerald-500 to-emerald-600',
+    action: 'border-emerald-200 text-emerald-900',
+    badge: 'bg-emerald-100 text-emerald-700',
+    muted: 'text-emerald-700/80',
+  },
+  store: {
+    border: 'border-orange-100/80',
+    header: 'from-orange-500 via-amber-500 to-orange-500',
+    action: 'border-orange-200 text-orange-900',
+    badge: 'bg-orange-100 text-orange-700',
+    muted: 'text-orange-700/80',
+  },
+  marketing: {
+    border: 'border-fuchsia-100/80',
+    header: 'from-fuchsia-600 via-pink-500 to-fuchsia-500',
+    action: 'border-fuchsia-200 text-fuchsia-900',
+    badge: 'bg-fuchsia-100 text-fuchsia-700',
+    muted: 'text-fuchsia-700/80',
+  },
+  stats: {
+    border: 'border-slate-200/80',
+    header: 'from-slate-800 via-slate-700 to-slate-600',
+    action: 'border-slate-300 text-slate-900',
+    badge: 'bg-slate-100 text-slate-700',
+    muted: 'text-slate-600',
+  },
+  marketplace: {
+    border: 'border-sky-200/80',
+    header: 'from-sky-600 via-indigo-500 to-sky-500',
+    action: 'border-sky-200 text-sky-900',
+    badge: 'bg-sky-100 text-sky-700',
+    muted: 'text-sky-700/80',
+  },
+  neutral: {
+    border: 'border-emerald-100/80',
+    header: 'from-emerald-600 via-emerald-500 to-emerald-600',
+    action: 'border-emerald-200 text-emerald-900',
+    badge: 'bg-emerald-100 text-emerald-700',
+    muted: 'text-emerald-700/80',
   },
 } as const;
 
@@ -153,8 +461,6 @@ type PageContextParts = {
   actions?: string[];
   tips?: string[];
 };
-
-const AUTO_PROMPT_STORAGE_KEY = 'farm2market_voice_auto_prompt';
 
 const buildContextText = ({ title, overview, navigation, actions, tips }: PageContextParts) => {
   const lines: string[] = [];
@@ -328,6 +634,7 @@ const isSamePageContext = (
   return left.routeKey === right.routeKey && left.context === right.context;
 };
 
+
 const debugEnabled =
   (import.meta.env.VITE_GEMINI_DEBUG as string | undefined) === 'true' ||
   (import.meta.env.DEV as boolean | undefined) === true;
@@ -466,19 +773,24 @@ const parseMimeType = (mimeType: string): WavConversionOptions => {
 export default function VoiceAssistantPopup() {
   const { language, t } = useLanguage();
   const location = useLocation();
+  const navigate = useNavigate();
   const { toast } = useToast();
-  const { user, firebaseUser, lineIdToken, isLoading, isLiffReady, isInLineApp } = useAuth();
+  const { user, firebaseUser, lineIdToken, isLoading, isLiffReady, isInLineApp, refreshUserData } = useAuth();
   const langKey = language === 'zh-TW' ? 'zh-TW' : 'en';
   const copy = COPY[langKey];
 
   const [isOpen, setIsOpen] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<ChatEntry[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [micLevel, setMicLevel] = useState(0);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [isLauncherMinimized, setIsLauncherMinimized] = useState(false);
+  const [isLauncherHidden, setIsLauncherHidden] = useState(false);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoResumeRef = useRef(false);
   const messageIdRef = useRef(1);
+  const handledToolIdsRef = useRef(new Set<string>());
   const micLevelRef = useRef(0);
   const micLevelRafRef = useRef<number | null>(null);
   const isOpenRef = useRef(false);
@@ -517,7 +829,8 @@ export default function VoiceAssistantPopup() {
   const liveSocketRef = useRef<WebSocket | null>(null);
   const liveSocketReadyRef = useRef(false);
   const lastAudioAtRef = useRef(0);
-  const fallbackSpeechTimeoutsRef = useRef<number[]>([]);
+  const openDialogIdsRef = useRef(new Set<string>());
+  const dialogPauseStateRef = useRef<{ shouldAutoResume: boolean; audioMuted: boolean } | null>(null);
 
   useEffect(() => {
     lineIdTokenRef.current = lineIdToken || '';
@@ -536,11 +849,6 @@ export default function VoiceAssistantPopup() {
       await captureContextRef.current.close().catch(() => {});
       captureContextRef.current = null;
     }
-  };
-
-  const stopSpeech = () => {
-    if (typeof window === 'undefined') return;
-    window.speechSynthesis?.cancel();
   };
 
   const ensurePlaybackContext = () => {
@@ -722,12 +1030,6 @@ export default function VoiceAssistantPopup() {
   }, []);
 
   useEffect(() => {
-    return () => {
-      cancelFallbackSpeech();
-    };
-  }, []);
-
-  useEffect(() => {
     if (typeof window === 'undefined') return;
     const resolveScrollTop = (target: EventTarget | null) => {
       if (!target || target === window || target === document) {
@@ -744,12 +1046,46 @@ export default function VoiceAssistantPopup() {
       return window.scrollY || 0;
     };
 
+    const resolveScrollMetrics = (target: EventTarget | null) => {
+      const element =
+        target instanceof HTMLElement
+          ? target
+          : document.scrollingElement ?? document.documentElement;
+      if (!element) return null;
+      return {
+        scrollTop: element.scrollTop,
+        scrollHeight: element.scrollHeight,
+        clientHeight: element.clientHeight,
+      };
+    };
+
     const setScrollBaseline = (target: EventTarget | null) => {
       lastScrollTargetRef.current = target;
       lastScrollYRef.current = resolveScrollTop(target);
     };
 
+    const updateLauncherVisibility = (target: EventTarget | null) => {
+      if (!isMobileViewport) {
+        setIsLauncherHidden(false);
+        return;
+      }
+      const metrics = resolveScrollMetrics(target);
+      if (!metrics) {
+        setIsLauncherHidden(false);
+        return;
+      }
+      const { scrollTop, scrollHeight, clientHeight } = metrics;
+      if (scrollHeight <= clientHeight + 1) {
+        setIsLauncherHidden(true);
+        return;
+      }
+      const atBottom =
+        scrollTop + clientHeight >= scrollHeight - LAUNCHER_HIDE_THRESHOLD_PX;
+      setIsLauncherHidden((prev) => (prev === atBottom ? prev : atBottom));
+    };
+
     setScrollBaseline(document.scrollingElement ?? document.documentElement);
+    updateLauncherVisibility(document.scrollingElement ?? document.documentElement);
 
     const applyScrollDelta = (delta: number, currentScroll: number | null) => {
       if (isOpenRef.current) return;
@@ -778,6 +1114,7 @@ export default function VoiceAssistantPopup() {
 
         const delta = currentScroll - lastScrollYRef.current;
         applyScrollDelta(delta, currentScroll);
+        updateLauncherVisibility(target);
 
         lastScrollYRef.current = currentScroll;
       });
@@ -796,6 +1133,7 @@ export default function VoiceAssistantPopup() {
       const delta = lastTouchYRef.current - touch.clientY;
       if (Math.abs(delta) < 6) return;
       applyScrollDelta(delta, null);
+      updateLauncherVisibility(document.scrollingElement ?? document.documentElement);
       lastTouchYRef.current = touch.clientY;
     };
     const handleTouchEnd = () => {
@@ -805,6 +1143,7 @@ export default function VoiceAssistantPopup() {
       if (!isInLineApp) return;
       if (Math.abs(event.deltaY) < 6) return;
       applyScrollDelta(event.deltaY, null);
+      updateLauncherVisibility(document.scrollingElement ?? document.documentElement);
     };
 
     window.addEventListener('scroll', handleScrollEvent, { passive: true });
@@ -825,7 +1164,7 @@ export default function VoiceAssistantPopup() {
         scrollRafRef.current = null;
       }
     };
-  }, [isInLineApp]);
+  }, [isInLineApp, isMobileViewport]);
 
   useEffect(() => {
     return () => {
@@ -837,7 +1176,6 @@ export default function VoiceAssistantPopup() {
         cancelAnimationFrame(micLevelRafRef.current);
         micLevelRafRef.current = null;
       }
-      stopSpeech();
       stopPlayback();
       stopPlayback();
       if (playbackContextRef.current) {
@@ -848,10 +1186,26 @@ export default function VoiceAssistantPopup() {
     };
   }, []);
 
-  const appendMessage = (role: Message['role'], text: string) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    const raf = window.requestAnimationFrame(() => {
+      container.scrollTop = container.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [isOpen, messages]);
+
+  const appendMessage = (role: TextEntry['role'], text: string) => {
     const id = messageIdRef.current;
     messageIdRef.current += 1;
-    setMessages((prev) => [...prev.slice(-20), { id, role, text, ts: Date.now() }]);
+    setMessages((prev) => [...prev.slice(-20), { id, role, text, ts: Date.now(), kind: 'text' }]);
+  };
+
+  const appendToolCard = (card: ToolUi) => {
+    const id = messageIdRef.current;
+    messageIdRef.current += 1;
+    setMessages((prev) => [...prev.slice(-20), { id, ts: Date.now(), kind: 'tool-card', card }]);
   };
 
   const updateMicLevel = (level: number) => {
@@ -869,34 +1223,11 @@ export default function VoiceAssistantPopup() {
     setMicLevel(0);
   };
 
-  const speakText = (text: string) => {
-    if (audioMutedRef.current) return;
-    if (typeof window === 'undefined') return;
-    if (!('speechSynthesis' in window)) return;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = langKey === 'zh-TW' ? 'zh-TW' : 'en-US';
-    window.speechSynthesis.speak(utterance);
-  };
-
-  const cancelFallbackSpeech = () => {
-    if (!fallbackSpeechTimeoutsRef.current.length) return;
-    for (const id of fallbackSpeechTimeoutsRef.current) {
-      window.clearTimeout(id);
-    }
-    fallbackSpeechTimeoutsRef.current = [];
-  };
-
-  const queueFallbackSpeech = (text: string) => {
-    if (!text) return;
-    if (!useLiveStreamingRef.current) {
-      speakText(text);
-      return;
-    }
-    const timeoutId = window.setTimeout(() => {
-      if (Date.now() - lastAudioAtRef.current < 350) return;
-      speakText(text);
-    }, 700);
-    fallbackSpeechTimeoutsRef.current.push(timeoutId);
+  const resumeListeningIfNeeded = () => {
+    if (!shouldAutoResumeRef.current) return;
+    if (!isOpenRef.current) return;
+    if (isRecordingRef.current) return;
+    void startRecording();
   };
 
   const sendMessage = async (text: string) => {
@@ -947,14 +1278,21 @@ export default function VoiceAssistantPopup() {
       if (!replies.length) {
         appendMessage('assistant', copy.connectErrorDesc);
         setStatus('ready');
+        resumeListeningIfNeeded();
         return;
       }
 
       for (const reply of replies) {
         appendMessage('assistant', reply.text);
-        speakText(reply.text);
+      }
+      if (payload.ui) {
+        appendToolCard(payload.ui);
+        if (payload.ui.kind === 'product_created' || payload.ui.kind === 'product_updated' || payload.ui.kind === 'store_created') {
+          void refreshUserData();
+        }
       }
       setStatus('ready');
+      resumeListeningIfNeeded();
     } catch (error) {
       console.error('Voice assistant error', error);
       setStatus('error');
@@ -971,6 +1309,7 @@ export default function VoiceAssistantPopup() {
     recordedChunksRef.current = [];
     if (!chunks.length) {
       setStatus('idle');
+      resumeListeningIfNeeded();
       return;
     }
 
@@ -1022,6 +1361,7 @@ export default function VoiceAssistantPopup() {
       const transcript = payload.transcript?.trim() || '';
       if (!transcript) {
         setStatus('ready');
+        resumeListeningIfNeeded();
         return;
       }
 
@@ -1094,25 +1434,51 @@ export default function VoiceAssistantPopup() {
     }
   };
 
+  const handleToolPayload = (payload: LiveEventPayload) => {
+    if (!payload.ui) return;
+    if (payload.phase === 'start') return;
+    const toolId = payload.toolCallId;
+    if (toolId) {
+      if (handledToolIdsRef.current.has(toolId)) return;
+      handledToolIdsRef.current.add(toolId);
+      if (handledToolIdsRef.current.size > 40) {
+        handledToolIdsRef.current.clear();
+      }
+    }
+    appendToolCard(payload.ui);
+    if (payload.ui.kind === 'product_created' || payload.ui.kind === 'product_updated' || payload.ui.kind === 'store_created') {
+      void refreshUserData();
+    }
+  };
+
   const handleLivePayload = (payload: LiveEventPayload) => {
     if (payload.type === 'text' && payload.text) {
       log('Live stream text');
       appendMessage('assistant', payload.text);
-      queueFallbackSpeech(payload.text);
       setStatus('ready');
-    } else if (payload.type === 'tool' && payload.messages?.length) {
+    } else if (payload.type === 'tool') {
       log('Live stream tool response');
-      for (const msg of payload.messages) {
-        appendMessage('assistant', msg.text);
+      if (payload.phase === 'start') {
+        setStatus('processing');
       }
-      setStatus('ready');
+      if (payload.messages?.length) {
+        for (const msg of payload.messages) {
+          appendMessage('assistant', msg.text);
+        }
+      }
+      handleToolPayload(payload);
+      if (payload.phase !== 'start') {
+        setStatus('ready');
+      }
     } else if (payload.type === 'audio' && payload.data) {
       lastAudioAtRef.current = Date.now();
-      cancelFallbackSpeech();
       void playInlineAudio(payload.data, payload.mimeType);
     } else if (payload.type === 'turnComplete') {
       log('Live stream turn complete');
       setStatus('ready');
+      void waitForAudioIdle().then(() => {
+        resumeListeningIfNeeded();
+      });
     } else if (payload.type === 'status') {
       log('Live stream status', { status: payload.status, code: payload.code, reason: payload.reason });
       if (payload.status === 'open' || payload.status === 'stream-open') {
@@ -1216,9 +1582,26 @@ export default function VoiceAssistantPopup() {
   const connectLiveWebSocket = async () => {
     const relayUrl = getLiveRelayUrl();
     if (!relayUrl || typeof WebSocket === 'undefined') return false;
-    if (liveSocketRef.current && liveSocketReadyRef.current) {
-      useLiveStreamingRef.current = true;
-      return true;
+    if (liveSocketRef.current) {
+      if (liveSocketReadyRef.current) {
+        useLiveStreamingRef.current = true;
+        return true;
+      }
+      return new Promise<boolean>((resolve) => {
+        const start = Date.now();
+        const waitForReady = () => {
+          if (liveSocketReadyRef.current) {
+            resolve(true);
+            return;
+          }
+          if (!liveSocketRef.current || Date.now() - start > 4000) {
+            resolve(false);
+            return;
+          }
+          window.setTimeout(waitForReady, 100);
+        };
+        waitForReady();
+      });
     }
     const firebaseToken = await getAuthToken();
     const lineToken = firebaseToken ? '' : await getLineIdToken();
@@ -1292,16 +1675,29 @@ export default function VoiceAssistantPopup() {
         if (payload.type === 'text' && payload.text) {
           log('Live relay text');
           appendMessage('assistant', payload.text);
-          queueFallbackSpeech(payload.text);
-        } else if (payload.type === 'tool' && payload.messages?.length) {
+        } else if (payload.type === 'tool') {
           log('Live relay tool response');
-          for (const msg of payload.messages) {
-            appendMessage('assistant', msg.text);
+          if (payload.phase === 'start') {
+            setStatus('processing');
+          }
+          if (payload.messages?.length) {
+            for (const msg of payload.messages) {
+              appendMessage('assistant', msg.text);
+            }
+          }
+          handleToolPayload(payload);
+          if (payload.phase !== 'start') {
+            setStatus('ready');
           }
         } else if (payload.type === 'audio' && payload.data) {
           lastAudioAtRef.current = Date.now();
-          cancelFallbackSpeech();
           void playInlineAudio(payload.data, payload.mimeType);
+        } else if (payload.type === 'turnComplete') {
+          log('Live relay turn complete');
+          setStatus('ready');
+          void waitForAudioIdle().then(() => {
+            resumeListeningIfNeeded();
+          });
         } else if (payload.type === 'status') {
           log('Live relay status', { status: payload.status, code: payload.code, reason: payload.reason });
           if (payload.status === 'error') {
@@ -1475,7 +1871,6 @@ export default function VoiceAssistantPopup() {
         },
       });
 
-      stopSpeech();
       resetMicLevel();
       recordedChunksRef.current = [];
       liveChunkQueueRef.current = [];
@@ -1584,6 +1979,7 @@ export default function VoiceAssistantPopup() {
     const { autoPrompt, startListening = true } = options;
     isOpenRef.current = true;
     if (startListening) {
+      shouldAutoResumeRef.current = true;
       void startRecording();
     }
     log('Opening assistant');
@@ -1593,7 +1989,6 @@ export default function VoiceAssistantPopup() {
     appendMessage('system', copy.readyMessage);
     if (autoPrompt) {
       appendMessage('assistant', autoPrompt);
-      queueFallbackSpeech(autoPrompt);
     }
     void unlockPlayback();
     void ensureLiveSession();
@@ -1603,19 +1998,179 @@ export default function VoiceAssistantPopup() {
     log('Closing assistant');
     isOpenRef.current = false;
     setIsOpen(false);
-    if (isMobileViewport) {
-      // Keep the live session and recording alive on mobile for continuity.
-      return;
-    }
+    shouldAutoResumeRef.current = false;
     audioMutedRef.current = true;
-    cancelFallbackSpeech();
     lastAudioAtRef.current = 0;
-    stopSpeech();
     stopPlayback();
     if (isRecordingRef.current) {
       void stopRecording('idle');
     }
     void stopLiveSession();
+  };
+
+  const pauseForDialog = () => {
+    if (dialogPauseStateRef.current) return;
+    dialogPauseStateRef.current = {
+      shouldAutoResume: shouldAutoResumeRef.current,
+      audioMuted: audioMutedRef.current,
+    };
+    shouldAutoResumeRef.current = false;
+    audioMutedRef.current = true;
+    lastAudioAtRef.current = 0;
+    stopPlayback();
+    if (isRecordingRef.current) {
+      void stopRecording('idle');
+    }
+  };
+
+  const resumeFromDialog = () => {
+    const pausedState = dialogPauseStateRef.current;
+    if (!pausedState) return;
+    dialogPauseStateRef.current = null;
+    if (!isOpenRef.current) {
+      audioMutedRef.current = true;
+      shouldAutoResumeRef.current = false;
+      return;
+    }
+    audioMutedRef.current = pausedState.audioMuted;
+    shouldAutoResumeRef.current = pausedState.shouldAutoResume;
+    resumeListeningIfNeeded();
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleDialogChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: string; open?: boolean }>).detail;
+      if (!detail || typeof detail.open !== 'boolean' || !detail.id) return;
+      if (detail.open) {
+        openDialogIdsRef.current.add(detail.id);
+        if (openDialogIdsRef.current.size === 1) {
+          pauseForDialog();
+        }
+        return;
+      }
+      openDialogIdsRef.current.delete(detail.id);
+      if (openDialogIdsRef.current.size === 0) {
+        resumeFromDialog();
+      }
+    };
+    window.addEventListener(DIALOG_TOGGLE_EVENT, handleDialogChange);
+    return () => window.removeEventListener(DIALOG_TOGGLE_EVENT, handleDialogChange);
+  }, []);
+
+  const waitForAudioIdle = async () => {
+    const start = Date.now();
+    while (Date.now() - start < 6000) {
+      const liveAudioRecent = Date.now() - lastAudioAtRef.current < 450;
+      const playbackActive = playbackContextRef.current
+        ? playbackContextRef.current.currentTime < nextPlaybackTimeRef.current - 0.05
+        : false;
+      if (!liveAudioRecent && !playbackActive) {
+        break;
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 200));
+    }
+  };
+
+  const buildTutorialRequest = () => {
+    return langKey === 'zh-TW'
+      ? '請開始這個頁面的語音導覽：先簡要介紹，再說明導覽路徑與主要操作。'
+      : 'Start a voice walkthrough for this page: give a short overview, navigation, and key actions.';
+  };
+
+  const sendLiveText = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    await ensureLiveSession();
+    if (liveSocketRef.current && liveSocketReadyRef.current) {
+      liveSocketRef.current.send(JSON.stringify({ type: 'text', text: trimmed }));
+      return true;
+    }
+    if (!liveSessionIdRef.current) {
+      return false;
+    }
+    const auth = await requireAuth();
+    if (!auth) return false;
+    const { base, prefix } = getLiveHttpEndpoints();
+    await fetch(`${base}${prefix}/input`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...auth.headers,
+      },
+      body: JSON.stringify({
+        sessionId: liveSessionIdRef.current,
+        text: trimmed,
+      }),
+    });
+    return true;
+  };
+
+  const handleToolPrompt = async (prompt: string) => {
+    const trimmed = prompt.trim();
+    if (!trimmed) return;
+    setStatus('processing');
+    const sent = await sendLiveText(trimmed);
+    if (sent) {
+      appendMessage('user', trimmed);
+      await waitForAudioIdle();
+      if (!isRecordingRef.current) {
+        void startRecording();
+      }
+      return;
+    }
+    await sendMessage(trimmed);
+  };
+
+  const handleNavigate = (href: string) => {
+    if (!href) return;
+    if (href.startsWith('http')) {
+      window.open(href, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    navigate(href);
+  };
+
+  const handleToolAction = (action: ToolUiAction) => {
+    if (action.prompt) {
+      void handleToolPrompt(action.prompt);
+      return;
+    }
+    if (action.href) {
+      handleNavigate(action.href);
+    }
+  };
+
+  const handleStartTutorial = async () => {
+    const page = getVoicePageContext(location.pathname, t);
+    if (!page) {
+      const fallbackText =
+        langKey === 'zh-TW'
+          ? '目前這個頁面還沒有可用的語音導覽。'
+          : 'There is no tutorial available for this page yet.';
+      appendMessage('assistant', fallbackText);
+      return;
+    }
+    if (!isOpenRef.current) {
+      await openAssistant({ startListening: false });
+    }
+    const requestText = buildTutorialRequest();
+    setStatus('processing');
+    const sent = await sendLiveText(requestText);
+    if (!sent) {
+      const failText =
+        langKey === 'zh-TW'
+          ? '目前無法連線到即時語音服務，請稍後再試。'
+          : 'Unable to connect to live voice right now. Please try again.';
+      appendMessage('assistant', failText);
+      setStatus('ready');
+      return;
+    }
+    appendMessage('user', requestText);
+    await waitForAudioIdle();
+    if (!isRecordingRef.current) {
+      void startRecording();
+    }
   };
 
   useEffect(() => {
@@ -1629,22 +2184,11 @@ export default function VoiceAssistantPopup() {
     if (isOpenRef.current) {
       void ensureLiveSession();
     }
-    if (typeof window === 'undefined') return;
-    if (!page.prompt.trim()) return;
-    const storageKey = `${AUTO_PROMPT_STORAGE_KEY}:${page.routeKey}`;
-    if (sessionStorage.getItem(storageKey)) return;
-    if (isRecordingRef.current) return;
-    sessionStorage.setItem(storageKey, '1');
-    if (isOpenRef.current) {
-      appendMessage('assistant', page.prompt);
-      queueFallbackSpeech(page.prompt);
-      return;
-    }
-    void openAssistant({ autoPrompt: page.prompt, startListening: false });
   }, [isLoading, location.pathname, t]);
 
   const handleMicClick = () => {
     if (isRecording) {
+      shouldAutoResumeRef.current = false;
       if (useLiveStreamingRef.current) {
         void stopRecording('idle');
       } else if (useServerTranscriptionRef.current) {
@@ -1654,6 +2198,7 @@ export default function VoiceAssistantPopup() {
       }
       return;
     }
+    shouldAutoResumeRef.current = true;
     void startRecording();
   };
 
@@ -1690,19 +2235,606 @@ export default function VoiceAssistantPopup() {
   const showWave = !isOpen && (isListening || isThinking);
   const showThinkingRing = !isOpen && isThinking;
 
+  const renderToolCard = (card: ToolUi) => {
+    const isTraditional = langKey === 'zh-TW';
+    const formatPrice = (price?: number, unit?: string) => {
+      if (typeof price !== 'number') return isTraditional ? '價格 —' : 'Price —';
+      const formatted = price.toLocaleString();
+      const suffix = unit ? `/${unit}` : '';
+      return `${isTraditional ? 'NT$ ' : '$'}${formatted}${suffix}`;
+    };
+    const formatStock = (stock?: number) => {
+      if (typeof stock !== 'number') return isTraditional ? '庫存 —' : 'Stock —';
+      return isTraditional ? `庫存 ${stock}` : `Stock ${stock}`;
+    };
+    const renderActions = (actions: ToolUiAction[] | undefined, style: (typeof CARD_STYLES)['product']) => {
+      if (!actions?.length) return null;
+      const cols =
+        actions.length >= 3 ? 'grid-cols-3' : actions.length === 2 ? 'grid-cols-2' : 'grid-cols-1';
+      return (
+        <div className={`grid ${cols} gap-2`}>
+          {actions.map((action) => (
+            <Button
+              key={action.label}
+              variant="outline"
+              size="sm"
+              className={`h-9 rounded-lg text-xs font-semibold ${style.action}`}
+              onClick={() => handleToolAction(action)}
+            >
+              {action.label}
+            </Button>
+          ))}
+        </div>
+      );
+    };
+    const renderEmptyState = (empty: ToolUiEmptyState | undefined, style: (typeof CARD_STYLES)['product']) => {
+      if (!empty) return null;
+      return (
+        <div className={`rounded-xl border ${style.border} bg-white/80 px-4 py-4 text-center`}>
+          <div className="text-sm font-semibold text-slate-900">{empty.title}</div>
+          <div className={`mt-1 text-xs ${style.muted}`}>{empty.description}</div>
+          {empty.actions?.length ? <div className="mt-3">{renderActions(empty.actions, style)}</div> : null}
+        </div>
+      );
+    };
+
+    const renderToolkitCard = (toolkit: ToolUiToolkit) => {
+      const headerMap = {
+        product_tools: { icon: Package, style: CARD_STYLES.product },
+        store_tools: { icon: Store, style: CARD_STYLES.store },
+        marketing_tools: { icon: Sparkles, style: CARD_STYLES.marketing },
+        analytics_tools: { icon: BarChart3, style: CARD_STYLES.stats },
+        help_options: { icon: ListChecks, style: CARD_STYLES.neutral },
+      } as const;
+      const header = headerMap[toolkit.kind];
+      const HeaderIcon = header.icon;
+      const actionCols = toolkit.actions.length >= 3 ? 'grid-cols-3' : 'grid-cols-2';
+      return (
+        <div className={`rounded-2xl border ${header.style.border} bg-white/90 shadow-[0_20px_45px_-30px_rgba(16,185,129,0.65)] overflow-hidden`}>
+          <div className={`flex items-start gap-3 bg-gradient-to-r ${header.style.header} px-4 py-3 text-white`}>
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/15">
+              <HeaderIcon className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-sm font-semibold tracking-tight">{toolkit.title}</div>
+              <div className="text-xs text-white/80">{toolkit.description}</div>
+            </div>
+          </div>
+          <div className="space-y-3 p-4">
+            {toolkit.items.map((item) => {
+              const Icon = TOOL_ICON_MAP[item.icon];
+              const accent = TOOL_ACCENTS[item.icon];
+              return (
+                <button
+                  key={item.title}
+                  type="button"
+                  onClick={() => handleToolPrompt(item.prompt)}
+                  className={`flex w-full items-start gap-3 rounded-xl border ${accent.border} bg-white/80 px-3 py-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md`}
+                >
+                  <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${accent.bg} ${accent.text}`}>
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <div className="flex-1">
+                    <div className="text-sm font-semibold text-slate-900">{item.title}</div>
+                    <div className="text-xs text-slate-600">{item.description}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div className="px-4 pb-4">
+            <div className={`grid ${actionCols} gap-2`}>
+              {toolkit.actions.map((action) => (
+                <Button
+                  key={action.label}
+                  variant="outline"
+                  size="sm"
+                  className={`h-9 rounded-lg text-xs font-semibold ${header.style.action}`}
+                  onClick={() => handleToolAction(action)}
+                >
+                  {action.label}
+                </Button>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const renderProductListCard = (tool: ToolUiProductList) => {
+      const style = tool.context === 'market' ? CARD_STYLES.marketplace : CARD_STYLES.product;
+      return (
+        <div className={`rounded-2xl border ${style.border} bg-white/90 shadow-[0_20px_45px_-30px_rgba(15,118,110,0.5)] overflow-hidden`}>
+          <div className={`flex items-start gap-3 bg-gradient-to-r ${style.header} px-4 py-3 text-white`}>
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/15">
+              <Package className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-sm font-semibold tracking-tight">{tool.title}</div>
+              {tool.description ? <div className="text-xs text-white/80">{tool.description}</div> : null}
+            </div>
+          </div>
+          <div className="space-y-2 p-4">
+            {tool.items.length === 0 ? (
+              renderEmptyState(tool.emptyState, style)
+            ) : (
+              tool.items.map((item) => {
+                const name = item.name?.trim() || (isTraditional ? '未命名產品' : 'Untitled product');
+                const lowStock = typeof item.stock === 'number' && item.stock <= 10;
+                const initial = name.trim()[0]?.toUpperCase() || '?';
+                const content = (
+                  <>
+                    <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border border-white/70 bg-emerald-50/80 text-emerald-700">
+                      {item.imageUrl ? (
+                        <img src={item.imageUrl} alt={name} className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="text-sm font-semibold">{initial}</span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold text-slate-900 truncate">{name}</span>
+                        {lowStock ? (
+                          <Badge className="bg-amber-100 text-amber-700 text-[10px] border border-amber-200">
+                            {isTraditional ? '偏低' : 'Low'}
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <div className="text-xs text-slate-500 truncate">
+                        {[item.category, item.unit].filter(Boolean).join(' · ') || (isTraditional ? '未分類' : 'Uncategorized')}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-semibold text-emerald-700">{formatPrice(item.price, item.unit)}</div>
+                      <div className="text-xs text-slate-500">{formatStock(item.stock)}</div>
+                    </div>
+                  </>
+                );
+                return item.href ? (
+                  <button
+                    key={item.id || item.name}
+                    type="button"
+                    onClick={() => handleNavigate(item.href!)}
+                    className="flex w-full items-center gap-3 rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <div
+                    key={item.id || item.name}
+                    className="flex w-full items-center gap-3 rounded-xl border border-white/70 bg-white/80 px-3 py-2 shadow-sm"
+                  >
+                    {content}
+                  </div>
+                );
+              })
+            )}
+          </div>
+          {tool.actions?.length ? <div className="px-4 pb-4">{renderActions(tool.actions, style)}</div> : null}
+        </div>
+      );
+    };
+
+    const renderProductCreatedCard = (tool: ToolUiProductCreated | ToolUiProductUpdated) => {
+      const style = CARD_STYLES.product;
+      const isNewlyCreated = tool.kind === 'product_created';
+      const product = tool.product;
+      const name = product.name?.trim() || (isTraditional ? '未命名產品' : 'Untitled product');
+      const initial = name.trim()[0]?.toUpperCase() || '?';
+      const description = product.description?.trim();
+      const pickupAddress = product.pickup?.address?.trim();
+      const imageCount = product.imageCount ?? (product.imageUrl ? 1 : 0);
+      const detailRows = [
+        {
+          icon: Image,
+          label: imageCount
+            ? isTraditional
+              ? `圖片 ${imageCount} 張`
+              : `${imageCount} image${imageCount > 1 ? 's' : ''}`
+            : isTraditional
+            ? '尚未新增圖片'
+            : 'No images yet',
+        },
+        {
+          icon: MapPin,
+          label: pickupAddress || (isTraditional ? '尚未設定取貨地址' : 'Pickup address not set'),
+        },
+      ];
+      if (description) {
+        detailRows.push({
+          icon: FileText,
+          label: description.length > 80 ? `${description.slice(0, 80)}…` : description,
+        });
+      }
+      return (
+        <div className={`rounded-2xl border ${isNewlyCreated ? 'border-4 border-emerald-400' : style.border} ${isNewlyCreated ? 'bg-gradient-to-br from-emerald-50 via-green-50 to-teal-50' : 'bg-white/90'} shadow-[0_20px_45px_-30px_rgba(16,185,129,0.55)] overflow-hidden ${isNewlyCreated ? 'animate-slideIn animate-glow' : ''} relative`}>
+          {isNewlyCreated && (
+            <div className="absolute inset-0 bg-gradient-to-r from-emerald-400/20 via-green-400/20 to-teal-400/20 rounded-2xl animate-shimmer" />
+          )}
+          <div className={`flex items-start gap-3 bg-gradient-to-r ${isNewlyCreated ? 'from-emerald-500 via-green-500 to-teal-500' : style.header} px-4 py-3 text-white relative z-10`}>
+            <span className={`flex h-9 w-9 items-center justify-center rounded-xl ${isNewlyCreated ? 'bg-white/25' : 'bg-white/15'}`} style={isNewlyCreated ? { animation: 'bounce 1s ease-in-out 3' } : undefined}>
+              <Package className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-sm font-semibold tracking-tight">{tool.title}</div>
+              {tool.description ? <div className="text-xs text-white/80">{tool.description}</div> : null}
+            </div>
+          </div>
+          <div className={`p-4 relative z-10 ${isNewlyCreated ? 'bg-gradient-to-br from-white/90 to-emerald-50/50' : ''}`}>
+            {product.href ? (
+              <button
+                type="button"
+                onClick={() => handleNavigate(product.href!)}
+                className={`flex w-full items-center gap-4 rounded-xl border ${isNewlyCreated ? 'border-emerald-300 bg-gradient-to-r from-emerald-50 to-green-50' : 'border-white/70 bg-white/80'} p-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${isNewlyCreated ? 'hover:border-emerald-400' : ''}`}
+              >
+                <div className={`h-16 w-16 overflow-hidden rounded-xl border ${isNewlyCreated ? 'border-emerald-300 bg-gradient-to-br from-emerald-100 to-green-100' : 'border-white/70 bg-emerald-50/80'} ${isNewlyCreated ? 'ring-2 ring-emerald-400/50' : ''}`}>
+                  {product.imageUrl ? (
+                    <img src={product.imageUrl} alt={name} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className={`flex h-full w-full items-center justify-center text-lg font-semibold ${isNewlyCreated ? 'text-emerald-700' : 'text-emerald-700'}`}>
+                      {initial}
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1">
+                  <div className={`text-sm font-semibold ${isNewlyCreated ? 'text-emerald-900' : 'text-slate-900'}`}>{name}</div>
+                  <div className="text-xs text-slate-500">
+                    {[product.category, product.unit].filter(Boolean).join(' · ') || (isTraditional ? '未分類' : 'Uncategorized')}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                    <span className={`rounded-full px-2 py-0.5 ${isNewlyCreated ? 'bg-emerald-200 text-emerald-800 font-semibold' : style.badge}`}>{formatPrice(product.price, product.unit)}</span>
+                    <span className={`rounded-full px-2 py-0.5 ${isNewlyCreated ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>{formatStock(product.stock)}</span>
+                  </div>
+                </div>
+              </button>
+            ) : (
+              <div className={`flex items-center gap-4 rounded-xl border ${isNewlyCreated ? 'border-emerald-300 bg-gradient-to-r from-emerald-50 to-green-50' : 'border-white/70 bg-white/80'} p-3 shadow-sm`}>
+                <div className={`h-16 w-16 overflow-hidden rounded-xl border ${isNewlyCreated ? 'border-emerald-300 bg-gradient-to-br from-emerald-100 to-green-100' : 'border-white/70 bg-emerald-50/80'} ${isNewlyCreated ? 'ring-2 ring-emerald-400/50' : ''}`}>
+                  {product.imageUrl ? (
+                    <img src={product.imageUrl} alt={name} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className={`flex h-full w-full items-center justify-center text-lg font-semibold ${isNewlyCreated ? 'text-emerald-700' : 'text-emerald-700'}`}>
+                      {initial}
+                    </div>
+                  )}
+                </div>
+                <div className="flex-1">
+                  <div className={`text-sm font-semibold ${isNewlyCreated ? 'text-emerald-900' : 'text-slate-900'}`}>{name}</div>
+                  <div className="text-xs text-slate-500">
+                    {[product.category, product.unit].filter(Boolean).join(' · ') || (isTraditional ? '未分類' : 'Uncategorized')}
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                    <span className={`rounded-full px-2 py-0.5 ${isNewlyCreated ? 'bg-emerald-200 text-emerald-800 font-semibold' : style.badge}`}>{formatPrice(product.price, product.unit)}</span>
+                    <span className={`rounded-full px-2 py-0.5 ${isNewlyCreated ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>{formatStock(product.stock)}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="mt-3 space-y-2 text-xs text-slate-600">
+              {detailRows.map((row) => {
+                const RowIcon = row.icon;
+                return (
+                  <div key={row.label} className="flex items-start gap-2">
+                    <RowIcon className="mt-0.5 h-3.5 w-3.5 text-emerald-600" />
+                    <span className="flex-1">{row.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+            {tool.actions?.length ? <div className="mt-4">{renderActions(tool.actions, style)}</div> : null}
+          </div>
+        </div>
+      );
+    };
+
+    const renderStoreListCard = (tool: ToolUiStoreList) => {
+      const style = tool.context === 'market' ? CARD_STYLES.marketplace : CARD_STYLES.store;
+      return (
+        <div className={`rounded-2xl border ${style.border} bg-white/90 shadow-[0_20px_45px_-30px_rgba(249,115,22,0.35)] overflow-hidden`}>
+          <div className={`flex items-start gap-3 bg-gradient-to-r ${style.header} px-4 py-3 text-white`}>
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/15">
+              <Store className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-sm font-semibold tracking-tight">{tool.title}</div>
+              {tool.description ? <div className="text-xs text-white/80">{tool.description}</div> : null}
+            </div>
+          </div>
+          <div className="space-y-2 p-4">
+            {tool.items.length === 0 ? (
+              renderEmptyState(tool.emptyState, style)
+            ) : (
+              tool.items.map((item) => {
+                const name = item.name?.trim() || (isTraditional ? '未命名店家' : 'Unnamed store');
+                const details = [item.type, item.location].filter(Boolean).join(' · ');
+                const content = (
+                  <>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-100 text-orange-700">
+                      <Store className="h-4 w-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-slate-900 truncate">{name}</div>
+                      <div className="text-xs text-slate-500 truncate">{details || (isTraditional ? '未提供資訊' : 'No details')}</div>
+                    </div>
+                    {item.status ? (
+                      <Badge className="bg-orange-100 text-orange-700 text-[10px] border border-orange-200">
+                        {item.status.replace(/_/g, ' ')}
+                      </Badge>
+                    ) : null}
+                  </>
+                );
+                return item.href ? (
+                  <button
+                    key={item.id || item.name}
+                    type="button"
+                    onClick={() => handleNavigate(item.href!)}
+                    className="flex w-full items-center gap-3 rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <div
+                    key={item.id || item.name}
+                    className="flex w-full items-center gap-3 rounded-xl border border-white/70 bg-white/80 px-3 py-2 shadow-sm"
+                  >
+                    {content}
+                  </div>
+                );
+              })
+            )}
+          </div>
+          {tool.actions?.length ? <div className="px-4 pb-4">{renderActions(tool.actions, style)}</div> : null}
+        </div>
+      );
+    };
+
+    const renderStoreCreatedCard = (tool: ToolUiStoreCreated) => {
+      const style = CARD_STYLES.store;
+      const store = tool.store;
+      const name = store.name?.trim() || (isTraditional ? '未命名店家' : 'Unnamed store');
+      return (
+        <div className={`rounded-2xl border ${style.border} bg-white/90 shadow-[0_20px_45px_-30px_rgba(249,115,22,0.35)] overflow-hidden`}>
+          <div className={`flex items-start gap-3 bg-gradient-to-r ${style.header} px-4 py-3 text-white`}>
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/15">
+              <Store className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-sm font-semibold tracking-tight">{tool.title}</div>
+              {tool.description ? <div className="text-xs text-white/80">{tool.description}</div> : null}
+            </div>
+          </div>
+          <div className="p-4">
+            {store.href ? (
+              <button
+                type="button"
+                onClick={() => handleNavigate(store.href!)}
+                className="flex w-full items-center gap-3 rounded-xl border border-white/70 bg-white/80 px-3 py-3 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+              >
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-100 text-orange-700">
+                  <Store className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-slate-900">{name}</div>
+                  <div className="text-xs text-slate-500">
+                    {[store.type, store.location].filter(Boolean).join(' · ') || (isTraditional ? '未提供資訊' : 'No details')}
+                  </div>
+                </div>
+              </button>
+            ) : (
+              <div className="flex items-center gap-3 rounded-xl border border-white/70 bg-white/80 px-3 py-3 shadow-sm">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-100 text-orange-700">
+                  <Store className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <div className="text-sm font-semibold text-slate-900">{name}</div>
+                  <div className="text-xs text-slate-500">
+                    {[store.type, store.location].filter(Boolean).join(' · ') || (isTraditional ? '未提供資訊' : 'No details')}
+                  </div>
+                </div>
+              </div>
+            )}
+            {tool.actions?.length ? <div className="mt-4">{renderActions(tool.actions, style)}</div> : null}
+          </div>
+        </div>
+      );
+    };
+
+    const renderMarketingListCard = (tool: ToolUiMarketingList) => {
+      const style = CARD_STYLES.marketing;
+      return (
+        <div className={`rounded-2xl border ${style.border} bg-white/90 shadow-[0_20px_45px_-30px_rgba(236,72,153,0.35)] overflow-hidden`}>
+          <div className={`flex items-start gap-3 bg-gradient-to-r ${style.header} px-4 py-3 text-white`}>
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/15">
+              <Sparkles className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-sm font-semibold tracking-tight">{tool.title}</div>
+              {tool.description ? <div className="text-xs text-white/80">{tool.description}</div> : null}
+            </div>
+          </div>
+          <div className="space-y-2 p-4">
+            {tool.items.length === 0 ? (
+              renderEmptyState(tool.emptyState, style)
+            ) : (
+              tool.items.map((item) => {
+                const title = item.title?.trim() || (isTraditional ? '未命名素材' : 'Untitled asset');
+                const typeLabel = item.type || (isTraditional ? '行銷素材' : 'Marketing');
+                const meta = [typeLabel, item.date].filter(Boolean).join(' · ');
+                const content = (
+                  <>
+                    <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-xl bg-fuchsia-100 text-fuchsia-700">
+                      {item.imageUrl ? (
+                        <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover" />
+                      ) : (
+                        <Sparkles className="h-4 w-4" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-slate-900 truncate">{title}</div>
+                      <div className="text-xs text-slate-500 truncate">{meta}</div>
+                    </div>
+                    <Badge className="bg-fuchsia-100 text-fuchsia-700 text-[10px] border border-fuchsia-200">
+                      {item.type || (isTraditional ? '素材' : 'Asset')}
+                    </Badge>
+                  </>
+                );
+                return item.href ? (
+                  <button
+                    key={item.id || title}
+                    type="button"
+                    onClick={() => handleNavigate(item.href!)}
+                    className="flex w-full items-center gap-3 rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <div
+                    key={item.id || title}
+                    className="flex w-full items-center gap-3 rounded-xl border border-white/70 bg-white/80 px-3 py-2 shadow-sm"
+                  >
+                    {content}
+                  </div>
+                );
+              })
+            )}
+          </div>
+          {tool.actions?.length ? <div className="px-4 pb-4">{renderActions(tool.actions, style)}</div> : null}
+        </div>
+      );
+    };
+
+    const renderStatsCard = (tool: ToolUiStats | ToolUiMarketplaceStats) => {
+      const style = tool.kind === 'marketplace_stats' ? CARD_STYLES.marketplace : CARD_STYLES.stats;
+      const Icon = BarChart3;
+      return (
+        <div className={`rounded-2xl border ${style.border} bg-white/90 shadow-[0_20px_45px_-30px_rgba(15,23,42,0.35)] overflow-hidden`}>
+          <div className={`flex items-start gap-3 bg-gradient-to-r ${style.header} px-4 py-3 text-white`}>
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/15">
+              <Icon className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-sm font-semibold tracking-tight">{tool.title}</div>
+              {tool.description ? <div className="text-xs text-white/80">{tool.description}</div> : null}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2 p-4">
+            {tool.items.map((item) => (
+              <div key={item.label} className="rounded-xl border border-white/70 bg-white/80 px-3 py-2 shadow-sm">
+                <div className="text-xs text-slate-500">{item.label}</div>
+                <div className="text-lg font-semibold text-slate-900">{item.value}</div>
+                {item.hint ? <div className="text-[10px] text-slate-400">{item.hint}</div> : null}
+              </div>
+            ))}
+          </div>
+          {tool.actions?.length ? <div className="px-4 pb-4">{renderActions(tool.actions, style)}</div> : null}
+        </div>
+      );
+    };
+
+    const renderDashboardCard = (tool: ToolUiDashboard) => {
+      const style = CARD_STYLES.product;
+      return (
+        <div className={`rounded-2xl border ${style.border} bg-white/90 shadow-[0_20px_45px_-30px_rgba(16,185,129,0.55)] overflow-hidden`}>
+          <div className={`flex items-start gap-3 bg-gradient-to-r ${style.header} px-4 py-3 text-white`}>
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/15">
+              <LayoutDashboard className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-sm font-semibold tracking-tight">{tool.title}</div>
+              {tool.description ? <div className="text-xs text-white/80">{tool.description}</div> : null}
+            </div>
+          </div>
+          <div className="p-4">
+            <div className="rounded-xl border border-white/70 bg-white/80 px-3 py-2 text-xs text-slate-500 break-words">
+              {tool.url}
+            </div>
+            <div className="mt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                className={`h-9 rounded-lg text-xs font-semibold ${style.action}`}
+                onClick={() => handleNavigate(tool.url)}
+              >
+                {tool.actionLabel}
+              </Button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const renderRoleCard = (tool: ToolUiRole) => {
+      const style = tool.role === 'market' ? CARD_STYLES.marketplace : CARD_STYLES.product;
+      const roleLabel =
+        tool.role === 'market'
+          ? isTraditional
+            ? '市場'
+            : 'Market'
+          : isTraditional
+          ? '賣家'
+          : 'Farmer';
+      return (
+        <div className={`rounded-2xl border ${style.border} bg-white/90 shadow-[0_20px_45px_-30px_rgba(16,185,129,0.55)] overflow-hidden`}>
+          <div className={`flex items-start gap-3 bg-gradient-to-r ${style.header} px-4 py-3 text-white`}>
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/15">
+              <UserCheck className="h-4 w-4" />
+            </span>
+            <div>
+              <div className="text-sm font-semibold tracking-tight">{tool.title}</div>
+              {tool.description ? <div className="text-xs text-white/80">{tool.description}</div> : null}
+            </div>
+          </div>
+          <div className="p-4">
+            <Badge className={`text-xs border ${style.badge}`}>{roleLabel}</Badge>
+            {tool.actions?.length ? <div className="mt-3">{renderActions(tool.actions, style)}</div> : null}
+          </div>
+        </div>
+      );
+    };
+
+    switch (card.kind) {
+      case 'product_tools':
+      case 'store_tools':
+      case 'marketing_tools':
+      case 'analytics_tools':
+      case 'help_options':
+        return renderToolkitCard(card);
+      case 'product_list':
+        return renderProductListCard(card);
+      case 'product_created':
+      case 'product_updated':
+        return renderProductCreatedCard(card);
+      case 'store_list':
+        return renderStoreListCard(card);
+      case 'store_created':
+        return renderStoreCreatedCard(card);
+      case 'marketing_list':
+        return renderMarketingListCard(card);
+      case 'stats':
+      case 'marketplace_stats':
+        return renderStatsCard(card);
+      case 'dashboard_link':
+        return renderDashboardCard(card);
+      case 'role_set':
+        return renderRoleCard(card);
+      default:
+        return null;
+    }
+  };
+
   return (
     <>
       {isOpen && (
-        <div className="fixed inset-0 z-50 sm:inset-auto sm:bottom-6 sm:right-6 sm:h-auto sm:max-h-none sm:w-[26rem] sm:max-w-[calc(100vw-3rem)]">
+        <div className="fixed inset-0 z-50 sm:inset-auto sm:bottom-6 sm:right-6 sm:h-[min(42rem,calc(100dvh-3rem))] sm:max-h-[calc(100dvh-3rem)] sm:w-[26rem] sm:max-w-[calc(100vw-3rem)]">
           <div
-            className="relative h-full max-h-[100dvh] w-full overflow-hidden border-0 bg-white/95 shadow-2xl ring-1 ring-emerald-100 sm:h-auto sm:max-h-none sm:rounded-3xl sm:border sm:border-emerald-100"
+            className="relative h-full max-h-[100dvh] w-full overflow-hidden border-0 bg-white/95 shadow-2xl ring-1 ring-emerald-100 sm:max-h-full sm:rounded-3xl sm:border sm:border-emerald-100"
             style={{ fontFamily: 'Manrope, "Helvetica Neue", sans-serif' }}
           >
             <div className="absolute inset-0 bg-gradient-to-br from-emerald-50 via-white to-amber-50" />
             <div className="absolute -top-24 right-4 h-56 w-56 rounded-full bg-emerald-200/50 blur-3xl sm:right-10" />
             <div className="absolute bottom-10 left-2 h-40 w-40 rounded-full bg-sky-200/40 blur-3xl sm:left-6" />
 
-            <div className="relative z-10 flex h-full flex-col px-6 pt-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:h-auto sm:pb-6">
+            <div className="relative z-10 flex h-full flex-col px-6 pt-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:pb-6">
               <div className="flex items-start justify-between">
                 <div>
                   <div className="text-lg font-semibold tracking-tight text-emerald-950 sm:text-base">
@@ -1720,22 +2852,36 @@ export default function VoiceAssistantPopup() {
 
               <div className="mt-4 flex-1 min-h-0">
                 <div className="relative h-full">
-                  <div className="h-full overflow-y-auto rounded-2xl border border-white/70 bg-white/70 px-4 py-3 text-sm shadow-inner backdrop-blur">
+                  <div
+                    ref={messagesContainerRef}
+                    className="h-full overflow-y-auto rounded-2xl border border-white/70 bg-white/70 px-4 py-3 text-sm shadow-inner backdrop-blur"
+                  >
                     {messages.length === 0 && (
                       <p className="text-emerald-700/70 text-xs">{copy.waitingReply}</p>
                     )}
-                    {messages.map((m) => (
-                      <div key={m.id} className="mb-3 last:mb-0">
-                        <span className="font-semibold mr-2 text-emerald-950">
-                          {m.role === 'assistant'
-                            ? copy.assistantLabel
-                            : m.role === 'user'
-                            ? copy.userLabel
-                            : copy.systemLabel}
-                        </span>
-                        <span className="text-slate-700">{m.text}</span>
-                      </div>
-                    ))}
+                    {messages.map((entry) => {
+                      if (entry.kind === 'tool-card') {
+                        const card = renderToolCard(entry.card);
+                        if (!card) return null;
+                        return (
+                          <div key={entry.id} className="mb-3 last:mb-0">
+                            {card}
+                          </div>
+                        );
+                      }
+                      return (
+                        <div key={entry.id} className="mb-3 last:mb-0">
+                          <span className="font-semibold mr-2 text-emerald-950">
+                            {entry.role === 'assistant'
+                              ? copy.assistantLabel
+                              : entry.role === 'user'
+                              ? copy.userLabel
+                              : copy.systemLabel}
+                          </span>
+                          <span className="text-slate-700">{entry.text}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                   {activityState && activityCopy && (
                     <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
@@ -1767,6 +2913,16 @@ export default function VoiceAssistantPopup() {
 
               <div className="mt-6 space-y-4">
                 <div className="flex flex-col items-center gap-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-emerald-800"
+                    onClick={() => void handleStartTutorial()}
+                    disabled={isBusy}
+                  >
+                    <PlayCircle className="mr-2 h-4 w-4" />
+                    {copy.startTutorial}
+                  </Button>
                   <div className="relative flex items-center justify-center">
                     <div
                       className="absolute h-28 w-28 rounded-full bg-emerald-300/40 blur-2xl transition-transform duration-150 sm:h-24 sm:w-24"
@@ -1822,13 +2978,17 @@ export default function VoiceAssistantPopup() {
       )}
 
       <div
-        className={`fixed right-6 z-50 ${isOpen ? 'hidden' : ''}`}
+        className={`fixed right-6 z-[45] transition-opacity duration-200 ${
+          isOpen ? 'hidden' : ''
+        } ${isLauncherHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
         style={{ bottom: launcherBottomOffset }}
+        aria-hidden={isLauncherHidden}
       >
         <button
           type="button"
           onPointerDown={() => void openAssistant()}
           onClick={() => void openAssistant()}
+          tabIndex={isLauncherHidden ? -1 : 0}
           className={`group flex items-center rounded-full border border-emerald-400/80 bg-emerald-50/95 py-3 shadow-[0_20px_40px_-16px_rgba(16,185,129,0.9)] backdrop-blur transition hover:-translate-y-0.5 hover:bg-emerald-100 hover:shadow-[0_28px_50px_-18px_rgba(16,185,129,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${
             isLauncherMinimized ? 'gap-0 px-3' : 'gap-3 px-4'
           }`}

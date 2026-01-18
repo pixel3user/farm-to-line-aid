@@ -25,6 +25,8 @@ interface StoreLocation {
   store: Store;
   coordinates: [number, number];
   geocoded: boolean;
+  addressUsed: string;
+  usedFallback: boolean;
 }
 
 // Simple geocoding function using OpenStreetMap Nominatim API
@@ -110,16 +112,35 @@ const getTypeIcon = (type: Store['type']) => {
   }
 };
 
+const getStoreAddresses = (store: Store) => {
+  const written = store.location?.trim() || '';
+  const gps = store.pickup?.address?.trim() || '';
+  return {
+    primary: written || gps,
+    fallback: written && gps ? gps : ''
+  };
+};
+
+const getPreferredDisplayAddress = (store: Store) => {
+  return store.location?.trim() || store.pickup?.address?.trim() || '';
+};
+
 const StoresMap: React.FC<StoresMapProps> = ({ stores, isLoading = false }) => {
   const { t } = useLanguage();
   const [mapCenter] = useState<[number, number]>([25.0330, 121.5654]); // Taipei coordinates
   const [mapZoom] = useState(11);
   const [storeLocations, setStoreLocations] = useState<StoreLocation[]>([]);
   const [geocodingInProgress, setGeocodingInProgress] = useState(false);
+  const [isInteractive, setIsInteractive] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Filter stores that have location data (memoized to reduce re-computations)
   const storesWithLocation = useMemo(() => {
-    return stores.filter(store => store.location && store.location.trim() !== '');
+    return stores.filter((store) => {
+      const written = store.location?.trim() || '';
+      const gps = store.pickup?.address?.trim() || '';
+      return Boolean(written || gps);
+    });
   }, [stores]);
 
   // Geocode store addresses
@@ -134,27 +155,60 @@ const StoresMap: React.FC<StoresMapProps> = ({ stores, isLoading = false }) => {
 
     for (const store of storesWithLocation) {
       try {
-        const coordinates = await geocodeAddress(store.location);
+        const preferredAddress = getPreferredDisplayAddress(store);
+        const storedLat = store.pickup?.lat;
+        const storedLng = store.pickup?.lng;
+        if (Number.isFinite(storedLat) && Number.isFinite(storedLng)) {
+          locations.push({
+            store,
+            coordinates: [storedLat as number, storedLng as number],
+            geocoded: true,
+            addressUsed: preferredAddress,
+            usedFallback: false
+          });
+          continue;
+        }
+
+        const { primary, fallback } = getStoreAddresses(store);
+        let addressUsed = primary;
+        let usedFallback = false;
+        let coordinates = primary ? await geocodeAddress(primary) : null;
+
+        if (!coordinates && fallback) {
+          coordinates = await geocodeAddress(fallback);
+          if (coordinates) {
+            addressUsed = fallback;
+            usedFallback = true;
+          }
+        }
+
         if (coordinates) {
           locations.push({
             store,
             coordinates,
-            geocoded: true
+            geocoded: true,
+            addressUsed,
+            usedFallback
           });
         } else {
           // Fallback to default location if geocoding fails
           locations.push({
             store,
             coordinates: mapCenter,
-            geocoded: false
+            geocoded: false,
+            addressUsed: addressUsed || store.location || store.pickup?.address || '',
+            usedFallback
           });
         }
       } catch (error) {
         console.error(`Failed to geocode ${store.name}:`, error);
+        const { primary, fallback } = getStoreAddresses(store);
         locations.push({
           store,
           coordinates: mapCenter,
-          geocoded: false
+          geocoded: false,
+          addressUsed: primary || fallback || store.location || store.pickup?.address || '',
+          usedFallback: false
         });
       }
     }
@@ -184,10 +238,10 @@ const StoresMap: React.FC<StoresMapProps> = ({ stores, isLoading = false }) => {
   }
 
   return (
-    <Card className="w-full h-96">
-      <CardContent className="p-0 h-full relative">
+    <Card className="w-full h-96 overflow-hidden">
+      <CardContent className="p-0 h-full relative overflow-hidden">
         {(isLoading || geocodingInProgress) && (
-          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/40 backdrop-blur-[1px]">
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/40 backdrop-blur-[1px]">
             <div className="text-center">
               <div className="w-8 h-8 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto mb-2"></div>
               <p className="text-gray-700 text-sm">
@@ -196,11 +250,128 @@ const StoresMap: React.FC<StoresMapProps> = ({ stores, isLoading = false }) => {
             </div>
           </div>
         )}
+        {!isInteractive && (
+          <button
+            type="button"
+            onClick={() => {
+              setIsInteractive(true);
+              setIsFullscreen(true);
+            }}
+            className="absolute inset-0 z-20 flex items-center justify-center bg-white/20 backdrop-blur-[1px]"
+            aria-label={t('farmer.stores.map.openFullscreen')}
+          >
+            <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-gray-700 shadow-sm">
+              {t('farmer.stores.map.openFullscreen')}
+            </span>
+          </button>
+        )}
+        {isFullscreen && (
+          <div className="fixed inset-0 z-50 bg-white">
+            <div className="absolute right-4 top-4 z-10">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFullscreen(false);
+                  setIsInteractive(false);
+                }}
+                className="rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-gray-700 shadow-md"
+                aria-label={t('farmer.stores.map.closeFullscreen')}
+              >
+                {t('farmer.stores.map.closeFullscreen')}
+              </button>
+            </div>
+            <MapContainer
+              center={mapCenter}
+              zoom={mapZoom}
+              style={{ height: '100%', width: '100%' }}
+              className="z-0"
+            >
+              <TileLayer
+                attribution='&copy; OpenStreetMap contributors, &copy; CARTO'
+                url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+              />
+              <FitBounds storeLocations={storeLocations} />
+              {storeLocations.map((location) => (
+                <Marker key={`${location.store.id}-fullscreen`} position={location.coordinates}>
+                  <Popup>
+                    <div className="p-2 min-w-[250px]">
+                      <div className="flex items-start gap-3 mb-3">
+                        <div className="text-2xl">{getTypeIcon(location.store.type)}</div>
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-gray-900 mb-1">{location.store.name}</h3>
+                          <Badge className={`text-xs ${getStatusColor(location.store.status)}`}>
+                            {getStatusText(location.store.status)}
+                          </Badge>
+                          {!location.geocoded && (
+                            <Badge variant="outline" className="text-xs ml-2 text-orange-600 border-orange-200">
+                              <Navigation className="w-3 h-3 mr-1" />
+                              {t('farmer.stores.map.defaultLocation')}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 text-sm text-gray-600">
+                        <div className="flex items-center gap-2">
+                          <MapPin className="w-4 h-4" />
+                          <span>{location.addressUsed || getPreferredDisplayAddress(location.store)}</span>
+                        </div>
+
+                        {location.store.contact?.phone && (
+                          <div className="flex items-center gap-2">
+                            <Phone className="w-4 h-4" />
+                            <span>{location.store.contact?.phone}</span>
+                          </div>
+                        )}
+
+                        {location.store.contact?.email && (
+                          <div className="flex items-center gap-2">
+                            <Mail className="w-4 h-4" />
+                            <span>{location.store.contact?.email}</span>
+                          </div>
+                        )}
+
+                        {location.store.contact?.website && (
+                          <div className="flex items-center gap-2">
+                            <Globe className="w-4 h-4" />
+                            <a
+                              href={location.store.contact?.website || '#'}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-800 underline"
+                            >
+                              {t('farmer.stores.map.website')}
+                            </a>
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2">
+                          <Users className="w-4 h-4" />
+                          <span>
+                            {t('farmer.stores.map.totalOrders')}: {location.store.metadata?.totalOrders ?? 0}
+                          </span>
+                        </div>
+                      </div>
+
+                      {location.store.metadata?.notes && location.store.metadata.notes.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                          <p className="text-xs text-gray-500">
+                            {t('farmer.stores.map.note')}: {location.store.metadata.notes[0]}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </Popup>
+                </Marker>
+              ))}
+            </MapContainer>
+          </div>
+        )}
         <MapContainer
           center={mapCenter}
           zoom={mapZoom}
           style={{ height: '100%', width: '100%' }}
-          className="rounded-lg"
+          className={`rounded-lg ${isInteractive ? 'pointer-events-auto' : 'pointer-events-none'} z-0`}
         >
           <TileLayer
             attribution='&copy; OpenStreetMap contributors, &copy; CARTO'
@@ -235,7 +406,7 @@ const StoresMap: React.FC<StoresMapProps> = ({ stores, isLoading = false }) => {
                   <div className="space-y-2 text-sm text-gray-600">
                     <div className="flex items-center gap-2">
                       <MapPin className="w-4 h-4" />
-                      <span>{location.store.location}</span>
+                      <span>{location.addressUsed || getPreferredDisplayAddress(location.store)}</span>
                     </div>
                     
                     {location.store.contact?.phone && (

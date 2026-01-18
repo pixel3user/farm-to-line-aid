@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useLayoutEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -9,7 +9,7 @@ export default function DeepLinkRouter() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const params = new URLSearchParams(location.search);
     // Support LIFF redirect style: ?liff.state=%3Ftab%3Dproducts%26role%3Dmarket%26product%3Dabc
     let tab: string | null = params.get('tab');
@@ -28,8 +28,9 @@ export default function DeepLinkRouter() {
         product = stateParams.get('product') || product;
       } catch {}
     }
+    const isEditAction = action === 'edit';
     // Allow product-only deep links to resolve to the catalog
-    if (!tab && product) {
+    if (!tab && product && !isEditAction) {
       tab = 'products';
     }
     if (!tab) return;
@@ -37,7 +38,7 @@ export default function DeepLinkRouter() {
     // If a specific product is being opened from LINE, force the market storefront
     // (we want a buyer-facing view even if role=farmer is present).
     const role = (() => {
-      if (product) return 'market';
+      if (product && !isEditAction) return 'market';
       return user?.role || roleParam || null;
     })();
 

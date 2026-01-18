@@ -8,12 +8,15 @@ export interface ConversationHistoryItem {
   timestamp?: string | number | Date | Timestamp;
 }
 
+type ConversationPlanMode = 'line' | 'voice';
+
 interface ConversationPlanInput {
   message: string;
   history?: ConversationHistoryItem[];
   user?: { displayName?: string; role?: 'farmer' | 'market'; locale?: 'zh-TW' | 'en' };
   sessionUserId?: string; // ensure per-user session separation
   context?: { pageRoute?: string; pageContext?: string };
+  mode?: ConversationPlanMode;
 }
 
 interface ConversationPlan {
@@ -42,6 +45,7 @@ const ALLOWED_FUNCTION_CALLS = new Set([
   // App feature actions
   'product_list',
   'product_create',
+  'product_update',
   'store_list',
   'store_create',
   'marketing_material_list',
@@ -104,14 +108,15 @@ Privacy and data sharing:
    - Footer (optional): one or two buttons linking to LIFF tabs when clearly relevant: products, stores, marketing, analytics
 
 Tool use:
-- functionCalls are optional. Allowed: show_product_tools, show_store_tools, show_marketing_tools, show_analytics_tools, open_dashboard, show_help_options.
+- functionCalls are optional. Allowed: show_product_tools, show_store_tools, show_marketing_tools, show_analytics_tools, open_dashboard, show_help_options, product_list, product_create, product_update, store_list, store_create, marketing_material_list, analytics_get_user_stats, user_set_role, product_browse_public, store_browse_public, marketplace_get_stats, product_search_public, store_search_public.
 - Minimize website redirections. Prefer a short back-and-forth in chat to collect missing info and confirm intent. Only suggest dashboard links when necessary for a complex workflow or when the user asks.
 - Include a function call when executing an app feature is clearly intended.
 - After setting user role, proactively propose role-specific next steps and quick replies.
 - For dataset queries, prefer calling search/browse tools (product_browse_public, product_search_public, store_browse_public, store_search_public, marketplace_get_stats) instead of answering from memory.
 - Never create placeholder/unnamed records. If required info is missing, ask the user succinct follow-up questions and wait.
 - When you call a function, include useful arguments parsed from the request:
-  * product_create: REQUIRED fields = name, price, unit, stock. Do NOT call this function until you have all four. If any are missing or ambiguous, ask 1–2 concise follow-up questions to collect them (e.g., "What price and unit?", "How many in stock?"). Price must be > 0; stock must be >= 0.
+  * product_create: REQUIRED fields = name, price, unit, stock. Do NOT call this function until you have all four. If any are missing or ambiguous, ask 1–2 concise follow-up questions to collect them (e.g., "What price and unit?", "How many in stock?"). Price must be > 0; stock must be >= 0. If the user provides optional details (description, category, image URL, pickup address/contact), include them in args.
+* product_update: Use to add or change details for an existing product (image URL, pickup address/contact, description, category, price, unit, stock). Include productId or productName when available. You can pass pickupStoreId or pickupStoreName to reuse a saved store pickup address. If the user says edit/modify without specifics, call product_update with productName/productId to show the edit card, then ask what to change. If no product is specified, update the most recent product. If required details are missing, ask one concise follow-up question.
   * store_create: REQUIRED field = name. Do NOT call without a clear non-empty name. Type/location optional; ask if the user mentions them.
   * product_list/store_list/marketing_material_list: include limit when the user specifies a number.
 
@@ -135,6 +140,26 @@ Onboarding and persona:
 Output nothing except the JSON object.
 `;
 
+const VOICE_SYSTEM_PROMPT = `
+Return ONLY strict JSON (no markdown fences) using this schema:
+{
+  "text": string | null,
+  "functionCalls": [ { "name": FunctionName, "args"?: object } ]
+}
+
+Rules:
+- Do NOT return lineMessages.
+- When a user clearly wants an app action, include the matching function call with parsed args.
+- If required details are missing, ask ONE concise question in "text" and do not call a function yet.
+- Keep "text" short (1-2 sentences). When you include any functionCalls, set "text" to a brief status message (<20 words).
+- For product_create, required fields = name, price, unit, stock. Ask for missing fields first.
+- For product_update, update the most recent product when no id/name is given. If the user says edit/modify without details, call product_update with productName/productId to show the edit card. You can set pickupStoreId/pickupStoreName to use a store pickup address.
+- Use the user's language (zh-TW or English).
+- Allowed function names: show_product_tools, show_store_tools, show_marketing_tools, show_analytics_tools, open_dashboard, show_help_options, product_list, product_create, product_update, store_list, store_create, marketing_material_list, analytics_get_user_stats, user_set_role, product_browse_public, store_browse_public, marketplace_get_stats, product_search_public, store_search_public.
+
+Output nothing except the JSON object.
+`;
+
 function getTools() {
   return [
     {
@@ -148,6 +173,7 @@ function getTools() {
         // Features
         { name: 'product_list', description: 'List the user\'s products. If a limit is mentioned, include it in args.' },
         { name: 'product_create', description: 'Create a new product. Required: name, price (>0), unit, stock (>=0). Do not call until all provided; otherwise ask for the missing fields first.' },
+        { name: 'product_update', description: 'Update an existing product. Optional args: { productId?, productName?, description?, category?, price?, unit?, stock?, imageUrl?, pickupAddress?, pickupContactName?, pickupContactTel?, pickupContactMobile?, pickupPostNumber?, pickupYamatoZipCode?, pickupStoreId?, pickupStoreName? }. Can be used with productName/productId only to open the edit card.' },
         { name: 'store_list', description: 'List the user\'s stores. If a limit is mentioned, include it in args.' },
         { name: 'store_create', description: 'Create a new store. Ask for missing: name (required). type/location optional. Include parsed args.' },
         { name: 'marketing_material_list', description: 'List recent marketing materials. If a limit is mentioned, include it in args.' },
@@ -329,9 +355,9 @@ function getUserContextPrompt(
 ): string {
   if (!user && !context) return 'Keep most interactions inside LINE chat; minimize external links.';
   const parts: string[] = ['Keep most interactions inside LINE chat; minimize external links.'];
-  if (user.displayName) parts.push(`User displayName: ${user.displayName}`);
-  if (user.role) parts.push(`User role: ${user.role === 'farmer' ? 'farmer/seller' : 'market buyer/owner'}`);
-  if (user.locale) parts.push(`User locale preference: ${user.locale}`);
+  if (user?.displayName) parts.push(`User displayName: ${user.displayName}`);
+  if (user?.role) parts.push(`User role: ${user.role === 'farmer' ? 'farmer/seller' : 'market buyer/owner'}`);
+  if (user?.locale) parts.push(`User locale preference: ${user.locale}`);
   if (context?.pageRoute) parts.push(`Current page route: ${context.pageRoute}`);
   if (context?.pageContext) {
     parts.push(`Current page context: ${context.pageContext}`);
@@ -345,7 +371,8 @@ async function requestConversationPlan(
   history?: ConversationHistoryItem[],
   user?: { displayName?: string; role?: 'farmer' | 'market'; locale?: 'zh-TW' | 'en' },
   sessionUserId?: string,
-  context?: { pageRoute?: string; pageContext?: string }
+  context?: { pageRoute?: string; pageContext?: string },
+  mode: ConversationPlanMode = 'line'
 ): Promise<ConversationPlan> {
   const client = getGeminiClient();
   const lang = detectLanguageFromMessage(message);
@@ -354,12 +381,13 @@ async function requestConversationPlan(
     : 'Respond in English.';
   const userContext = getUserContextPrompt(user, context);
   const sessionNote = sessionUserId ? `\nSession: line_user_id=${sessionUserId}` : '';
+  const systemPrompt = mode === 'voice' ? VOICE_SYSTEM_PROMPT : SYSTEM_FORMAT_PROMPT;
   const response = await client.models.generateContent({
     model: GEMINI_MODEL,
     contents: buildConversationContents(history, message),
     config: {
       tools: getTools(),
-      systemInstruction: { role: 'system', parts: [{ text: `${SYSTEM_FORMAT_PROMPT}\n\n${userContext}${sessionNote}\n\nLanguage: ${langPrompt}` }] },
+      systemInstruction: { role: 'system', parts: [{ text: `${systemPrompt}\n\n${userContext}${sessionNote}\n\nLanguage: ${langPrompt}` }] },
     },
   });
 
@@ -404,11 +432,14 @@ export async function generateConversationPlan({
   user,
   sessionUserId,
   context,
+  mode = 'line',
 }: ConversationPlanInput): Promise<ConversationPlan> {
   const trimmed = message.trim();
   if (!trimmed) {
     return {
-      text: '我可以如何協助您？您可以描述需求或直接點擊下方按鈕。',
+      text: mode === 'voice'
+        ? '我可以幫你新增產品或查詢資料，先告訴我你想做什麼。'
+        : '我可以如何協助您？您可以描述需求或直接點擊下方按鈕。',
       functionCalls: [],
     };
   }
@@ -416,13 +447,15 @@ export async function generateConversationPlan({
   if (!GEMINI_API_KEY) {
     // No API key: ask a clarifying question instead of fallback
     return {
-      text: '我想更了解您的需求：需要我幫您管理產品、拓展店家、建立行銷素材，或查看營運分析？',
+      text: mode === 'voice'
+        ? '想更精準協助你，請用一句話描述要做的事。'
+        : '我想更了解您的需求：需要我幫您管理產品、拓展店家、建立行銷素材，或查看營運分析？',
       functionCalls: [],
     };
   }
 
   try {
-    return await requestConversationPlan(trimmed, history, user, sessionUserId, context);
+    return await requestConversationPlan(trimmed, history, user, sessionUserId, context, mode);
   } catch (error) {
     console.error('[gemini-client] Gemini conversation plan failed:', error);
     // Retry with explicit instruction to ask a clarifying question
@@ -432,11 +465,14 @@ export async function generateConversationPlan({
         history,
         user,
         sessionUserId,
-        context
+        context,
+        mode
       );
     } catch {
       return {
-        text: '想更精準協助您，請用一句話說明要做的事（例如：新增雞蛋 120/斤 20 箱）。',
+        text: mode === 'voice'
+          ? '請用一句話說明要做的事（例如：新增雞蛋 120/斤 20 箱）。'
+          : '想更精準協助您，請用一句話說明要做的事（例如：新增雞蛋 120/斤 20 箱）。',
         functionCalls: [],
       };
     }

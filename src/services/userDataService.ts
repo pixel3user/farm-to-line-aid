@@ -13,7 +13,7 @@ import {
   QueryConstraint
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Product, Store, Conversation, MarketingMaterial, LineUser } from '@/lib/database';
+import { Product, Store, Conversation, MarketingMaterial, LineUser, Order } from '@/lib/database';
 
 export interface UserStats {
   totalProducts: number;
@@ -93,19 +93,32 @@ export class UserDataService {
         };
       }
 
-      const [productsSnap, storesSnap, conversationsSnap, materialsSnap] = await Promise.all([
+      const [productsSnap, storesSnap, conversationsSnap, materialsSnap, ordersSnap] = await Promise.all([
         getDocs(query(collection(db, 'products'), where('userId', '==', userId))),
         getDocs(query(collection(db, 'stores'), where('userId', '==', userId))),
         getDocs(query(collection(db, 'conversations'), where('userId', '==', userId))),
-        getDocs(query(collection(db, 'marketing_materials'), where('userId', '==', userId)))
+        getDocs(query(collection(db, 'marketing_materials'), where('userId', '==', userId))),
+        getDocs(query(collection(db, 'orders'), where('sellerIds', 'array-contains', userId)))
       ]);
 
       const products = productsSnap.docs.map(doc => doc.data() as Product);
       const activeProducts = products.filter(p => p.isActive).length;
       const lowStockProducts = products.filter(p => p.stock <= 10).length; // Assuming 10 is low stock threshold
-      
-      // Calculate total revenue (simplified)
-      const totalRevenue = products.reduce((sum, p) => sum + (p.price * p.stock), 0);
+
+      const revenueStatuses = new Set(['confirmed', 'paid']);
+      const orders = ordersSnap.docs.map(doc => doc.data() as Order);
+      const totalRevenue = orders.reduce((sum, order) => {
+        if (!revenueStatuses.has(order.status)) return sum;
+        const items = Array.isArray(order.items) ? order.items : [];
+        const sellerItems = items.filter((item) => item.ownerId === userId);
+        if (sellerItems.length > 0) {
+          return sum + sellerItems.reduce((itemSum, item) => itemSum + item.price * item.quantity, 0);
+        }
+        if (order.sellerIds?.length === 1 && order.sellerIds[0] === userId) {
+          return sum + (order.amount || 0);
+        }
+        return sum;
+      }, 0);
       
       // Get last activity
       const lastConversation = conversationsSnap.docs[0];
@@ -213,7 +226,159 @@ export class UserDataService {
         id: doc.id
       }));
     } catch (error) {
+      const firestoreError = error as FirestoreError;
+      if (firestoreError?.code === 'failed-precondition') {
+        console.warn('UserDataService: Query requires index, falling back to client-side filtering');
+        try {
+          if (!db) {
+            return [];
+          }
+          const snapshot = await getDocs(collection(db, 'stores'));
+          const filtered = snapshot.docs
+            .filter((doc) => doc.data()?.userId === userId)
+            .map((doc) => ({
+              ...(doc.data() as Store),
+              id: doc.id
+            }))
+            .sort((a, b) => {
+              const aTime = a.createdAt?.toMillis?.() || 0;
+              const bTime = b.createdAt?.toMillis?.() || 0;
+              return bTime - aTime;
+            });
+          return limitCount && Number.isFinite(limitCount) ? filtered.slice(0, limitCount) : filtered;
+        } catch (fallbackError) {
+          console.error('UserDataService: Fallback store fetch failed:', fallbackError);
+          return [];
+        }
+      }
       console.error('Error fetching user stores:', error);
+      return [];
+    }
+  }
+
+  static async getUserVerifiedStores(userId: string, limitCount?: number): Promise<Store[]> {
+    const stores = await this.getUserStores(userId, limitCount);
+    return stores.filter((store) => Boolean(store?.pickup?.yamatoZipCode && store?.pickup?.address));
+  }
+
+  static async getBuyerStores(limitCount?: number): Promise<Store[]> {
+    try {
+      if (!db) {
+        console.warn('Firestore unavailable, returning empty buyer store list');
+        return [];
+      }
+
+      const marketUsersSnap = await getDocs(
+        query(collection(db, 'line_users'), where('role', '==', 'market'))
+      );
+
+      const buyerIds = new Set<string>();
+      for (const docSnap of marketUsersSnap.docs) {
+        const data = docSnap.data() as LineUser;
+        if (data?.id) buyerIds.add(data.id);
+        if (data?.lineUserId) buyerIds.add(data.lineUserId);
+        buyerIds.add(docSnap.id);
+      }
+
+      if (buyerIds.size === 0) {
+        return [];
+      }
+
+      const ids = Array.from(buyerIds);
+      const chunkSize = 10;
+      const storesById = new Map<string, Store>();
+
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        const q = query(collection(db, 'stores'), where('userId', 'in', chunk));
+        const snapshot = await getDocs(q);
+        snapshot.docs.forEach((doc) => {
+          storesById.set(doc.id, {
+            ...(doc.data() as Store),
+            id: doc.id
+          });
+        });
+      }
+
+      let stores = Array.from(storesById.values());
+      stores.sort((a, b) => {
+        const aTime = a.createdAt?.toMillis?.() || 0;
+        const bTime = b.createdAt?.toMillis?.() || 0;
+        return bTime - aTime;
+      });
+
+      if (limitCount && Number.isFinite(limitCount)) {
+        stores = stores.slice(0, limitCount);
+      }
+
+      return stores;
+    } catch (error) {
+      console.error('Error fetching buyer stores:', error);
+      return [];
+    }
+  }
+
+  // Get all stores owned by market users (no sorting/limit filtering beyond the market-user lookup).
+  static async getMarketStores(): Promise<Store[]> {
+    try {
+      if (!db) {
+        console.warn('Firestore unavailable, returning empty market store list');
+        return [];
+      }
+
+      const marketUsersSnap = await getDocs(
+        query(collection(db, 'line_users'), where('role', '==', 'market'))
+      );
+
+      const buyerIds = new Set<string>();
+      for (const docSnap of marketUsersSnap.docs) {
+        const data = docSnap.data() as LineUser;
+        if (data?.id) buyerIds.add(data.id);
+        if (data?.lineUserId) buyerIds.add(data.lineUserId);
+        buyerIds.add(docSnap.id);
+      }
+
+      if (buyerIds.size === 0) {
+        return [];
+      }
+
+      const ids = Array.from(buyerIds);
+      const chunkSize = 10;
+      const stores: Store[] = [];
+      const seen = new Set<string>();
+
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        const q = query(collection(db, 'stores'), where('userId', 'in', chunk));
+        const snapshot = await getDocs(q);
+        snapshot.docs.forEach((doc) => {
+          if (seen.has(doc.id)) return;
+          seen.add(doc.id);
+          stores.push({
+            ...(doc.data() as Store),
+            id: doc.id
+          });
+        });
+      }
+
+      return stores;
+    } catch (error) {
+      console.error('Error fetching market store list:', error);
+      return [];
+    }
+  }
+
+  static async getStoresForFarmer(userId: string, limitCount?: number): Promise<Store[]> {
+    try {
+      let stores = await this.getBuyerStores();
+
+      if (limitCount && Number.isFinite(limitCount)) {
+        stores = stores.slice(0, limitCount);
+      }
+
+      return stores;
+    } catch (error) {
+      console.error('Error fetching farmer store list:', error);
       return [];
     }
   }

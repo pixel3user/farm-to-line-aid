@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Smartphone, Loader2 } from 'lucide-react';
 import { lineAuthService } from '@/lib/lineAuth';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface LineLoginButtonProps {
   className?: string;
@@ -21,11 +22,20 @@ const LineLoginButton: React.FC<LineLoginButtonProps> = ({
 }) => {
   const [isLoading, setIsLoading] = useState(false);
   const { t } = useLanguage();
+  const { login, isInLineApp, isLiffReady } = useAuth();
 
   const handleLineLogin = async () => {
     setIsLoading(true);
     
     try {
+      // If inside LINE app, use LIFF login instead of LINE Login
+      if (isInLineApp) {
+        console.log('Inside LINE app - using LIFF authentication');
+        await login(undefined, undefined, { force: true });
+        return;
+      }
+      
+      // Outside LINE app - use LINE Login (web)
       await lineAuthService.login();
     } catch (error) {
       console.error('LINE login error:', error);

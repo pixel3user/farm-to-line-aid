@@ -82,6 +82,18 @@ export interface Product {
   images: string[];
   tags: string[];
   isActive: boolean;
+  pickup?: {
+    address?: string;
+    yamatoZipCode?: string;
+    contactName?: string;
+    contactTel?: string;
+    contactMobile?: string;
+    postNumber?: string;
+    lat?: number;
+    lng?: number;
+    placeId?: string;
+    verifiedAt?: Timestamp | string;
+  };
   createdAt: Timestamp;
   updatedAt: Timestamp;
   geminiData?: {
@@ -117,6 +129,15 @@ export interface Store {
     phone?: string;
     email?: string;
     website?: string;
+  };
+  pickup?: {
+    address?: string;
+    yamatoZipCode?: string;
+    contactName?: string;
+    contactTel?: string;
+    contactMobile?: string;
+    postNumber?: string;
+    verifiedAt?: Timestamp | string;
   };
   status: 'potential' | 'contacted' | 'customer' | 'former_customer';
   metadata: {
@@ -177,6 +198,60 @@ export interface OrderItem {
   imageUrl?: string;
 }
 
+export interface YamatoShipment {
+  service?: string;
+  sellerId?: string;
+  fileNo?: string;
+  printDateTime?: string;
+  orders?: Array<{
+    obtNumber?: string;
+    orderId?: string;
+    deliveryId?: string;
+    fileNo?: string;
+  }>;
+  createdAt?: Timestamp;
+}
+
+export interface YamatoPickup {
+  sellerId?: string;
+  srvTranId?: string;
+  message?: string;
+  requestedAt?: Timestamp;
+}
+
+export interface YamatoTracking {
+  lastFetchedAt?: Timestamp;
+  latest?: {
+    statusId?: string;
+    statusName?: string;
+    stationName?: string;
+    createDateTime?: string;
+  };
+  history?: Array<{
+    statusId?: string;
+    statusName?: string;
+    stationName?: string;
+    createDateTime?: string;
+  }>;
+}
+
+export interface YamatoReverse {
+  lastAction?: 'add' | 'edit' | 'delete' | 'query';
+  obtNumber?: string;
+  status?: string;
+  message?: string;
+}
+
+export interface OrderLogistics {
+  provider?: 'yamato';
+  environment?: 'test' | 'prod';
+  shipments?: YamatoShipment[];
+  pickup?: YamatoPickup;
+  pickups?: YamatoPickup[];
+  tracking?: YamatoTracking;
+  reverse?: YamatoReverse;
+}
+
 export interface Order {
   id?: string;
   orderId: string;
@@ -200,6 +275,14 @@ export interface Order {
     city?: string;
     postalCode?: string;
     instructions?: string;
+    method?: 'home' | 'b2s' | 'pickup_station';
+    storeId?: string;
+    storeName?: string;
+    storeAddress?: string;
+    pickupOfficeNo?: string;
+    pickupOfficeName?: string;
+    pickupOfficeAddress?: string;
+    pickupPostcode?: string;
   };
   deliveryStatus?: 'awaiting_pickup' | 'enroute' | 'delivered' | 'cancelled';
   redirectUrls?: {
@@ -207,6 +290,7 @@ export interface Order {
     cancelUrl?: string;
   };
   metadata?: Record<string, any>;
+  logistics?: OrderLogistics;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
 }
@@ -298,6 +382,10 @@ export class DatabaseService {
       createdAt: now,
       updatedAt: now
     };
+
+    if (productData.pickup !== undefined) {
+      productDoc.pickup = productData.pickup;
+    }
 
     // Only include geminiData if it's not undefined
     if (productData.geminiData !== undefined) {
@@ -407,6 +495,10 @@ export class DatabaseService {
       storeDoc.contact = storeData.contact;
     }
 
+    if (storeData.pickup !== undefined) {
+      storeDoc.pickup = storeData.pickup;
+    }
+
     // Only include lastOrder if it's not undefined
     if (storeData.metadata?.lastOrder !== undefined) {
       storeDoc.metadata.lastOrder = storeData.metadata.lastOrder;
@@ -457,14 +549,34 @@ export class DatabaseService {
   }
 
   static async getFarmers(limitCount: number = 20): Promise<LineUser[]> {
-    const constraints: QueryConstraint[] = [orderBy('createdAt', 'desc')];
-    if (limitCount > 0) {
-      constraints.push(limit(limitCount));
-    }
+    try {
+      const constraints: QueryConstraint[] = [where('role', '==', 'farmer'), orderBy('createdAt', 'desc')];
+      if (limitCount > 0) {
+        constraints.push(limit(limitCount));
+      }
 
-    const q = query(collection(db, 'line_users'), ...constraints);
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => doc.data() as LineUser);
+      const q = query(collection(db, 'line_users'), ...constraints);
+      const snapshot = await getDocs(q);
+      return snapshot.docs.map(doc => doc.data() as LineUser);
+    } catch (error) {
+      const firestoreError = error as FirestoreError;
+      if (firestoreError?.code === 'failed-precondition') {
+        try {
+          const snapshot = await getDocs(query(collection(db, 'line_users'), where('role', '==', 'farmer')));
+          const toMillis = (value: any) =>
+            typeof value?.toMillis === 'function' ? value.toMillis() : Date.parse(value || '') || 0;
+          const farmers = snapshot.docs.map(doc => doc.data() as LineUser);
+          farmers.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
+          return limitCount > 0 ? farmers.slice(0, limitCount) : farmers;
+        } catch (fallbackError) {
+          console.error('DatabaseService: Fallback farmer fetch failed:', fallbackError);
+          return [];
+        }
+      }
+
+      console.error('DatabaseService: Error fetching farmers:', error);
+      return [];
+    }
   }
 
   static async getAllProducts(limitCount: number = 20): Promise<Product[]> {
@@ -641,6 +753,51 @@ export class DatabaseService {
     }
     
     return snapshot.docs[0].data().timestamp as Timestamp;
+  }
+
+  // Review operations
+  static async createReview(productId: string, userId: string, reviewData: {
+    rating: number;
+    comment: string;
+    reviewerName?: string;
+  }): Promise<{ id: string }> {
+    const reviewRef = doc(collection(db, 'product_reviews'));
+    const now = Timestamp.now();
+    
+    const reviewDoc = {
+      id: reviewRef.id,
+      productId,
+      userId,
+      rating: reviewData.rating,
+      comment: reviewData.comment || '',
+      reviewerName: reviewData.reviewerName || 'Anonymous',
+      createdAt: now,
+      updatedAt: now
+    };
+
+    await setDoc(reviewRef, reviewDoc);
+    return { id: reviewRef.id };
+  }
+
+  static async getReviewsByProduct(productId: string): Promise<Array<{
+    id: string;
+    productId: string;
+    userId: string;
+    rating: number;
+    comment: string;
+    reviewerName: string;
+    createdAt: Timestamp;
+  }>> {
+    const q = query(
+      collection(db, 'product_reviews'),
+      where('productId', '==', productId),
+      orderBy('createdAt', 'desc')
+    );
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    } as any));
   }
 }
 

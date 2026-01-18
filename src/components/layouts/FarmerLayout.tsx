@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -10,10 +10,7 @@ import { featureFlags } from '@/config/featureFlags';
 import LocationReminder from '@/components/LocationReminder';
 import { Toaster } from '@/components/ui/toaster';
 import { Toaster as Sonner } from '@/components/ui/sonner';
-import FarmerOnboarding from '@/components/FarmerOnboarding';
-import FarmerTutorial from '@/components/FarmerTutorial';
 import { useAuth } from '@/contexts/AuthContext';
-import VoiceAssistantPopup from '@/components/VoiceAssistantPopup';
 import { 
   LayoutDashboard, 
   Package, 
@@ -30,6 +27,10 @@ import {
   Smartphone,
   Bot
 } from 'lucide-react';
+
+const FarmerOnboarding = React.lazy(() => import('@/components/FarmerOnboarding'));
+const FarmerTutorial = React.lazy(() => import('@/components/FarmerTutorial'));
+const VoiceAssistantPopup = React.lazy(() => import('@/components/VoiceAssistantPopup'));
 
 const FarmerLayout: React.FC = () => {
   const { t } = useLanguage();
@@ -231,19 +232,25 @@ const FarmerLayout: React.FC = () => {
         {/* Page content */}
         <div className="p-3 sm:p-4 md:p-6 lg:p-8">
           <LocationReminder />
-          <FarmerOnboarding>
-            <>
-              <FarmerTutorial />
-              <Outlet />
-            </>
-          </FarmerOnboarding>
+          <Suspense fallback={null}>
+            <FarmerOnboarding>
+              <>
+                <FarmerTutorial />
+                <Outlet />
+              </>
+            </FarmerOnboarding>
+          </Suspense>
         </div>
       </div>
 
       {/* Toast containers for protected routes */}
       <Toaster />
       <Sonner />
-      {showVoiceAssistant && <VoiceAssistantPopup />}
+      {showVoiceAssistant && (
+        <Suspense fallback={null}>
+          <VoiceAssistantPopup />
+        </Suspense>
+      )}
 
       {/* Mobile Bottom Navigation for LIFF */}
       {isLiffApp && (

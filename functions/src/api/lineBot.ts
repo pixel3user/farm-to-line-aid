@@ -453,7 +453,7 @@ export class MessageTemplates {
           contents: role === 'farmer'
             ? [
                 { type: 'button', style: 'primary', height: 'sm', action: { type: 'message', label: '➕ 新增產品', text: '我要新增產品' } },
-                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'uri', label: '🔍 尋找附近店家', uri: `${LINE_CONFIG.LIFF_URL}?tab=stores&role=farmer` } },
+                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '🏪 拓展店家', text: '協助拓展店家' } },
                 { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '📱 行銷素材', text: '我要行銷建議' } },
               ]
             : [
@@ -917,9 +917,8 @@ export const RICH_MENU_CONFIG = {
       },
       action: {
         type: 'postback',
-        data: 'source=richmenu&action=help',
-        label: 'Help',
-        displayText: '🆘 Help'
+        data: 'action=help',
+        label: 'Help'
       }
     }
   ]

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { DatabaseService, Store } from '@/lib/database';
 import { CheckCircle, MessageCircle, Star, XCircle } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 interface StoreFeedback {
   id: string;
@@ -17,23 +18,19 @@ interface StoreFeedback {
 
 const MarketRatings: React.FC = () => {
   const { t } = useLanguage();
-  const [stores, setStores] = useState<Store[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const storeItems = await DatabaseService.getAllStores(50);
-        setStores(storeItems);
-      } catch (error) {
-        console.error('Failed to load store feedback data:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    load();
-  }, []);
+  const queryClient = useQueryClient();
+  const { data: stores = [], isFetching } = useQuery<Store[]>({
+    queryKey: ['market-stores-all'],
+    queryFn: () => DatabaseService.getAllStores(50),
+    staleTime: Infinity,
+    cacheTime: 30 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    keepPreviousData: true,
+    initialData: () => queryClient.getQueryData(['market-stores-all']) as Store[] | undefined,
+  });
+  const hasStores = stores.length > 0;
+  const isLoading = !hasStores && isFetching;
 
   const entries = useMemo<StoreFeedback[]>(() => {
     return stores.map((store) => ({

@@ -35,6 +35,15 @@ export interface ProductRecord {
   images?: string[];
   tags?: string[];
   isActive?: boolean;
+  pickup?: {
+    address?: string;
+    yamatoZipCode?: string;
+    contactName?: string;
+    contactTel?: string;
+    contactMobile?: string;
+    postNumber?: string;
+    verifiedAt?: Timestamp | FirebaseFirestore.FieldValue;
+  };
   createdAt?: Timestamp | FirebaseFirestore.FieldValue;
   updatedAt?: Timestamp | FirebaseFirestore.FieldValue;
   geminiData?: Record<string, unknown>;
@@ -47,6 +56,15 @@ export interface StoreRecord {
   type?: string;
   location?: string;
   contact?: Record<string, unknown>;
+  pickup?: {
+    address?: string;
+    yamatoZipCode?: string;
+    contactName?: string;
+    contactTel?: string;
+    contactMobile?: string;
+    postNumber?: string;
+    verifiedAt?: Timestamp | FirebaseFirestore.FieldValue;
+  };
   status?: string;
   metadata?: Record<string, unknown>;
   geminiData?: Record<string, unknown>;
@@ -78,6 +96,60 @@ export interface OrderItemRecord {
   imageUrl?: string;
 }
 
+export interface YamatoShipmentRecord {
+  service?: string;
+  sellerId?: string;
+  fileNo?: string;
+  printDateTime?: string;
+  orders?: Array<{
+    obtNumber?: string;
+    orderId?: string;
+    deliveryId?: string;
+    fileNo?: string;
+  }>;
+  createdAt?: Timestamp | FirebaseFirestore.FieldValue;
+}
+
+export interface YamatoPickupRecord {
+  sellerId?: string;
+  srvTranId?: string;
+  message?: string;
+  requestedAt?: Timestamp | FirebaseFirestore.FieldValue;
+}
+
+export interface YamatoTrackingRecord {
+  lastFetchedAt?: Timestamp | FirebaseFirestore.FieldValue;
+  latest?: {
+    statusId?: string;
+    statusName?: string;
+    stationName?: string;
+    createDateTime?: string;
+  };
+  history?: Array<{
+    statusId?: string;
+    statusName?: string;
+    stationName?: string;
+    createDateTime?: string;
+  }>;
+}
+
+export interface YamatoReverseRecord {
+  lastAction?: 'add' | 'edit' | 'delete' | 'query';
+  obtNumber?: string;
+  status?: string;
+  message?: string;
+}
+
+export interface OrderLogisticsRecord {
+  provider?: 'yamato';
+  environment?: 'test' | 'prod';
+  shipments?: YamatoShipmentRecord[];
+  pickup?: YamatoPickupRecord;
+  pickups?: YamatoPickupRecord[];
+  tracking?: YamatoTrackingRecord;
+  reverse?: YamatoReverseRecord;
+}
+
 export interface OrderRecord {
   orderId: string;
   status: 'pending' | 'reserved' | 'authorized' | 'confirmed' | 'paid' | 'cancelled' | 'failed';
@@ -100,6 +172,14 @@ export interface OrderRecord {
     city?: string;
     postalCode?: string;
     instructions?: string;
+    method?: 'home' | 'b2s' | 'pickup_station';
+    storeId?: string;
+    storeName?: string;
+    storeAddress?: string;
+    pickupOfficeNo?: string;
+    pickupOfficeName?: string;
+    pickupOfficeAddress?: string;
+    pickupPostcode?: string;
   };
   redirectUrls?: {
     successUrl?: string;
@@ -107,6 +187,7 @@ export interface OrderRecord {
   };
   metadata?: Record<string, unknown>;
   deliveryStatus?: 'awaiting_pickup' | 'enroute' | 'delivered' | 'cancelled';
+  logistics?: OrderLogisticsRecord;
   linePay?: {
     transactionId?: string;
     paymentUrl?: {
@@ -157,7 +238,7 @@ export class DatabaseService {
     );
   }
 
-  static async getAllProducts(limit: number = 10): Promise<Array<Pick<ProductRecord, 'id' | 'name' | 'price' | 'unit' | 'stock' | 'images'>>> {
+  static async getAllProducts(limit: number = 10): Promise<Array<Pick<ProductRecord, 'id' | 'name' | 'price' | 'unit' | 'stock' | 'images' | 'category'>>> {
     const snapshot = await firestore
       .collection('products')
       .orderBy('createdAt', 'desc')
@@ -171,6 +252,7 @@ export class DatabaseService {
         price: data.price,
         unit: data.unit,
         stock: data.stock,
+        category: data.category,
         images: data.images ?? [],
       };
     });
@@ -210,7 +292,7 @@ export class DatabaseService {
     };
   }
 
-  static async searchProductsPublic(filters: { nameContains?: string; categoryEquals?: string; tagsAny?: string[]; minPrice?: number; maxPrice?: number; limit?: number } = {}): Promise<Array<Pick<ProductRecord, 'id' | 'name' | 'price' | 'unit' | 'stock' | 'images'>>> {
+  static async searchProductsPublic(filters: { nameContains?: string; categoryEquals?: string; tagsAny?: string[]; minPrice?: number; maxPrice?: number; limit?: number } = {}): Promise<Array<Pick<ProductRecord, 'id' | 'name' | 'price' | 'unit' | 'stock' | 'images' | 'category'>>> {
     let baseQuery: FirebaseFirestore.Query = firestore.collection('products');
     if (filters.categoryEquals) baseQuery = baseQuery.where('category', '==', filters.categoryEquals);
     if (Array.isArray(filters.tagsAny) && filters.tagsAny.length) baseQuery = baseQuery.where('tags', 'array-contains-any', filters.tagsAny.slice(0, 10));
@@ -227,14 +309,22 @@ export class DatabaseService {
     if (!hasName) {
       const snapshot = await baseQuery.limit(requestedLimit).get();
       const rows = snapshot.docs.map((doc: QueryDocumentSnapshot) => ({ id: doc.id, ...(doc.data() as ProductRecord) }));
-      return rows.map(r => ({ id: r.id, name: r.name, price: r.price, unit: r.unit, stock: r.stock, images: r.images ?? [] }));
+      return rows.map(r => ({
+        id: r.id,
+        name: r.name,
+        price: r.price,
+        unit: r.unit,
+        stock: r.stock,
+        category: r.category,
+        images: r.images ?? [],
+      }));
     }
 
     // With a name filter, paginate through the entire queryable dataset, filter client-side by name, then return up to requestedLimit
     const nameKw = filters.nameContains!.trim().toLowerCase();
     const pageSize = 200; // per-page fetch size for efficiency
     let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | undefined;
-    const matched: Array<Pick<ProductRecord, 'id' | 'name' | 'price' | 'unit' | 'stock' | 'images'>> = [];
+    const matched: Array<Pick<ProductRecord, 'id' | 'name' | 'price' | 'unit' | 'stock' | 'images' | 'category'>> = [];
 
     // Safety cap to prevent runaway scans in extremely large datasets
     const SCAN_CAP = 50000; // total docs to scan at most in one request
@@ -250,7 +340,15 @@ export class DatabaseService {
         scanned++;
         const data = doc.data() as ProductRecord;
         if ((data.name || '').toLowerCase().includes(nameKw)) {
-          matched.push({ id: doc.id, name: data.name, price: data.price, unit: data.unit, stock: data.stock, images: data.images ?? [] });
+          matched.push({
+            id: doc.id,
+            name: data.name,
+            price: data.price,
+            unit: data.unit,
+            stock: data.stock,
+            category: data.category,
+            images: data.images ?? [],
+          });
         }
       }
 
@@ -382,7 +480,7 @@ export class DatabaseService {
     }
 
     const docRef = firestore.collection('products').doc();
-    await docRef.set({
+    const payload: ProductRecord = {
       userId,
       name,
       description: productData.description ?? '',
@@ -396,7 +494,12 @@ export class DatabaseService {
       geminiData: productData.geminiData ?? {},
       createdAt: nowTimestamp(),
       updatedAt: nowTimestamp(),
-    });
+    };
+    if (productData.pickup && Object.keys(productData.pickup).length) {
+      payload.pickup = productData.pickup;
+    }
+
+    await docRef.set(payload);
 
     return { id: docRef.id };
   }
@@ -465,6 +568,9 @@ export class DatabaseService {
     if (updates.geminiData !== undefined) {
       payload.geminiData = updates.geminiData;
     }
+    if (updates.pickup !== undefined) {
+      payload.pickup = updates.pickup;
+    }
 
     if (!Object.keys(payload).length) {
       return;
@@ -523,6 +629,7 @@ export class DatabaseService {
       type: storeData.type ?? 'other',
       location: storeData.location ?? '',
       contact: storeData.contact ?? {},
+      pickup: storeData.pickup ?? undefined,
       status: storeData.status ?? 'potential',
       metadata: storeData.metadata ?? {
         firstContact: nowTimestamp(),

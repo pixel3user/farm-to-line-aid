@@ -1,9 +1,9 @@
 // Firebase Configuration and Services
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, User } from 'firebase/auth';
-import { getFirestore, Timestamp, FieldValue } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider, User, connectAuthEmulator } from 'firebase/auth';
+import { getFirestore, Timestamp, FieldValue, connectFirestoreEmulator } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
-import { getFunctions } from 'firebase/functions';
+import { getFunctions, connectFunctionsEmulator } from 'firebase/functions';
 
 // Firebase configuration
 const firebaseConfig = {
@@ -39,6 +39,26 @@ try {
   functions = getFunctions(app);
   googleProvider = new GoogleAuthProvider();
   console.log('Firebase services initialized successfully');
+
+  const useEmulators = import.meta.env.VITE_USE_FIREBASE_EMULATORS === 'true';
+  if (useEmulators) {
+    const emulatorHost = (import.meta.env.VITE_FIREBASE_EMULATOR_HOST as string | undefined) || '127.0.0.1';
+    const firestorePort = Number(import.meta.env.VITE_FIRESTORE_EMULATOR_PORT || 8081);
+    const functionsPort = Number(import.meta.env.VITE_FUNCTIONS_EMULATOR_PORT || 5001);
+    const authPort = Number(import.meta.env.VITE_AUTH_EMULATOR_PORT || 9099);
+    const useAuthEmulator = import.meta.env.VITE_USE_AUTH_EMULATOR === 'true';
+
+    if (db) {
+      connectFirestoreEmulator(db, emulatorHost, firestorePort);
+    }
+    if (functions) {
+      connectFunctionsEmulator(functions, emulatorHost, functionsPort);
+    }
+    if (useAuthEmulator && auth) {
+      connectAuthEmulator(auth, `http://${emulatorHost}:${authPort}`, { disableWarnings: true });
+    }
+    console.log('Firebase emulator connections enabled.');
+  }
 } catch (error) {
   console.error('Firebase services initialization failed:', error);
   // Create mock services for development

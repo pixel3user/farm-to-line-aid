@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import MarkdownRenderer from '@/components/MarkdownRenderer';
 import {
   MapPin,
   Users,
@@ -31,16 +32,45 @@ import {
 import { DatabaseService, LineUser, Product, Store } from '@/lib/database';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { FarmerMapPreview, FarmerRelatedSection } from '@/components/FarmerDetailSections';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 const FAVORITE_FARMERS_KEY = 'market_favorite_farmers';
 
 const MarketDashboard: React.FC = () => {
   const { t } = useLanguage();
   const navigate = useNavigate();
-  const [farmers, setFarmers] = useState<LineUser[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [stores, setStores] = useState<Store[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const { data: farmers = [], isFetching: farmersFetching } = useQuery<LineUser[]>({
+    queryKey: ['market-farmers'],
+    queryFn: () => DatabaseService.getFarmers(12),
+    staleTime: Infinity,
+    cacheTime: 30 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    initialData: () => queryClient.getQueryData(['market-farmers']) as LineUser[] | undefined,
+  });
+  const { data: products = [], isFetching: productsFetching } = useQuery<Product[]>({
+    queryKey: ['market-products'],
+    queryFn: () => DatabaseService.getAllProducts(12),
+    staleTime: Infinity,
+    cacheTime: 30 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    keepPreviousData: true,
+    initialData: () => queryClient.getQueryData(['market-products']) as Product[] | undefined,
+  });
+  const { data: stores = [], isFetching: storesFetching } = useQuery<Store[]>({
+    queryKey: ['market-stores'],
+    queryFn: () => DatabaseService.getAllStores(12),
+    staleTime: Infinity,
+    cacheTime: 30 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    keepPreviousData: true,
+    initialData: () => queryClient.getQueryData(['market-stores']) as Store[] | undefined,
+  });
+  const hasCachedData = farmers.length > 0 || products.length > 0 || stores.length > 0;
+  const isLoading = !hasCachedData && (farmersFetching || productsFetching || storesFetching);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [sortBy, setSortBy] = useState('recent');
@@ -66,27 +96,6 @@ const MarketDashboard: React.FC = () => {
   const [productFarmerStores, setProductFarmerStores] = useState<Store[]>([]);
   const [productRelatedProducts, setProductRelatedProducts] = useState<Product[]>([]);
   const [isProductDataLoading, setIsProductDataLoading] = useState(false);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [farmerItems, productItems, storeItems] = await Promise.all([
-          DatabaseService.getFarmers(12),
-          DatabaseService.getAllProducts(12),
-          DatabaseService.getAllStores(12)
-        ]);
-        setFarmers(farmerItems);
-        setProducts(productItems);
-        setStores(storeItems);
-      } catch (error) {
-        console.error('Failed to load marketplace data:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    load();
-  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -678,9 +687,11 @@ const MarketDashboard: React.FC = () => {
                     </Badge>
                   </div>
                   
-                  <p className="text-sm text-gray-600 mb-3 line-clamp-2" title={product.description || ''}>
-                    {product.description || '無商品描述'}
-                  </p>
+                  <MarkdownRenderer
+                    content={product.description || '無商品描述'}
+                    compact
+                    className="mb-3 line-clamp-2 text-sm text-gray-600 prose-p:my-0"
+                  />
                   
                   <div className="flex items-center justify-between mb-3">
                     <div className="text-lg font-bold text-green-600">NT$ {product.price || 0}</div>
@@ -1059,9 +1070,10 @@ const MarketDashboard: React.FC = () => {
                 <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">
                   {t('market.productModal.descriptionLabel')}
                 </p>
-                <p className="text-sm text-gray-700">
-                  {selectedProduct.description || t('market.detail.notProvided')}
-                </p>
+                <MarkdownRenderer
+                  content={selectedProduct.description || t('market.detail.notProvided')}
+                  className="prose-sm text-gray-700"
+                />
               </div>
 
               {productFarmer?.location &&

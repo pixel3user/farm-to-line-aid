@@ -2,9 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/contexts/AuthContext';
-import { DatabaseService, Order } from '@/lib/database';
-import { Loader2, MapPin, PackageCheck, Truck, Clock3, ChevronDown, ChevronUp, Check } from 'lucide-react';
+import { DatabaseService, Order, YamatoShipment } from '@/lib/database';
+import { Loader2, MapPin, PackageCheck, Truck, Clock3, Check, Download } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import resolveApiBaseUrl from '@/lib/api';
@@ -18,38 +21,280 @@ type DeliveryView = {
   destination?: string;
   items: string[];
   createdAt?: number;
+  order: Order;
+};
+
+type PickupForm = {
+  customerName: string;
+  contactName: string;
+  contactTel: string;
+  contactMobile: string;
+  normalQuantity: string;
+  coldQuantity: string;
+  freezeQuantity: string;
+};
+
+type LabelInfo = {
+  fileNo: string;
+  obtNumbers: string[];
+  printDateTime?: string;
+};
+
+const normalizeTaiwanPhoneDigits = (value: string) => {
+  const digits = value.replace(/[^0-9]/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('886')) {
+    return `0${digits.slice(3)}`;
+  }
+  if (digits.startsWith('9') && digits.length === 9) {
+    return `0${digits}`;
+  }
+  return digits;
+};
+
+const normalizeTaiwanTelInput = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  let normalized = trimmed.replace(/[\s()]/g, '');
+  if (normalized.startsWith('+886')) {
+    normalized = `0${normalized.slice(4)}`;
+  } else if (normalized.startsWith('886')) {
+    normalized = `0${normalized.slice(3)}`;
+  }
+  normalized = normalized.replace(/[^0-9-]/g, '');
+  if (!normalized.includes('-')) return normalized;
+  const [area, ...rest] = normalized.split('-');
+  return `${area}-${rest.join('')}`;
+};
+
+const formatTaiwanMobileInput = (value: string) => {
+  const normalized = normalizeTaiwanPhoneDigits(value);
+  if (!normalized) return '';
+  if (!normalized.startsWith('09')) return normalized;
+  const digits = normalized.slice(0, 10);
+  if (digits.length <= 4) return digits;
+  if (digits.length <= 7) return `${digits.slice(0, 4)}-${digits.slice(4)}`;
+  return `${digits.slice(0, 4)}-${digits.slice(4, 7)}-${digits.slice(7)}`;
+};
+
+const parseHolidayList = (value: string | undefined) => {
+  if (!value) return new Set<string>();
+  const normalized = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const digits = entry.replace(/[^0-9]/g, '');
+      if (digits.length === 8) {
+        return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+      }
+      return entry;
+    })
+    .filter((entry) => /^\d{4}-\d{2}-\d{2}$/.test(entry));
+  return new Set(normalized);
+};
+
+const YAMATO_HOLIDAYS = parseHolidayList(import.meta.env.VITE_YAMATO_HOLIDAYS as string | undefined);
+
+const formatDateInput = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const parseDateInput = (value: string) => {
+  if (!value) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  if (!year || !month || !day) return null;
+  const parsed = new Date(year, month - 1, day);
+  if (parsed.getFullYear() !== year || parsed.getMonth() !== month - 1 || parsed.getDate() !== day) {
+    return null;
+  }
+  return parsed;
+};
+
+const startOfDay = (date: Date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate());
+
+const isYamatoBlackoutDate = (date: Date) =>
+  date.getDay() === 0 || YAMATO_HOLIDAYS.has(formatDateInput(date));
+
+const findNextValidDate = (start: Date, maxLookahead = 14) => {
+  let candidate = startOfDay(start);
+  for (let i = 0; i <= maxLookahead; i += 1) {
+    if (!isYamatoBlackoutDate(candidate)) return candidate;
+    candidate = addDays(candidate, 1);
+  }
+  return startOfDay(start);
+};
+
+const findNextValidDeliveryDate = (pickup: Date) => {
+  let candidate = addDays(startOfDay(pickup), 1);
+  for (let i = 0; i < 7; i += 1) {
+    if (!isYamatoBlackoutDate(candidate)) return candidate;
+    candidate = addDays(candidate, 1);
+  }
+  return addDays(startOfDay(pickup), 1);
+};
+
+const addDays = (date: Date, days: number) => {
+  const next = new Date(date.getTime());
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const toYamatoDate = (value: string) => value.replace(/-/g, '');
+
+const decodeJwtPayload = (token: string) => {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+    const json = atob(padded);
+    return JSON.parse(json) as { exp?: number };
+  } catch {
+    return null;
+  }
+};
+
+const isJwtExpired = (token: string, leewayMs = 30_000) => {
+  const payload = decodeJwtPayload(token);
+  if (!payload || typeof payload.exp !== 'number') return false;
+  return payload.exp * 1000 <= Date.now() + leewayMs;
 };
 
 const FarmerDeliverySchedule: React.FC = () => {
-  const { user } = useAuth();
+  const { user, firebaseUser, liffUser, lineIdToken, isInLineApp, isLiffReady, setLineIdToken } = useAuth();
   const { t } = useLanguage();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
   const deepLinkActionRef = useRef<string | null>(null);
+  const labelDownloadRef = useRef<string | null>(null);
+  const labelDialogRef = useRef<string | null>(null);
+  const stepsPanelRef = useRef<HTMLDivElement | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [declining, setDeclining] = useState<string | null>(null);
+  const [logisticsActions, setLogisticsActions] = useState<Record<string, { printing?: boolean; pickup?: boolean; status?: boolean; downloading?: boolean }>>({});
+  const [pickupForms, setPickupForms] = useState<Record<string, PickupForm>>({});
+  const [labelDialogOpen, setLabelDialogOpen] = useState(false);
+  const [labelDialogOrder, setLabelDialogOrder] = useState<Order | null>(null);
+  const [labelPickupDate, setLabelPickupDate] = useState('');
+  const [labelDeliveryDate, setLabelDeliveryDate] = useState('');
+  const [labelDialogError, setLabelDialogError] = useState('');
+  const [labelDialogStep, setLabelDialogStep] = useState<1 | 2>(1);
+  const [labelDialogFileNo, setLabelDialogFileNo] = useState('');
+  const [labelDialogObtNumbers, setLabelDialogObtNumbers] = useState<string[]>([]);
+  const [labelDialogPrintedAt, setLabelDialogPrintedAt] = useState('');
+  const [labelDialogExisting, setLabelDialogExisting] = useState(false);
+  const { toast } = useToast();
 
   const sellerId = (user as any)?.lineUserId || user?.id;
+  const sellerName = user?.displayName || 'Seller';
+
+  const getSellerShipments = (order: Order) => {
+    const shipments = order.logistics?.shipments || [];
+    return shipments.filter((shipment) => !shipment.sellerId || shipment.sellerId === sellerId);
+  };
+
+  const getLatestSellerShipment = (order: Order) => {
+    const shipments = getSellerShipments(order);
+    return shipments.length ? shipments[shipments.length - 1] : null;
+  };
+
+  const buildLabelInfoFromShipment = (shipment?: YamatoShipment | null): LabelInfo | null => {
+    if (!shipment) return null;
+    const fileNo = shipment.fileNo || '';
+    const obtNumbers = (shipment.orders || [])
+      .map((entry) => entry?.obtNumber)
+      .filter(Boolean) as string[];
+    const printDateTime = shipment.printDateTime || '';
+    if (!fileNo && obtNumbers.length === 0) return null;
+    return { fileNo, obtNumbers, printDateTime };
+  };
+
+  const buildLabelInfoFromPrintData = (data: any): LabelInfo | null => {
+    if (!data || typeof data !== 'object') return null;
+    const fileNo = typeof data.FileNo === 'string' ? data.FileNo : '';
+    const orders = Array.isArray(data.Orders) ? data.Orders : [];
+    const obtNumbers = orders.map((entry) => entry?.OBTNumber).filter(Boolean) as string[];
+    const printDateTime = typeof data.PrintDateTime === 'string' ? data.PrintDateTime : '';
+    if (!fileNo && obtNumbers.length === 0) return null;
+    return { fileNo, obtNumbers, printDateTime };
+  };
+
+  const getLabelInfoFromPrintResponse = (payload: any): LabelInfo | null => {
+    if (!payload || typeof payload !== 'object') return null;
+    const splitResults = Array.isArray(payload.results) ? payload.results : [];
+    if (payload.split && splitResults.length) {
+      const match =
+        splitResults.find((result: any) => result?.sellerId === sellerId) || splitResults[0];
+      return buildLabelInfoFromPrintData(match?.response?.Data);
+    }
+    return buildLabelInfoFromPrintData(payload?.Data);
+  };
+
+  const applyLabelDialogInfo = (info: LabelInfo | null) => {
+    setLabelDialogFileNo(info?.fileNo || '');
+    setLabelDialogObtNumbers(info?.obtNumbers || []);
+    setLabelDialogPrintedAt(info?.printDateTime || '');
+  };
+
+  const resolveLineAuthHeaders = async () => {
+    if (firebaseUser) {
+      try {
+        const firebaseToken = await firebaseUser.getIdToken(true);
+        if (firebaseToken) {
+          return { Authorization: `Bearer ${firebaseToken}` };
+        }
+      } catch {}
+    }
+
+    let accessToken = '';
+    let idToken = '';
+    if (isInLineApp && isLiffReady) {
+      try {
+        const liff = (await import('@line/liff')).default;
+        accessToken = typeof liff.getAccessToken === 'function' ? liff.getAccessToken() || '' : '';
+        const candidateIdToken = typeof liff.getIDToken === 'function' ? liff.getIDToken() || '' : '';
+        if (candidateIdToken && !isJwtExpired(candidateIdToken)) {
+          idToken = candidateIdToken;
+          setLineIdToken(candidateIdToken);
+        }
+      } catch {}
+    }
+
+    if (!idToken && lineIdToken && !isJwtExpired(lineIdToken)) {
+      idToken = lineIdToken;
+    }
+
+    const headers: Record<string, string> = {};
+    if (idToken) headers['X-Line-Id-Token'] = idToken;
+    if (accessToken) headers['X-Line-Access-Token'] = accessToken;
+    return headers;
+  };
+
+  const loadOrders = useCallback(async () => {
+    if (!sellerId) return;
+    try {
+      setIsLoading(true);
+      const data = await DatabaseService.getOrdersForSeller(sellerId, 100);
+      setOrders(data);
+    } catch (error) {
+      console.error('Failed to load delivery schedule', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sellerId]);
 
   useEffect(() => {
-    const load = async () => {
-      if (!sellerId) return;
-      try {
-        setIsLoading(true);
-        const data = await DatabaseService.getOrdersForSeller(sellerId, 100);
-        setOrders(data);
-      } catch (error) {
-        console.error('Failed to load delivery schedule', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    load();
-  }, [sellerId]);
+    loadOrders();
+  }, [loadOrders]);
 
   const deliveries = useMemo<DeliveryView[]>(() => {
     return orders.map((order) => {
@@ -68,6 +313,7 @@ const FarmerDeliverySchedule: React.FC = () => {
         destination: [order.shipping?.city, order.shipping?.addressLine1].filter(Boolean).join(' '),
         items: summaryItems,
         createdAt: order.createdAt?.toMillis?.(),
+        order,
       };
     });
   }, [orders, sellerId]);
@@ -86,6 +332,405 @@ const FarmerDeliverySchedule: React.FC = () => {
     const ready = deliveries.filter((d) => ['confirmed', 'paid', 'delivered'].includes(d.status)).length;
     return { total, awaiting: awaitingCount, enroute, ready };
   }, [deliveries]);
+
+  const updateActionState = (orderId: string, updates: { printing?: boolean; pickup?: boolean; status?: boolean; downloading?: boolean }) => {
+    setLogisticsActions((prev) => ({
+      ...prev,
+      [orderId]: { ...prev[orderId], ...updates },
+    }));
+  };
+
+  const ensurePickupForm = useCallback((orderId: string) => {
+    setPickupForms((prev) => {
+      if (prev[orderId]) return prev;
+      return {
+        ...prev,
+        [orderId]: {
+          customerName: sellerName,
+          contactName: sellerName,
+          contactTel: '',
+          contactMobile: '',
+          normalQuantity: '',
+          coldQuantity: '',
+          freezeQuantity: '',
+        },
+      };
+    });
+  }, [sellerName]);
+
+  const selectOrderId = useCallback(
+    (orderId: string | null) => {
+      if (!orderId) {
+        setExpandedId(null);
+        return;
+      }
+      ensurePickupForm(orderId);
+      setExpandedId(orderId);
+    },
+    [ensurePickupForm]
+  );
+
+  const openLabelDialog = (order: Order) => {
+    const today = new Date();
+    const pickupDate = findNextValidDate(today);
+    const deliveryDate = findNextValidDeliveryDate(pickupDate);
+    setLabelDialogOrder(order);
+    setLabelPickupDate(formatDateInput(pickupDate));
+    setLabelDeliveryDate(formatDateInput(deliveryDate));
+    setLabelDialogError('');
+    const latestShipment = getLatestSellerShipment(order);
+    const existingLabel = buildLabelInfoFromShipment(latestShipment);
+    if (existingLabel) {
+      applyLabelDialogInfo(existingLabel);
+      setLabelDialogStep(2);
+      setLabelDialogExisting(true);
+    } else {
+      applyLabelDialogInfo(null);
+      setLabelDialogStep(1);
+      setLabelDialogExisting(false);
+    }
+    setLabelDialogOpen(true);
+  };
+
+  const handleLabelDialogOpen = (open: boolean) => {
+    setLabelDialogOpen(open);
+    if (!open) {
+      setLabelDialogOrder(null);
+      setLabelDialogError('');
+      setLabelDialogStep(1);
+      setLabelDialogExisting(false);
+      applyLabelDialogInfo(null);
+    }
+  };
+
+  const getLabelDateError = (pickupValue: string, deliveryValue: string) => {
+    if (!pickupValue || !deliveryValue) {
+      return t('schedule.logistics.labelDateRequired');
+    }
+    const pickupDate = parseDateInput(pickupValue);
+    const deliveryDate = parseDateInput(deliveryValue);
+    if (!pickupDate || !deliveryDate) {
+      return t('schedule.logistics.labelDateRequired');
+    }
+    const today = startOfDay(new Date());
+    const pickupDay = startOfDay(pickupDate);
+    const deliveryDay = startOfDay(deliveryDate);
+    if (pickupDay < today) {
+      return t('schedule.logistics.labelPickupPast');
+    }
+    if (isYamatoBlackoutDate(pickupDay)) {
+      return t('schedule.logistics.labelPickupHoliday');
+    }
+    if (deliveryDay < today) {
+      return t('schedule.logistics.labelDeliveryPast');
+    }
+    if (isYamatoBlackoutDate(deliveryDay)) {
+      return t('schedule.logistics.labelDeliveryHoliday');
+    }
+    const diffDays = Math.round((deliveryDay.getTime() - pickupDay.getTime()) / 86400000);
+    if (diffDays < 1) {
+      return t('schedule.logistics.labelDateOrderError');
+    }
+    if (diffDays > 7) {
+      return t('schedule.logistics.labelDeliveryRange');
+    }
+    return '';
+  };
+
+  const submitLabelDialog = async () => {
+    if (!labelDialogOrder) return;
+    if (labelDialogStep === 2) return;
+    const dateError = getLabelDateError(labelPickupDate, labelDeliveryDate);
+    if (dateError) {
+      setLabelDialogError(dateError);
+      return;
+    }
+    setLabelDialogError('');
+    const shipmentDate = toYamatoDate(labelPickupDate);
+    const deliveryDate = toYamatoDate(labelDeliveryDate);
+    const labelInfo = await handlePrintLabel(labelDialogOrder, { shipmentDate, deliveryDate });
+    if (labelInfo) {
+      applyLabelDialogInfo(labelInfo);
+      setLabelDialogStep(2);
+      setLabelDialogExisting(false);
+    }
+  };
+
+  const parseTelephoneParts = (value: string) => {
+    const raw = value.trim();
+    if (!raw) return { area: '', number: '', ext: '' };
+    if (raw.includes('-')) {
+      const [area, rest] = raw.split('-', 2);
+      return { area: area || '', number: (rest || '').replace(/[^0-9]/g, ''), ext: '' };
+    }
+    const digits = raw.replace(/[^0-9]/g, '');
+    if (digits.length >= 9) {
+      return { area: digits.slice(0, 2), number: digits.slice(2), ext: '' };
+    }
+    return { area: '', number: digits, ext: '' };
+  };
+
+  const formatTimestamp = (value?: any) => {
+    if (!value) return '';
+    if (typeof value === 'string') return value;
+    const date = value?.toDate?.() || value;
+    if (!date) return '';
+    return new Date(date).toLocaleString();
+  };
+
+  const handlePrintLabel = async (
+    order: Order,
+    dates?: { shipmentDate?: string; deliveryDate?: string }
+  ): Promise<LabelInfo | null> => {
+    if (!sellerId) return null;
+    const orderId = order.orderId;
+    updateActionState(orderId, { printing: true });
+    try {
+      const existingLabel = buildLabelInfoFromShipment(getLatestSellerShipment(order));
+      if (existingLabel) {
+        return existingLabel;
+      }
+      const apiBaseUrl = resolveApiBaseUrl();
+      const isB2s = order.shipping?.method === 'b2s';
+      if (isB2s && !order.shipping?.storeId) {
+        throw new Error(t('schedule.logistics.storeMissing'));
+      }
+      const endpoint = isB2s ? 'print-obt-b2s' : 'print-obt';
+      const payload: Record<string, any> = {
+        splitBySeller: true,
+        sellerId,
+        PrintType: '01',
+        PrintOBTType: '01',
+      };
+      if (!isB2s) {
+        if (dates?.shipmentDate) payload.ShipmentDate = dates.shipmentDate;
+        if (dates?.deliveryDate) payload.DeliveryDate = dates.deliveryDate;
+      }
+      if (order.paymentMethod === 'cod') {
+        payload.IsCollection = 'Y';
+        payload.CollectionAmount = Math.max(0, Math.round(order.amount || 0));
+      } else {
+        payload.IsCollection = 'N';
+      }
+      if (isB2s && order.shipping?.storeId) {
+        payload.receiveStoreId = order.shipping.storeId;
+      }
+      const res = await fetch(`${apiBaseUrl}/api/orders/${orderId}/logistics/yamato/${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      const splitResults = Array.isArray(data?.results) ? data.results : [];
+      const splitResponses = splitResults
+        .map((result: any) => result?.response ?? result)
+        .filter(Boolean);
+      const splitOk =
+        Boolean(data?.split) && splitResponses.some((response: any) => response?.IsOK === 'Y');
+      const isOk = data?.IsOK === 'Y' || splitOk;
+      if (!res.ok || !isOk) {
+        const splitError = splitResponses.find(
+          (response: any) => response?.IsOK && response?.IsOK !== 'Y'
+        );
+        throw new Error(
+          splitError?.Message || data?.Message || data?.error || t('schedule.logistics.actionFailed')
+        );
+      }
+      const labelInfo = getLabelInfoFromPrintResponse(data);
+      toast({
+        title: t('schedule.logistics.labelReadyTitle'),
+        description: t('schedule.logistics.labelReadyDesc'),
+      });
+      await loadOrders();
+      return labelInfo;
+    } catch (error: any) {
+      toast({
+        title: t('schedule.logistics.actionFailed'),
+        description: error?.message || t('schedule.logistics.actionFailed'),
+        variant: 'destructive',
+      });
+      return null;
+    } finally {
+      updateActionState(orderId, { printing: false });
+    }
+  };
+
+  const handleDownloadLabel = async (orderId: string, fileNo: string) => {
+    if (!fileNo) return;
+    updateActionState(orderId, { downloading: true });
+    try {
+      const apiBaseUrl = resolveApiBaseUrl();
+      if (isInLineApp) {
+        const authHeaders = await resolveLineAuthHeaders();
+        const payload: Record<string, string> = { FileNo: fileNo };
+        if (liffUser?.userId) payload.lineUserId = liffUser.userId;
+        if (orderId && orderId !== fileNo) payload.orderId = orderId;
+        const res = await fetch(`${apiBaseUrl}/api/logistics/yamato/download-obt-line`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.ok !== true) {
+          throw new Error(data?.error || t('schedule.logistics.downloadFailed'));
+        }
+        toast({
+          title: t('schedule.logistics.downloadSentTitle'),
+          description: t('schedule.logistics.downloadSentDesc'),
+        });
+        return;
+      }
+      const res = await fetch(`${apiBaseUrl}/api/logistics/yamato/download-obt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ FileNo: fileNo }),
+      });
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data?.IsOK !== 'Y') {
+          throw new Error(data?.Message || data?.error || t('schedule.logistics.downloadFailed'));
+        }
+        throw new Error(t('schedule.logistics.downloadFailed'));
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+    } catch (error: any) {
+      toast({
+        title: t('schedule.logistics.downloadFailed'),
+        description: error?.message || t('schedule.logistics.downloadFailed'),
+        variant: 'destructive',
+      });
+    } finally {
+      updateActionState(orderId, { downloading: false });
+    }
+  };
+
+  const handlePickupRequest = async (order: Order) => {
+    if (!sellerId) return;
+    const orderId = order.orderId;
+    const form = pickupForms[orderId] || {
+      customerName: sellerName,
+      contactName: sellerName,
+      contactTel: '',
+      contactMobile: '',
+      normalQuantity: '',
+      coldQuantity: '',
+      freezeQuantity: '',
+    };
+    const normalizeQuantity = (value: string) => {
+      const digits = value.replace(/[^0-9]/g, '');
+      if (!digits) return 0;
+      const parsed = Number.parseInt(digits, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+    };
+    const normalQuantity = normalizeQuantity(form.normalQuantity);
+    const coldQuantity = normalizeQuantity(form.coldQuantity);
+    const freezeQuantity = normalizeQuantity(form.freezeQuantity);
+    const hasQuantity = normalQuantity + coldQuantity + freezeQuantity > 0;
+    const contactTel = normalizeTaiwanTelInput(form.contactTel);
+    const contactMobile = normalizeTaiwanPhoneDigits(form.contactMobile);
+    if (!hasQuantity) {
+      toast({
+        title: t('schedule.logistics.pickupQuantityRequired'),
+        description: t('schedule.logistics.pickupQuantityHint'),
+        variant: 'destructive',
+      });
+      return;
+    }
+    if (!contactTel && !contactMobile) {
+      toast({
+        title: t('schedule.logistics.pickupMissingContact'),
+        description: t('schedule.logistics.pickupMissingContactDesc'),
+        variant: 'destructive',
+      });
+      return;
+    }
+    updateActionState(orderId, { pickup: true });
+    try {
+      const apiBaseUrl = resolveApiBaseUrl();
+      const telParts = parseTelephoneParts(contactTel);
+      const payload: Record<string, any> = {
+        splitBySeller: true,
+        sellerId,
+        CustomerName: form.customerName.trim() || sellerName,
+        ContactName: (form.contactName || form.customerName || sellerName).trim(),
+        ContactTelArea: telParts.area,
+        ContactTelNumber: telParts.number,
+        ContactTelExt: telParts.ext,
+        ContactMobile: contactMobile,
+        NormalQuantity: normalQuantity,
+        ColdQuantity: coldQuantity,
+        FreezeQuantity: freezeQuantity,
+      };
+      const res = await fetch(`${apiBaseUrl}/api/orders/${orderId}/logistics/yamato/pickup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      const splitResults = Array.isArray(data?.results) ? data.results : [];
+      const splitResponses = splitResults
+        .map((result: any) => result?.response ?? result)
+        .filter(Boolean);
+      const splitOk =
+        Boolean(data?.split) && splitResponses.some((response: any) => response?.IsOK === 'Y');
+      const isOk = data?.IsOK === 'Y' || splitOk;
+      if (!res.ok || !isOk) {
+        const splitError = splitResponses.find(
+          (response: any) => response?.IsOK && response?.IsOK !== 'Y'
+        );
+        throw new Error(
+          splitError?.Message || data?.Message || data?.error || t('schedule.logistics.actionFailed')
+        );
+      }
+      toast({
+        title: t('schedule.logistics.pickupReadyTitle'),
+        description: t('schedule.logistics.pickupReadyDesc'),
+      });
+      await loadOrders();
+    } catch (error: any) {
+      toast({
+        title: t('schedule.logistics.actionFailed'),
+        description: error?.message || t('schedule.logistics.actionFailed'),
+        variant: 'destructive',
+      });
+    } finally {
+      updateActionState(orderId, { pickup: false });
+    }
+  };
+
+  const handleRefreshStatus = async (order: Order) => {
+    const orderId = order.orderId;
+    updateActionState(orderId, { status: true });
+    try {
+      const apiBaseUrl = resolveApiBaseUrl();
+      const res = await fetch(`${apiBaseUrl}/api/orders/${orderId}/logistics/yamato/obt-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.IsOK !== 'Y') {
+        throw new Error(data?.Message || data?.error || t('schedule.logistics.actionFailed'));
+      }
+      toast({
+        title: t('schedule.logistics.statusReadyTitle'),
+        description: t('schedule.logistics.statusReadyDesc'),
+      });
+      await loadOrders();
+    } catch (error: any) {
+      toast({
+        title: t('schedule.logistics.actionFailed'),
+        description: error?.message || t('schedule.logistics.actionFailed'),
+        variant: 'destructive',
+      });
+    } finally {
+      updateActionState(orderId, { status: false });
+    }
+  };
 
   const confirmOrder = useCallback(async (orderId: string) => {
     try {
@@ -144,7 +789,7 @@ const FarmerDeliverySchedule: React.FC = () => {
       } else if (action === 'decline') {
         await declineOrder(orderParam);
       }
-      setExpandedId(orderParam);
+      selectOrderId(orderParam);
       const next = new URLSearchParams(searchParams);
       next.delete('action');
       const nextSearch = next.toString();
@@ -152,7 +797,60 @@ const FarmerDeliverySchedule: React.FC = () => {
     };
 
     handleDeepLink();
-  }, [searchParams, confirmOrder, declineOrder, navigate, location.pathname]);
+  }, [searchParams, confirmOrder, declineOrder, navigate, location.pathname, selectOrderId]);
+
+  useEffect(() => {
+    const dialog = searchParams.get('dialog');
+    const orderParam = searchParams.get('order');
+    const action = searchParams.get('action');
+    if (dialog !== 'label' || !orderParam) {
+      labelDialogRef.current = null;
+      return;
+    }
+    if (action) return;
+    if (labelDialogRef.current === orderParam) return;
+    if (isLoading) return;
+    const targetOrder = orders.find(
+      (order) => order.orderId === orderParam || order.id === orderParam
+    );
+    if (!targetOrder) return;
+    labelDialogRef.current = orderParam;
+    selectOrderId(orderParam);
+    openLabelDialog(targetOrder);
+    const next = new URLSearchParams(searchParams);
+    next.delete('dialog');
+    const nextSearch = next.toString();
+    navigate(nextSearch ? `${location.pathname}?${nextSearch}` : location.pathname, { replace: true });
+  }, [searchParams, isLoading, orders, navigate, location.pathname, selectOrderId]);
+
+  useEffect(() => {
+    const fileNo = searchParams.get('label');
+    const orderParam = searchParams.get('order');
+    if (!fileNo) {
+      labelDownloadRef.current = null;
+      return;
+    }
+    const key = `${orderParam || ''}:${fileNo}`;
+    if (labelDownloadRef.current === key) return;
+    labelDownloadRef.current = key;
+    const matchedOrder =
+      orderParam ||
+      orders.find((order) => getSellerShipments(order).some((shipment) => shipment.fileNo === fileNo))?.orderId;
+    if (matchedOrder) {
+      selectOrderId(matchedOrder);
+    }
+    handleDownloadLabel(matchedOrder || fileNo, fileNo);
+    const next = new URLSearchParams(searchParams);
+    next.delete('label');
+    const nextSearch = next.toString();
+    navigate(nextSearch ? `${location.pathname}?${nextSearch}` : location.pathname, { replace: true });
+  }, [searchParams, navigate, location.pathname, orders, selectOrderId]);
+
+  useEffect(() => {
+    if (!expandedId || !stepsPanelRef.current) return;
+    if (typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches) return;
+    stepsPanelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [expandedId]);
 
   const statusBadge = (status: string, deliveryStatus?: string) => {
     const displayStatus = deliveryStatus || status;
@@ -176,6 +874,359 @@ const FarmerDeliverySchedule: React.FC = () => {
         return <Badge variant="outline" className="text-gray-600 capitalize">{displayStatus || 'pending'}</Badge>;
     }
   };
+
+  const renderOrderSteps = (delivery: DeliveryView) => {
+    const order = delivery.order;
+    const orderId = order.orderId;
+    const actions = logisticsActions[orderId] || {};
+    const shipments = getSellerShipments(order);
+    const latestShipment = shipments[shipments.length - 1];
+    const obtNumbers = (latestShipment?.orders || []).map((entry) => entry.obtNumber).filter(Boolean) as string[];
+    const fileNo = latestShipment?.fileNo || '';
+    const pickups = order.logistics?.pickups || (order.logistics?.pickup ? [order.logistics.pickup] : []);
+    const sellerPickups = pickups.filter((pickup) => !pickup.sellerId || pickup.sellerId === sellerId);
+    const latestPickup = sellerPickups[sellerPickups.length - 1];
+    const tracking = order.logistics?.tracking?.latest;
+    const form = pickupForms[orderId] || {
+      customerName: sellerName,
+      contactName: sellerName,
+      contactTel: '',
+      contactMobile: '',
+      normalQuantity: '',
+      coldQuantity: '',
+      freezeQuantity: '',
+    };
+    const isPending = ['pending', 'reserved', 'authorized'].includes(order.status);
+    const isCancelled = ['cancelled', 'failed'].includes(order.status) || order.deliveryStatus === 'cancelled';
+    const canRunLogistics = !['pending', 'reserved', 'authorized', 'cancelled', 'failed'].includes(order.status);
+    const hasLabel = Boolean(fileNo || obtNumbers.length);
+
+    return (
+      <div className="space-y-4">
+        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-gray-900">#{orderId}</p>
+              <p className="text-xs text-gray-500">{delivery.items.join(' • ')}</p>
+            </div>
+            {statusBadge(delivery.status, delivery.deliveryStatus)}
+          </div>
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <MapPin className="w-3 h-3" />
+            <span>{delivery.destination || t('checkout.addresses.defaultLabel')}</span>
+          </div>
+          {delivery.createdAt ? (
+            <div className="flex items-center gap-2 text-xs text-gray-500">
+              <Clock3 className="w-3 h-3" />
+              <span>{formatTimestamp(delivery.createdAt)}</span>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-700">
+                1
+              </span>
+              <span>{t('schedule.stepConfirmTitle')}</span>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500">{t('schedule.stepConfirmDesc')}</p>
+          {isPending ? (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => confirmOrder(orderId)}
+                disabled={confirming === orderId}
+              >
+                {confirming === orderId ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />}
+                {t('schedule.confirmButton')}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => declineOrder(orderId)}
+                disabled={declining === orderId}
+              >
+                {declining === orderId ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                {t('schedule.declineButton')}
+              </Button>
+            </div>
+          ) : isCancelled ? (
+            <p className="text-xs text-red-600">{t('schedule.stepConfirmDeclined')}</p>
+          ) : (
+            <p className="text-xs text-emerald-600">{t('schedule.stepConfirmDone')}</p>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-700">
+                2
+              </span>
+              <span>{t('schedule.stepLabelTitle')}</span>
+            </div>
+            {hasLabel ? (
+              <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">{t('schedule.stepLabelDone')}</Badge>
+            ) : null}
+          </div>
+          <p className="text-xs text-gray-500">{t('schedule.stepLabelDesc')}</p>
+          {hasLabel ? (
+            <div className="space-y-1 text-xs text-gray-600">
+              {fileNo && (
+                <p>
+                  <span className="font-semibold text-gray-700">{t('schedule.logistics.fileNo')}:</span> {fileNo}
+                </p>
+              )}
+              {obtNumbers.length > 0 && (
+                <p>
+                  <span className="font-semibold text-gray-700">{t('schedule.logistics.obtNumbers')}:</span> {obtNumbers.join(', ')}
+                </p>
+              )}
+              {latestShipment?.printDateTime && (
+                <p>
+                  <span className="font-semibold text-gray-700">{t('schedule.logistics.printedAt')}:</span> {latestShipment.printDateTime}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500">{t('schedule.logistics.noLabel')}</p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => openLabelDialog(order)}
+              disabled={!canRunLogistics || actions.printing}
+            >
+              {actions.printing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              {t('schedule.logistics.generateLabel')}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => handleDownloadLabel(orderId, fileNo)}
+              disabled={!fileNo || actions.downloading}
+            >
+              {actions.downloading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+              {t('schedule.logistics.downloadLabel')}
+            </Button>
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-700">
+                3
+              </span>
+              <span>{t('schedule.stepPickupTitle')}</span>
+            </div>
+            {latestPickup ? (
+              <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">{t('schedule.logistics.pickupReadyTitle')}</Badge>
+            ) : null}
+          </div>
+          <p className="text-xs text-gray-500">{t('schedule.stepPickupDesc')}</p>
+          {latestPickup ? (
+            <div className="text-xs text-gray-600">
+              <p>
+                <span className="font-semibold text-gray-700">{t('schedule.logistics.pickupMessage')}:</span> {latestPickup.message || t('schedule.logistics.pickupSuccessShort')}
+              </p>
+              {latestPickup.requestedAt && (
+                <p>
+                  <span className="font-semibold text-gray-700">{t('schedule.logistics.pickupRequestedAt')}:</span> {formatTimestamp(latestPickup.requestedAt)}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500">{t('schedule.logistics.noPickup')}</p>
+          )}
+          <div className="grid gap-2 md:grid-cols-2">
+            <div className="space-y-1">
+              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupCustomerName')}</p>
+              <Input
+                value={form.customerName}
+                onChange={(event) =>
+                  setPickupForms((prev) => ({
+                    ...prev,
+                    [orderId]: { ...form, customerName: event.target.value },
+                  }))
+                }
+                placeholder={t('schedule.logistics.pickupCustomerName')}
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupContactName')}</p>
+              <Input
+                value={form.contactName}
+                onChange={(event) =>
+                  setPickupForms((prev) => ({
+                    ...prev,
+                    [orderId]: { ...form, contactName: event.target.value },
+                  }))
+                }
+                placeholder={t('schedule.logistics.pickupContactName')}
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupTel')}</p>
+              <Input
+                value={form.contactTel}
+                onChange={(event) =>
+                  setPickupForms((prev) => ({
+                    ...prev,
+                    [orderId]: { ...form, contactTel: normalizeTaiwanTelInput(event.target.value) },
+                  }))
+                }
+                placeholder="02-12345678"
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupMobile')}</p>
+              <Input
+                value={form.contactMobile}
+                onChange={(event) =>
+                  setPickupForms((prev) => ({
+                    ...prev,
+                    [orderId]: { ...form, contactMobile: formatTaiwanMobileInput(event.target.value) },
+                  }))
+                }
+                placeholder="0912-345-678"
+                className="h-9"
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupNormalQuantity')}</p>
+              <Input
+                value={form.normalQuantity}
+                onChange={(event) =>
+                  setPickupForms((prev) => ({
+                    ...prev,
+                    [orderId]: { ...form, normalQuantity: event.target.value.replace(/[^0-9]/g, '') },
+                  }))
+                }
+                placeholder="0"
+                className="h-9"
+                inputMode="numeric"
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupColdQuantity')}</p>
+              <Input
+                value={form.coldQuantity}
+                onChange={(event) =>
+                  setPickupForms((prev) => ({
+                    ...prev,
+                    [orderId]: { ...form, coldQuantity: event.target.value.replace(/[^0-9]/g, '') },
+                  }))
+                }
+                placeholder="0"
+                className="h-9"
+                inputMode="numeric"
+              />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupFreezeQuantity')}</p>
+              <Input
+                value={form.freezeQuantity}
+                onChange={(event) =>
+                  setPickupForms((prev) => ({
+                    ...prev,
+                    [orderId]: { ...form, freezeQuantity: event.target.value.replace(/[^0-9]/g, '') },
+                  }))
+                }
+                placeholder="0"
+                className="h-9"
+                inputMode="numeric"
+              />
+            </div>
+            <div className="md:col-span-2 text-xs text-amber-600">
+              {t('schedule.logistics.pickupQuantityHint')}
+            </div>
+          </div>
+          <Button
+            size="sm"
+            onClick={() => handlePickupRequest(order)}
+            disabled={!canRunLogistics || actions.pickup}
+          >
+            {actions.pickup ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+            {t('schedule.logistics.requestPickup')}
+          </Button>
+        </div>
+
+        <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-700">
+                4
+              </span>
+              <span>{t('schedule.stepStatusTitle')}</span>
+            </div>
+          </div>
+          <p className="text-xs text-gray-500">{t('schedule.stepStatusDesc')}</p>
+          {tracking ? (
+            <div className="text-xs text-gray-600 space-y-1">
+              <p>
+                <span className="font-semibold text-gray-700">{t('schedule.logistics.latestStatus')}:</span> {tracking.statusName || t('schedule.logistics.statusUnknown')}
+              </p>
+              {tracking.stationName && (
+                <p>
+                  <span className="font-semibold text-gray-700">{t('schedule.logistics.statusStation')}:</span> {tracking.stationName}
+                </p>
+              )}
+              {tracking.createDateTime && (
+                <p>
+                  <span className="font-semibold text-gray-700">{t('schedule.logistics.statusUpdated')}:</span> {tracking.createDateTime}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500">{t('schedule.logistics.noTracking')}</p>
+          )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleRefreshStatus(order)}
+            disabled={!hasLabel || actions.status}
+          >
+            {actions.status ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+            {t('schedule.logistics.refreshStatus')}
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  const labelDialogActions = labelDialogOrder
+    ? logisticsActions[labelDialogOrder.orderId] || {}
+    : {};
+  const labelDialogOrderId = labelDialogOrder?.orderId || '';
+  const labelDialogHasLabel = Boolean(labelDialogFileNo || labelDialogObtNumbers.length);
+  const labelDialogCanDownload = Boolean(labelDialogFileNo);
+  const labelDialogLocked = labelDialogStep === 2;
+  const labelDialogCanGenerate = labelDialogOrder
+    ? !['pending', 'reserved', 'authorized', 'cancelled', 'failed'].includes(labelDialogOrder.status)
+    : false;
+  const labelDialogRequiresConfirm = Boolean(labelDialogOrder && !labelDialogCanGenerate);
+  const pickupMin = formatDateInput(new Date());
+  const pickupDateValue = parseDateInput(labelPickupDate);
+  const deliveryMin = pickupDateValue ? formatDateInput(addDays(pickupDateValue, 1)) : undefined;
+  const deliveryMax = pickupDateValue ? formatDateInput(addDays(pickupDateValue, 7)) : undefined;
+  const selectedDelivery = useMemo(
+    () =>
+      expandedId
+        ? deliveries.find(
+            (delivery) => delivery.orderId === expandedId || delivery.id === expandedId
+          ) || null
+        : null,
+    [deliveries, expandedId]
+  );
 
   return (
     <div className="space-y-6">
@@ -217,149 +1268,257 @@ const FarmerDeliverySchedule: React.FC = () => {
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('schedule.awaitingHeader')}</CardTitle>
-          <CardDescription>{t('schedule.awaitingDescription')}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-10 text-gray-500 gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {t('schedule.refresh')}
-            </div>
-          ) : awaiting.length === 0 ? (
-            <div className="text-sm text-gray-500 py-6 text-center">
-              {t('schedule.noEntries')}
-            </div>
-          ) : (
-            awaiting.map((delivery) => (
-              <div
-                key={delivery.id}
-                className="border rounded-lg p-4 space-y-2 transition-all duration-200 hover:border-green-200 hover:shadow-sm cursor-pointer"
-                onClick={() => setExpandedId(expandedId === delivery.id ? null : delivery.id)}
-              >
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
-                      <PackageCheck className="w-5 h-5 text-green-700" />
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">#{delivery.orderId}</p>
-                      <p className="text-sm text-gray-600">{delivery.items.join(' • ')}</p>
-                      <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                        <MapPin className="w-3 h-3" />
-                        <span>{delivery.destination || t('checkout.addresses.defaultLabel')}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 md:w-80 md:justify-end w-full">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {statusBadge(delivery.status, delivery.deliveryStatus)}
-                      {delivery.paymentMethod && (
-                        <Badge variant="outline" className="text-xs uppercase">{delivery.paymentMethod}</Badge>
-                      )}
-                    </div>
-                    {['pending', 'reserved', 'authorized'].includes(delivery.status) && (
-                      <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                        <Button size="sm" variant="outline" className="w-full sm:w-auto" onClick={(e) => { e.stopPropagation(); confirmOrder(delivery.orderId); }} disabled={confirming === delivery.orderId}>
-                          {confirming === delivery.orderId ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />}
-                          {t('schedule.confirmButton')}
-                        </Button>
-                        <Button size="sm" variant="ghost" className="w-full sm:w-auto" onClick={(e) => { e.stopPropagation(); declineOrder(delivery.orderId); }} disabled={declining === delivery.orderId}>
-                          {declining === delivery.orderId ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-                          {t('schedule.declineButton')}
-                        </Button>
-                      </div>
-                    )}
-                    <Button size="sm" variant="ghost" className="w-full sm:w-auto">
-                      {expandedId === delivery.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    </Button>
-                  </div>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('schedule.awaitingHeader')}</CardTitle>
+              <CardDescription>{t('schedule.awaitingDescription')}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {isLoading ? (
+                <div className="flex items-center justify-center py-10 text-gray-500 gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {t('schedule.refresh')}
                 </div>
-                {expandedId === delivery.id && (
-                  <div className="border-t pt-3 space-y-2 text-sm text-gray-700">
-                    <p className="font-semibold">{t('schedule.nextContact')}: {delivery.destination || t('checkout.addresses.defaultLabel')}</p>
-                    <p className="text-xs text-gray-600">{delivery.items.join(' • ')}</p>
-                    <div className="flex items-center gap-2">
-                      <Clock3 className="w-4 h-4 text-green-600" />
-                      <a href="/farmer/delivery" className="text-green-700 underline">
-                        {t('schedule.route')}
-                      </a>
+              ) : awaiting.length === 0 ? (
+                <div className="text-sm text-gray-500 py-6 text-center">
+                  {t('schedule.noEntries')}
+                </div>
+              ) : (
+                awaiting.map((delivery) => {
+                  const isSelected = expandedId === delivery.orderId || expandedId === delivery.id;
+                  return (
+                    <div
+                      key={delivery.id}
+                      className={`border rounded-lg p-4 space-y-2 transition-all duration-200 cursor-pointer ${
+                        isSelected
+                          ? 'border-emerald-300 bg-emerald-50/40 shadow-sm'
+                          : 'hover:border-green-200 hover:shadow-sm'
+                      }`}
+                      onClick={() => selectOrderId(isSelected ? null : delivery.orderId)}
+                    >
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                            <PackageCheck className="w-5 h-5 text-green-700" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-gray-900">#{delivery.orderId}</p>
+                            <p className="text-sm text-gray-600">{delivery.items.join(' • ')}</p>
+                            <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                              <MapPin className="w-3 h-3" />
+                              <span>{delivery.destination || t('checkout.addresses.defaultLabel')}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 md:w-80 md:justify-end w-full">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {statusBadge(delivery.status, delivery.deliveryStatus)}
+                            {delivery.paymentMethod && (
+                              <Badge variant="outline" className="text-xs uppercase">{delivery.paymentMethod}</Badge>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+                  );
+                })
+              )}
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('schedule.schedule')}</CardTitle>
-          <CardDescription>{t('schedule.scheduleDescription')}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {isLoading ? (
-            <div className="flex items-center justify-center py-10 text-gray-500 gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" />
-              {t('schedule.refresh')}
-            </div>
-          ) : active.length === 0 ? (
-            <div className="text-sm text-gray-500 py-6 text-center">
-              {t('schedule.noEntries')}
-            </div>
-          ) : (
-            active.map((delivery) => (
-              <div
-                key={delivery.id}
-                className="border rounded-lg p-4 space-y-2 transition-all duration-200 hover:border-green-200 hover:shadow-sm cursor-pointer"
-                onClick={() => setExpandedId(expandedId === delivery.id ? null : delivery.id)}
-              >
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
-                      <PackageCheck className="w-5 h-5 text-green-700" />
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">#{delivery.orderId}</p>
-                      <p className="text-sm text-gray-600">{delivery.items.join(' • ')}</p>
-                      <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
-                        <MapPin className="w-3 h-3" />
-                        <span>{delivery.destination || t('checkout.addresses.defaultLabel')}</span>
+          <Card>
+            <CardHeader>
+              <CardTitle>{t('schedule.schedule')}</CardTitle>
+              <CardDescription>{t('schedule.scheduleDescription')}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {isLoading ? (
+                <div className="flex items-center justify-center py-10 text-gray-500 gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {t('schedule.refresh')}
+                </div>
+              ) : active.length === 0 ? (
+                <div className="text-sm text-gray-500 py-6 text-center">
+                  {t('schedule.noEntries')}
+                </div>
+              ) : (
+                active.map((delivery) => {
+                  const isSelected = expandedId === delivery.orderId || expandedId === delivery.id;
+                  return (
+                    <div
+                      key={delivery.id}
+                      className={`border rounded-lg p-4 space-y-2 transition-all duration-200 cursor-pointer ${
+                        isSelected
+                          ? 'border-emerald-300 bg-emerald-50/40 shadow-sm'
+                          : 'hover:border-green-200 hover:shadow-sm'
+                      }`}
+                      onClick={() => selectOrderId(isSelected ? null : delivery.orderId)}
+                    >
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
+                            <PackageCheck className="w-5 h-5 text-green-700" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-gray-900">#{delivery.orderId}</p>
+                            <p className="text-sm text-gray-600">{delivery.items.join(' • ')}</p>
+                            <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
+                              <MapPin className="w-3 h-3" />
+                              <span>{delivery.destination || t('checkout.addresses.defaultLabel')}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 md:w-80 md:justify-end w-full">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {statusBadge(delivery.status, delivery.deliveryStatus)}
+                            {delivery.paymentMethod && (
+                              <Badge variant="outline" className="text-xs uppercase">{delivery.paymentMethod}</Badge>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 md:w-80 md:justify-end w-full">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {statusBadge(delivery.status, delivery.deliveryStatus)}
-                      {delivery.paymentMethod && (
-                        <Badge variant="outline" className="text-xs uppercase">{delivery.paymentMethod}</Badge>
-                      )}
-                    </div>
-                    <Button size="sm" variant="ghost" className="w-full sm:w-auto">
-                      {expandedId === delivery.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    </Button>
-                  </div>
+                  );
+                })
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div ref={stepsPanelRef} className="space-y-6 lg:sticky lg:top-24 lg:self-start">
+          <Card className="lg:max-h-[calc(100vh-8rem)] lg:overflow-auto">
+            <CardHeader>
+              <CardTitle>{t('schedule.stepsTitle')}</CardTitle>
+              <CardDescription>{t('schedule.stepsDescription')}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {selectedDelivery ? (
+                renderOrderSteps(selectedDelivery)
+              ) : (
+                <div className="text-sm text-gray-500 py-6 text-center">
+                  {t('schedule.stepsEmpty')}
                 </div>
-                {expandedId === delivery.id && (
-                  <div className="border-t pt-3 space-y-2 text-sm text-gray-700">
-                    <p className="font-semibold">{t('schedule.nextContact')}: {delivery.destination || t('checkout.addresses.defaultLabel')}</p>
-                    <p className="text-xs text-gray-600">{delivery.items.join(' • ')}</p>
-                    <div className="flex items-center gap-2">
-                      <Clock3 className="w-4 h-4 text-green-600" />
-                      <a href="/farmer/delivery" className="text-green-700 underline">
-                        {t('schedule.route')}
-                      </a>
-                    </div>
-                  </div>
-                )}
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      <Dialog open={labelDialogOpen} onOpenChange={handleLabelDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('schedule.logistics.labelDialogTitle')}</DialogTitle>
+            <DialogDescription>{t('schedule.logistics.labelDialogDescription')}</DialogDescription>
+          </DialogHeader>
+          {labelDialogExisting && labelDialogHasLabel ? (
+            <p className="text-xs text-emerald-600">{t('schedule.logistics.labelDialogExisting')}</p>
+          ) : null}
+          {labelDialogRequiresConfirm ? (
+            <p className="text-xs text-amber-600">{t('schedule.stepConfirmDesc')}</p>
+          ) : null}
+          <div className="grid gap-3">
+            <div className="rounded-md border border-gray-200 p-3 space-y-2">
+              <p className="text-xs font-semibold text-gray-700">{t('schedule.logistics.labelDialogStep1')}</p>
+              <div className="space-y-1">
+                <p className="text-xs text-gray-500">{t('schedule.logistics.labelPickupDate')}</p>
+                <Input
+                  type="date"
+                  value={labelPickupDate}
+                  disabled={labelDialogLocked}
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setLabelPickupDate(nextValue);
+                    setLabelDialogError('');
+                    const nextDate = parseDateInput(nextValue);
+                    if (nextDate) {
+                      const nextMin = formatDateInput(addDays(nextDate, 1));
+                      const nextMax = formatDateInput(addDays(nextDate, 7));
+                      if (!labelDeliveryDate || labelDeliveryDate < nextMin || labelDeliveryDate > nextMax) {
+                        setLabelDeliveryDate(formatDateInput(findNextValidDeliveryDate(nextDate)));
+                      }
+                    }
+                  }}
+                  min={pickupMin}
+                  className="h-9"
+                />
               </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+              <div className="space-y-1">
+                <p className="text-xs text-gray-500">{t('schedule.logistics.labelDeliveryDate')}</p>
+                <Input
+                  type="date"
+                  value={labelDeliveryDate}
+                  min={deliveryMin}
+                  max={deliveryMax}
+                  disabled={labelDialogLocked}
+                  onChange={(event) => {
+                    setLabelDeliveryDate(event.target.value);
+                    setLabelDialogError('');
+                  }}
+                  className="h-9"
+                />
+              </div>
+              {labelDialogError ? (
+                <p className="text-xs text-red-600">{labelDialogError}</p>
+              ) : (
+                <p className="text-xs text-gray-500">{t('schedule.logistics.labelDateHint')}</p>
+              )}
+            </div>
+            <div className="rounded-md border border-gray-200 p-3 space-y-2">
+              <p className="text-xs font-semibold text-gray-700">{t('schedule.logistics.labelDialogStep2')}</p>
+              {labelDialogHasLabel ? (
+                <div className="space-y-1 text-xs text-gray-600">
+                  <p className="text-xs text-gray-500">{t('schedule.logistics.labelDialogDownloadHint')}</p>
+                  {labelDialogFileNo ? (
+                    <p>
+                      <span className="font-semibold text-gray-700">{t('schedule.logistics.fileNo')}:</span> {labelDialogFileNo}
+                    </p>
+                  ) : null}
+                  {labelDialogObtNumbers.length > 0 ? (
+                    <p>
+                      <span className="font-semibold text-gray-700">{t('schedule.logistics.obtNumbers')}:</span> {labelDialogObtNumbers.join(', ')}
+                    </p>
+                  ) : null}
+                  {labelDialogPrintedAt ? (
+                    <p>
+                      <span className="font-semibold text-gray-700">{t('schedule.logistics.printedAt')}:</span> {labelDialogPrintedAt}
+                    </p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500">{t('schedule.logistics.labelDialogStep2Hint')}</p>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleDownloadLabel(labelDialogOrderId || labelDialogFileNo, labelDialogFileNo)}
+                disabled={!labelDialogCanDownload || labelDialogActions.downloading}
+              >
+                {labelDialogActions.downloading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                {t('schedule.logistics.downloadLabel')}
+              </Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => handleLabelDialogOpen(false)}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              onClick={submitLabelDialog}
+              disabled={!labelDialogOrder || labelDialogActions.printing || labelDialogLocked || !labelDialogCanGenerate}
+            >
+              {labelDialogActions.printing ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : null}
+              {t('schedule.logistics.generateLabel')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

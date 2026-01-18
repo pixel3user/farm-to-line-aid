@@ -1,47 +1,53 @@
+import { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import AppLayout from "./components/layouts/AppLayout";
 import DeepLinkRouter from "./components/DeepLinkRouter";
+import DeepLinkHomeGate from "./components/DeepLinkHomeGate";
 import FarmerLayout from "./components/layouts/FarmerLayout";
 import MarketLayout from "./components/layouts/MarketLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
-import Home from "./pages/Home";
-import SignIn from "./pages/auth/SignIn";
-import SignUp from "./pages/auth/SignUp";
-import LineCallback from "./pages/auth/LineCallback";
-import RoleSelection from "./pages/auth/RoleSelection";
-import NotFound from "./pages/NotFound";
+import DebugOverlay from "./components/DebugOverlay";
+
+const Home = lazy(() => import("./pages/Home"));
+const SignIn = lazy(() => import("./pages/auth/SignIn"));
+const SignUp = lazy(() => import("./pages/auth/SignUp"));
+const LineCallback = lazy(() => import("./pages/auth/LineCallback"));
+const RoleSelection = lazy(() => import("./pages/auth/RoleSelection"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 // Farmer pages
-import FarmerDashboard from "./pages/farmer/Dashboard";
-import FarmerProducts from "./pages/farmer/Products";
-import FarmerStores from "./pages/farmer/Stores";
-import FarmerMarketing from "./pages/farmer/Marketing";
-import FarmerAnalytics from "./pages/farmer/Analytics";
-import FarmerReferences from "./pages/farmer/References";
-import FarmerDeliverySchedule from "./pages/farmer/DeliverySchedule";
+const FarmerDashboard = lazy(() => import("./pages/farmer/Dashboard"));
+const FarmerProducts = lazy(() => import("./pages/farmer/Products"));
+const FarmerStores = lazy(() => import("./pages/farmer/Stores"));
+const FarmerMarketing = lazy(() => import("./pages/farmer/Marketing"));
+const FarmerAnalytics = lazy(() => import("./pages/farmer/Analytics"));
+const FarmerReferences = lazy(() => import("./pages/farmer/References"));
+const FarmerDeliverySchedule = lazy(() => import("./pages/farmer/DeliverySchedule"));
 
 // Market pages
-import MarketDashboard from "./pages/market/Dashboard";
-import MarketFarms from "./pages/market/Farms";
-import MarketProducts from "./pages/market/Products";
-import MarketSchedule from "./pages/market/Schedule";
-import MarketRatings from "./pages/market/Ratings";
-import MarketCheckout from "./pages/market/Checkout";
+const MarketDashboard = lazy(() => import("./pages/market/Dashboard"));
+const MarketFarms = lazy(() => import("./pages/market/Farms"));
+const MarketProducts = lazy(() => import("./pages/market/Products"));
+const MarketSchedule = lazy(() => import("./pages/market/Schedule"));
+const MarketRatings = lazy(() => import("./pages/market/Ratings"));
+const MarketCheckout = lazy(() => import("./pages/market/Checkout"));
 
 // Demo pages
-import LineDemo from "./pages/demo/LineDemo";
-import LinePayResult from "./pages/payments/LinePayResult";
+const LineDemo = lazy(() => import("./pages/demo/LineDemo"));
+const LinePayResult = lazy(() => import("./pages/payments/LinePayResult"));
 
 // Settings page
-import Settings from "./pages/Settings";
+const Settings = lazy(() => import("./pages/Settings"));
 
 const App = () => {
   return (
     <BrowserRouter>
       <DeepLinkRouter />
-      <Routes>
+      <DebugOverlay />
+      <Suspense fallback={<div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>}>
+        <Routes>
             {/* Public routes */}
-            <Route path="/" element={<AppLayout><Home /></AppLayout>} />
+            <Route path="/" element={<AppLayout><DeepLinkHomeGate /></AppLayout>} />
             <Route path="/auth/signin" element={<AppLayout><SignIn /></AppLayout>} />
             <Route path="/auth/signup" element={<AppLayout><SignUp /></AppLayout>} />
             <Route path="/auth/line/callback" element={<AppLayout><LineCallback /></AppLayout>} />
@@ -91,7 +97,8 @@ const App = () => {
         
         {/* Catch-all route */}
         <Route path="*" element={<NotFound />} />
-      </Routes>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 };

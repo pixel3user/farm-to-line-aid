@@ -58,7 +58,7 @@ const FarmerDashboard: React.FC = () => {
       return;
     }
 
-    const missingCoreData = !userStats || !userProducts || !userStores;
+    const missingCoreData = !userProducts || !userStores;
 
     if (missingCoreData && !authLoading && !isRefreshingData && !hasRequestedDataRef.current) {
       hasRequestedDataRef.current = true;
@@ -92,18 +92,30 @@ const FarmerDashboard: React.FC = () => {
     loadConversations();
   }, [user?.id]);
 
-  const isLoading =
-    (!!user?.id && (!userStats || !userProducts || !userStores)) ||
-    isLoadingConversations ||
-    authLoading ||
-    isRefreshingData;
+  const productsList = userProducts || [];
+  const storesList = userStores || [];
+  const marketingList = userMarketingMaterials || [];
+  const hasCoreData = Array.isArray(productsList) && Array.isArray(storesList);
+  const isLoading = (!hasCoreData) && (authLoading || isRefreshingData);
+
+  const derivedStats = useMemo(() => {
+    const activeProducts = productsList.filter((p) => p.isActive !== false).length;
+    const lowStockProducts = productsList.filter((p) => (p.stock || 0) <= 10).length;
+    return {
+      totalProducts: userStats?.totalProducts ?? productsList.length,
+      totalStores: userStats?.totalStores ?? storesList.length,
+      totalMarketingMaterials: userStats?.totalMarketingMaterials ?? marketingList.length,
+      activeProducts: userStats?.activeProducts ?? activeProducts,
+      lowStockProducts: userStats?.lowStockProducts ?? lowStockProducts,
+    };
+  }, [productsList, storesList, marketingList, userStats]);
 
   const metricCards = useMemo(() => {
     const cards = [
       {
         key: 'activeProducts',
         title: t('dashboard.metrics.activeProducts'),
-        value: userStats?.activeProducts ?? 0,
+        value: derivedStats.activeProducts,
         icon: Package,
         color: 'bg-green-100 text-green-700',
         href: '/farmer/products'
@@ -111,14 +123,14 @@ const FarmerDashboard: React.FC = () => {
       {
         key: 'lowStockAlerts',
         title: t('dashboard.metrics.lowStockAlerts'),
-        value: userStats?.lowStockProducts ?? 0,
+        value: derivedStats.lowStockProducts,
         icon: Bell,
         color: 'bg-red-100 text-red-700'
       },
       {
         key: 'partnerStores',
         title: t('dashboard.metrics.partnerStores'),
-        value: userStats?.totalStores ?? 0,
+        value: derivedStats.totalStores,
         icon: Users,
         color: 'bg-blue-100 text-blue-700',
         href: '/farmer/stores'
@@ -126,7 +138,7 @@ const FarmerDashboard: React.FC = () => {
       {
         key: 'marketingAssets',
         title: t('dashboard.metrics.marketingAssets'),
-        value: userStats?.totalMarketingMaterials ?? 0,
+        value: derivedStats.totalMarketingMaterials,
         icon: FileText,
         color: 'bg-purple-100 text-purple-700'
       }
@@ -210,8 +222,82 @@ const FarmerDashboard: React.FC = () => {
 
   return (
     <div className="space-y-6">
+      {/* Mobile Overview */}
+      <div className="md:hidden" data-tour="farmer-welcome">
+        <Card className="shadow-lg border-0">
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs text-gray-500">{t('dashboard.welcome')}</p>
+                <p className="text-lg font-semibold text-gray-900">
+                  {user?.displayName || 'Farmer'}
+                </p>
+              </div>
+              <Badge variant="secondary" className="text-xs">
+                {new Date().toLocaleDateString()}
+              </Badge>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {metricCards.map((metric) => {
+                const Icon = metric.icon;
+                const content = (
+                  <div
+                    className="flex items-center justify-between rounded-xl border border-gray-100 bg-white p-3 shadow-sm"
+                    data-tour={`metric-${metric.key}`}
+                  >
+                    <div>
+                      <p className="text-[11px] font-medium text-gray-500">{metric.title}</p>
+                      <p className="text-lg font-bold text-gray-900">{metric.value}</p>
+                    </div>
+                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${metric.color}`}>
+                      <Icon className="w-4 h-4" />
+                    </div>
+                  </div>
+                );
+
+                return metric.href ? (
+                  <Link
+                    key={metric.key}
+                    to={metric.href}
+                    className="block focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-green-500 rounded-xl"
+                  >
+                    {content}
+                  </Link>
+                ) : (
+                  <div key={metric.key}>{content}</div>
+                );
+              })}
+            </div>
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+                {t('dashboard.quickActions')}
+              </p>
+              <div className="grid grid-cols-4 gap-2">
+                {visibleQuickActions.map((action) => {
+                  const Icon = action.icon;
+                  return (
+                    <Link
+                      key={action.key}
+                      to={action.href}
+                      className="flex flex-col items-center justify-center rounded-xl border border-gray-100 bg-white p-2 text-center shadow-sm"
+                    >
+                      <div className={`mb-1 flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br ${action.color}`}>
+                        <Icon className="h-4 w-4 text-white" />
+                      </div>
+                      <span className="text-[10px] font-medium text-gray-700 leading-tight">
+                        {action.title}
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Welcome Section */}
-      <div className="bg-gradient-to-r from-green-500 via-green-600 to-green-700 rounded-2xl p-8 text-white shadow-xl" data-tour="farmer-welcome">
+      <div className="hidden md:block bg-gradient-to-r from-green-500 via-green-600 to-green-700 rounded-2xl p-8 text-white shadow-xl" data-tour="farmer-welcome">
         <div className="flex items-center justify-between">
           <div className="space-y-3">
             <h1 className="text-3xl font-bold">
@@ -240,17 +326,17 @@ const FarmerDashboard: React.FC = () => {
       </div>
 
       {/* Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="hidden md:grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {metricCards.map((metric) => {
           const Icon = metric.icon;
           const helper =
-            metric.key === 'activeProducts' && (userStats?.activeProducts ?? 0) > 0
+            metric.key === 'activeProducts' && (derivedStats.activeProducts ?? 0) > 0
               ? { text: '+2 this week', className: 'text-xs text-green-600 font-medium' }
-              : metric.key === 'lowStockAlerts' && (userStats?.lowStockProducts ?? 0) > 0
+              : metric.key === 'lowStockAlerts' && (derivedStats.lowStockProducts ?? 0) > 0
               ? { text: t('dashboard.lowStockAlerts'), className: 'text-xs text-red-600 font-medium' }
-              : metric.key === 'partnerStores' && (userStats?.totalStores ?? 0) > 0
+              : metric.key === 'partnerStores' && (derivedStats.totalStores ?? 0) > 0
               ? { text: 'Growing network', className: 'text-xs text-blue-600 font-medium' }
-              : metric.key === 'marketingAssets' && (userStats?.totalMarketingMaterials ?? 0) > 0
+              : metric.key === 'marketingAssets' && (derivedStats.totalMarketingMaterials ?? 0) > 0
               ? { text: 'Active campaigns', className: 'text-xs text-purple-600 font-medium' }
               : null;
 
@@ -287,7 +373,7 @@ const FarmerDashboard: React.FC = () => {
       </div>
 
       {/* Quick Actions */}
-      <Card className="shadow-lg border-0">
+      <Card className="hidden md:block shadow-lg border-0">
         <CardHeader className="pb-4">
           <CardTitle className="text-2xl font-bold">{t('dashboard.quickActions')}</CardTitle>
           <CardDescription className="text-lg">
@@ -316,8 +402,67 @@ const FarmerDashboard: React.FC = () => {
         </CardContent>
       </Card>
 
+      {/* Mobile Activity + Performance */}
+      <div className="md:hidden">
+        <div className="space-y-4">
+          <Card className="shadow-lg border-0">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold">{t('dashboard.recentActivity')}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                {recentConversations.length === 0 ? (
+                  <p className="text-sm text-gray-500">{t('dashboard.noConversations')}</p>
+                ) : (
+                  recentConversations.slice(0, 2).map((conversation) => (
+                    <div key={conversation.id} className="flex items-start justify-between rounded-lg bg-gray-50 px-3 py-2">
+                      <div>
+                        <p className="text-xs font-semibold text-gray-900 capitalize">{conversation.type}</p>
+                        <p className="text-[11px] text-gray-500 line-clamp-1">{conversation.content}</p>
+                      </div>
+                      <span className="text-[10px] text-gray-400">{formatTimestamp(conversation.timestamp)}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  {t('dashboard.performance')}
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-lg border border-gray-100 bg-white px-3 py-2">
+                    <p className="text-[10px] text-gray-500">{t('dashboard.totalRevenue')}</p>
+                    <p className="text-sm font-semibold text-green-600">
+                      NT$ {userStats?.totalRevenue?.toLocaleString() || '0'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-gray-100 bg-white px-3 py-2">
+                    <p className="text-[10px] text-gray-500">{t('dashboard.monthlyGrowth')}</p>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {userStats?.monthlyGrowth && userStats.monthlyGrowth > 0 ? '+' : ''}
+                      {userStats?.monthlyGrowth || 0}%
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-gray-100 bg-white px-3 py-2">
+                    <p className="text-[10px] text-gray-500">{t('dashboard.productsInStock')}</p>
+                    <p className="text-sm font-semibold text-blue-600">{userProducts?.length || 0}</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-100 bg-white px-3 py-2">
+                    <p className="text-[10px] text-gray-500">{t('dashboard.lastActivity')}</p>
+                    <p className="text-xs font-semibold text-gray-700">
+                      {formatTimestamp(userStats?.lastActivity) || '--'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+        </div>
+      </div>
+
       {/* Recent Activity, Performance & Location */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="hidden md:grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="shadow-lg border-0 lg:col-span-1">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center text-xl">
@@ -424,7 +569,7 @@ const FarmerDashboard: React.FC = () => {
       </div>
 
       {/* Store Insights */}
-      <Card className="shadow-lg border-0">
+      <Card className="hidden md:block shadow-lg border-0">
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center text-xl">
             <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
@@ -470,7 +615,7 @@ const FarmerDashboard: React.FC = () => {
 
       {/* Marketing Materials */}
       {marketingEnabled && (
-        <Card className="shadow-lg border-0">
+        <Card className="hidden md:block shadow-lg border-0">
           <CardHeader className="pb-4">
             <CardTitle className="flex items-center text-xl">
               <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center mr-3">
@@ -512,6 +657,71 @@ const FarmerDashboard: React.FC = () => {
           </CardContent>
         </Card>
       )}
+
+      {/* Mobile Store Summary + Marketing */}
+      <div className="md:hidden space-y-4">
+        <Card className="shadow-lg border-0">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold">{t('dashboard.storeSummary')}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {userStores && userStores.length > 0 ? (
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(storeStatusSummary).map(([status, count]) => (
+                  <Link
+                    key={status}
+                    to={`/farmer/stores?status=${status}`}
+                    className="rounded-lg border border-gray-100 bg-white px-3 py-2"
+                  >
+                    <p className="text-[10px] font-medium text-gray-500 capitalize">
+                      {t(`stores.status.${status}`)}
+                    </p>
+                    <p className="text-sm font-semibold text-gray-900">{count}</p>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">{t('dashboard.noStoresMessage')}</p>
+            )}
+          </CardContent>
+        </Card>
+
+        {marketingEnabled && (
+          <Card className="shadow-lg border-0">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-semibold">{t('dashboard.marketingRecent')}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {userMarketingMaterials && userMarketingMaterials.length > 0 ? (
+                <>
+                  {userMarketingMaterials.slice(0, 2).map((material) => (
+                    <div key={material.id} className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2">
+                      <div>
+                        <p className="text-xs font-semibold text-gray-900">{material.title}</p>
+                        <p className="text-[10px] text-gray-500 capitalize">{material.type}</p>
+                      </div>
+                      <Badge variant="outline" className="text-[10px] border-orange-200 text-orange-700">
+                        {(material.usage?.timesUsed || 0)} {t('dashboard.marketingUses')}
+                      </Badge>
+                    </div>
+                  ))}
+                </>
+              ) : (
+                <p className="text-sm text-gray-500">{t('dashboard.noMarketing')}</p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        <Card className="shadow-lg border-0">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-semibold">{t('farmer.location.map.title')}</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <FarmerLocationMap />
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 };

@@ -23,3 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Firebase service account keys (never commit)
+*firebase-adminsdk*.json
+farm2market-99-firebase-adminsdk-fbsvc-c333b4e691.json

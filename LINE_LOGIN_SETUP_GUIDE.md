@@ -9,7 +9,7 @@
 
 ### **2. Incorrect Redirect URLs**
 - Bot is using placeholder URLs instead of actual website URL
-- Need to update all redirect URLs to `https://farm2market-99.web.app`
+- Need to update all redirect URLs to `https://farm2market.tw`
 
 ### **3. Missing Environment Variables**
 - No `.env` file with proper configuration
@@ -26,7 +26,7 @@
 5. **Configure LIFF app**:
    - **LIFF app name**: `Farm2Market AI Web App`
    - **Size**: Full
-   - **Endpoint URL**: `https://farm2market-99.web.app`
+   - **Endpoint URL**: `https://farm2market.tw`
    - **Scope**: Profile, OpenID
    - **Bot link feature**: On
 6. **Copy the LIFF ID** (starts with `liff.`)
@@ -39,7 +39,7 @@ Create a `.env` file in the project root:
 # LINE Configuration
 LINE_CHANNEL_ACCESS_TOKEN=your_actual_channel_access_token
 LINE_CHANNEL_SECRET=your_actual_channel_secret
-LIFF_URL=https://farm2market-99.web.app
+LIFF_URL=https://liff.line.me/your_actual_liff_id_from_step_1
 VITE_LIFF_ID=your_actual_liff_id_from_step_1
 
 # Gemini API
@@ -75,7 +75,7 @@ VITE_FIREBASE_APP_ID=1:766264273875:web:4d16eb47367395315edd26
 2. **Test LINE Bot redirect**:
    - Send "管理" to your LINE bot
    - Click the website access button
-   - Should redirect to: `https://farm2market-99.web.app?userId=...&displayName=...&pictureUrl=...`
+   - Should redirect to: `https://farm2market.tw?userId=...&displayName=...&pictureUrl=...`
 
 3. **Test website authentication**:
    - Open the redirected URL
@@ -113,7 +113,7 @@ npm run build
 firebase deploy --only hosting
 
 # Test website
-open https://farm2market-99.web.app/test-line-redirect
+open https://farm2market.tw/test-line-redirect
 ```
 
 ## 📞 **Next Steps:**
@@ -127,7 +127,6 @@ open https://farm2market-99.web.app/test-line-redirect
 ---
 
 **The main issue is that the LIFF app needs to be created in LINE Developer Console and the LIFF ID needs to be configured in the environment variables.**
-
 
 
 

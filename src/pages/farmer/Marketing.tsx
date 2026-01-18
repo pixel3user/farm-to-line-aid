@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Sparkles,
   ShoppingBag,
@@ -6,17 +7,17 @@ import {
   Image as ImageIcon,
   X,
   Loader2,
-  Clipboard,
   Download,
   CheckCircle2,
-  Save,
   UploadCloud
 } from 'lucide-react';
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Progress } from '@/components/ui/progress';
 import { Textarea } from '@/components/ui/textarea';
+import MarkdownRenderer from '@/components/MarkdownRenderer';
 import { featureFlags } from '@/config/featureFlags';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -101,13 +102,16 @@ const FarmerMarketing: React.FC = () => {
   const { user, userProducts = [], refreshUserData } = useAuth();
   const { t, language } = useLanguage();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   const copy = useMemo(() => getMarketingCopy(language), [language]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const stepContainerRef = useRef<HTMLDivElement | null>(null);
 
   const [selectedProductId, setSelectedProductId] = useState('');
+  const [marketingStep, setMarketingStep] = useState(0);
   const [prompt, setPrompt] = useState('');
   const [uploadedImage, setUploadedImage] = useState<{
     name: string;
@@ -119,9 +123,8 @@ const FarmerMarketing: React.FC = () => {
   const [outputText, setOutputText] = useState('');
   const [outputImages, setOutputImages] = useState<Array<{ base64: string; mimeType: string }>>([]);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [isSavingText, setIsSavingText] = useState(false);
   const [savingImageIndex, setSavingImageIndex] = useState<number | null>(null);
+  const hasGeneratedAssets = Boolean(outputText || outputImages.length);
 
   const marketingProducts = useMemo(() => {
     const products = (userProducts as MarketingProduct[]) || [];
@@ -138,29 +141,47 @@ const FarmerMarketing: React.FC = () => {
     }
   }, [marketingProducts, selectedProductId]);
 
+  useEffect(() => {
+    if (!marketingProducts.length) {
+      setMarketingStep(0);
+    }
+  }, [marketingProducts.length]);
+
+  const marketingStepTotal = 4;
+  const stepLabel = (current: number, total: number) =>
+    t('common.stepOf')
+      .replace('{current}', String(current))
+      .replace('{total}', String(total));
+
+  const scrollToStepTop = () => {
+    if (typeof window === 'undefined') return;
+    window.requestAnimationFrame(() => {
+      stepContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  const handleStepChange = (nextStep: number) => {
+    setMarketingStep(nextStep);
+    scrollToStepTop();
+  };
+
+  const resetGeneratedAssets = () => {
+    setOutputText('');
+    setOutputImages([]);
+    setError(null);
+    setSavingImageIndex(null);
+  };
+
+  useEffect(() => {
+    if (hasGeneratedAssets && !isGenerating && marketingStep < 2) {
+      handleStepChange(2);
+    }
+  }, [hasGeneratedAssets, isGenerating, marketingStep]);
+
   const selectedProduct = useMemo(
     () => marketingProducts.find((product) => product.id === selectedProductId) ?? null,
     [marketingProducts, selectedProductId]
   );
-
-  const handleCopy = async () => {
-    if (!outputText) return;
-    try {
-      await navigator.clipboard.writeText(outputText);
-      setCopied(true);
-      toast({
-        title: copy.copyToastTitle,
-        description: copy.copyToastDesc
-      });
-      setTimeout(() => setCopied(false), 1500);
-    } catch (err) {
-      toast({
-        title: copy.copyToastErrorTitle,
-        description: (err as Error).message,
-        variant: 'destructive'
-      });
-    }
-  };
 
   const handleDownloadImage = (image: { base64: string; mimeType: string }, index: number) => {
     const dataUrl = `data:${image.mimeType};base64,${image.base64}`;
@@ -221,9 +242,7 @@ const FarmerMarketing: React.FC = () => {
     }
 
     setIsGenerating(true);
-    setOutputText('');
-    setOutputImages([]);
-    setError(null);
+    resetGeneratedAssets();
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -319,48 +338,6 @@ const FarmerMarketing: React.FC = () => {
     }
   };
 
-  const handleApplyTextToProduct = async () => {
-    if (!selectedProduct) {
-      toast({
-        title: copy.selectProductToastTitle,
-        description: copy.selectProductToastDesc
-      });
-      return;
-    }
-    const trimmed = outputText.trim();
-    if (!trimmed) {
-      toast({
-        title: copy.applyTextButton,
-        description: copy.applyTextMissing,
-        variant: 'destructive'
-      });
-      return;
-    }
-
-    setIsSavingText(true);
-    try {
-      await DatabaseService.updateProduct(selectedProduct.id, {
-        description: trimmed
-      } as any);
-      toast({
-        title: copy.applyTextSuccess,
-        description: selectedProduct.name
-      });
-      if (typeof refreshUserData === 'function') {
-        await refreshUserData();
-      }
-    } catch (err) {
-      console.error('Failed to update product description from marketing page', err);
-      toast({
-        title: copy.applyTextError,
-        description: (err as Error).message,
-        variant: 'destructive'
-      });
-    } finally {
-      setIsSavingText(false);
-    }
-  };
-
   const handleAttachImageToProduct = async (image: { base64: string; mimeType: string }, index: number) => {
     if (!selectedProduct) {
       toast({
@@ -424,6 +401,16 @@ const FarmerMarketing: React.FC = () => {
     }
   };
 
+  const handleGenerateMore = () => {
+    resetGeneratedAssets();
+    handleStepChange(1);
+  };
+
+  const handleViewProduct = () => {
+    if (!selectedProductId) return;
+    navigate(`/market/products?product=${selectedProductId}`);
+  };
+
   if (!featureFlags.marketingTools) {
     return (
       <Card>
@@ -452,296 +439,358 @@ const FarmerMarketing: React.FC = () => {
         <p className="text-muted-foreground">{heroSubtitle}</p>
       </section>
 
-      <Card>
-        <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <ShoppingBag className="h-5 w-5 text-primary" />
-              {copy.inventoryTitle}
-            </CardTitle>
-            <CardDescription>{copy.inventoryDescription}</CardDescription>
+      <div ref={stepContainerRef} className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs font-semibold text-gray-500">
+          <span>{stepLabel(marketingStep + 1, marketingStepTotal)}</span>
+          <div className="flex items-center gap-2 text-[11px] text-gray-400">
+            <span className={marketingStep === 0 ? 'text-gray-700' : ''}>{copy.inventoryTitle}</span>
+            <span>/</span>
+            <span className={marketingStep === 1 ? 'text-gray-700' : ''}>{copy.generatorTitle}</span>
+            <span>/</span>
+            <span className={marketingStep === 2 ? 'text-gray-700' : ''}>{copy.outputCardTitle}</span>
+            <span>/</span>
+            <span className={marketingStep === 3 ? 'text-gray-700' : ''}>{copy.nextActionsTitle}</span>
           </div>
-          <Badge variant="outline" className="text-sm">
-            {copy.productCount(marketingProducts.length)}
-          </Badge>
-        </CardHeader>
-        <CardContent>
-          {!marketingProducts.length ? (
-            <div className="rounded-xl border border-dashed bg-muted/30 p-6 text-center text-sm text-muted-foreground">
-              {copy.emptyState}
-            </div>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {marketingProducts.map((product) => {
-                const isSelected = product.id === selectedProductId;
-                const mainPhoto = product.photos?.[0] || product.images?.[0];
-                return (
-                  <button
-                    key={product.id}
-                    type="button"
-                    onClick={() => setSelectedProductId(product.id)}
-                    className={cn(
-                      'group relative flex h-full flex-col gap-3 rounded-2xl border bg-background/80 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-lg',
-                      isSelected ? 'border-primary ring-2 ring-primary/30' : 'border-border'
-                    )}
-                  >
-                    <div className="overflow-hidden rounded-xl border bg-muted">
-                      {mainPhoto ? (
-                        <img
-                          src={mainPhoto}
-                          alt={product.name}
-                          className="h-40 w-full object-cover transition group-hover:scale-[1.02]"
-                        />
-                      ) : (
-                        <div className="flex h-40 w-full items-center justify-center text-sm text-muted-foreground">
-                          {copy.noPhoto}
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-lg font-semibold leading-tight">{product.name}</h3>
-                        <p className="text-sm text-muted-foreground capitalize">{product.category}</p>
-                      </div>
-                      <Badge variant="secondary" className="text-[11px]">
-                        {copy.productBadge}
+        </div>
+
+        <div
+          key={`marketing-step-${marketingStep}`}
+          className="space-y-6 animate-in fade-in-0 slide-in-from-right-2 duration-300"
+        >
+          {marketingStep === 0 ? (
+            <Card>
+              <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-xl">
+                    <ShoppingBag className="h-5 w-5 text-primary" />
+                    {copy.inventoryTitle}
+                  </CardTitle>
+                  <CardDescription>{copy.inventoryDescription}</CardDescription>
+                </div>
+                <Badge variant="outline" className="text-sm">
+                  {copy.productCount(marketingProducts.length)}
+                </Badge>
+              </CardHeader>
+              <CardContent>
+                {!marketingProducts.length ? (
+                  <div className="rounded-xl border border-dashed bg-muted/30 p-6 text-center text-sm text-muted-foreground">
+                    {copy.emptyState}
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {marketingProducts.map((product) => {
+                      const isSelected = product.id === selectedProductId;
+                      const mainPhoto = product.photos?.[0] || product.images?.[0];
+                      return (
+                        <button
+                          key={product.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedProductId(product.id);
+                            resetGeneratedAssets();
+                            handleStepChange(1);
+                          }}
+                          className={cn(
+                            'group relative flex h-full flex-col gap-3 rounded-2xl border bg-background/80 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-lg',
+                            isSelected ? 'border-primary ring-2 ring-primary/30' : 'border-border'
+                          )}
+                        >
+                          <div className="overflow-hidden rounded-xl border bg-muted">
+                            {mainPhoto ? (
+                              <img
+                                src={mainPhoto}
+                                alt={product.name}
+                                className="h-40 w-full object-cover transition group-hover:scale-[1.02]"
+                              />
+                            ) : (
+                              <div className="flex h-40 w-full items-center justify-center text-sm text-muted-foreground">
+                                {copy.noPhoto}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <h3 className="text-lg font-semibold leading-tight">{product.name}</h3>
+                              <p className="text-sm text-muted-foreground capitalize">{product.category}</p>
+                            </div>
+                            <Badge variant="secondary" className="text-[11px]">
+                              {copy.productBadge}
+                            </Badge>
+                          </div>
+                          <dl className="grid grid-cols-2 gap-3 text-xs text-muted-foreground">
+                            <div className="space-y-0.5">
+                              <dt>{copy.priceLabel}</dt>
+                              <dd className="text-sm font-semibold text-foreground">
+                                {new Intl.NumberFormat('zh-TW', {
+                                  style: 'currency',
+                                  currency: 'TWD',
+                                  maximumFractionDigits: 0
+                                }).format(product.price ?? 0)}{' '}
+                                / {product.unit || 'unit'}
+                              </dd>
+                            </div>
+                            <div className="space-y-0.5">
+                              <dt>{copy.stockLabel}</dt>
+                              <dd className="text-sm font-semibold text-foreground">{product.stock ?? 0}</dd>
+                            </div>
+                            <div className="space-y-0.5">
+                              <dt>{copy.packLabel}</dt>
+                              <dd>{product.pack || 1}</dd>
+                            </div>
+                            <div className="space-y-0.5">
+                              <dt>{copy.gradeLabel}</dt>
+                              <dd>{product.grade || '—'}</dd>
+                            </div>
+                          </dl>
+                          {product.description ? (
+                            <p className="text-sm text-muted-foreground line-clamp-2">{product.description}</p>
+                          ) : (
+                            <p className="text-xs text-muted-foreground">{copy.noDescription}</p>
+                          )}
+                          {isSelected ? (
+                            <div className="absolute right-4 top-4 flex items-center gap-1 rounded-full bg-primary/90 px-3 py-1 text-xs font-semibold text-white shadow">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              {copy.focusedBadge}
+                            </div>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ) : marketingStep === 1 ? (
+            <Card className="border-primary/30 shadow-lg shadow-primary/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-xl">
+                  <Sparkles className="h-5 w-5 text-primary" />
+                  {copy.generatorTitle}
+                </CardTitle>
+                <CardDescription>{copy.generatorDescription}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {selectedProduct ? (
+                  <div className="rounded-2xl border bg-muted/30 p-4">
+                    <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
+                      <Package className="h-4 w-4 text-primary" />
+                      {selectedProduct.name}
+                      <Badge variant="outline" className="text-xs capitalize">
+                        {selectedProduct.category}
                       </Badge>
+                      {selectedProduct.grade ? (
+                        <Badge variant="secondary" className="text-xs">
+                          {copy.gradeBadgePrefix} {selectedProduct.grade}
+                        </Badge>
+                      ) : null}
                     </div>
-                    <dl className="grid grid-cols-2 gap-3 text-xs text-muted-foreground">
-                      <div className="space-y-0.5">
-                        <dt>{copy.priceLabel}</dt>
-                        <dd className="text-sm font-semibold text-foreground">
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {selectedProduct.description || copy.productSummaryNoDesc}
+                    </p>
+                    <dl className="mt-3 grid gap-3 text-xs text-muted-foreground sm:grid-cols-3">
+                      <div>
+                        <dt className="font-medium text-foreground">{copy.priceLabel}</dt>
+                        <dd>
                           {new Intl.NumberFormat('zh-TW', {
                             style: 'currency',
                             currency: 'TWD',
                             maximumFractionDigits: 0
-                          }).format(product.price ?? 0)}{' '}
-                          / {product.unit || 'unit'}
+                          }).format(selectedProduct.price ?? 0)}
                         </dd>
                       </div>
-                      <div className="space-y-0.5">
-                        <dt>{copy.stockLabel}</dt>
-                        <dd className="text-sm font-semibold text-foreground">{product.stock ?? 0}</dd>
+                      <div>
+                        <dt className="font-medium text-foreground">{copy.unitLabel}</dt>
+                        <dd>{selectedProduct.unit || 'unit'}</dd>
                       </div>
-                      <div className="space-y-0.5">
-                        <dt>{copy.packLabel}</dt>
-                        <dd>{product.pack || 1}</dd>
-                      </div>
-                      <div className="space-y-0.5">
-                        <dt>{copy.gradeLabel}</dt>
-                        <dd>{product.grade || '—'}</dd>
+                      <div>
+                        <dt className="font-medium text-foreground">{copy.stockLabel}</dt>
+                        <dd>{selectedProduct.stock ?? 0}</dd>
                       </div>
                     </dl>
-                    {product.description ? (
-                      <p className="text-sm text-muted-foreground line-clamp-2">{product.description}</p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">{copy.noDescription}</p>
-                    )}
-                    {isSelected ? (
-                      <div className="absolute right-4 top-4 flex items-center gap-1 rounded-full bg-primary/90 px-3 py-1 text-xs font-semibold text-white shadow">
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        {copy.focusedBadge}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+                    {copy.selectProductFallback}
+                  </div>
+                )}
+
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{copy.referenceImageLabel}</label>
+                    <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} className="hidden" />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex items-center gap-2"
+                      >
+                        <ImageIcon className="h-4 w-4" />
+                        {uploadedImage ? copy.changeImageButton : copy.uploadImageButton}
+                      </Button>
+                      {uploadedImage ? (
+                        <Button type="button" variant="ghost" onClick={clearUpload} className="flex items-center gap-2">
+                          <X className="h-4 w-4" />
+                          {copy.removeImageButton}
+                        </Button>
+                      ) : null}
+                      <span className="text-xs text-muted-foreground">
+                        {uploadedImage ? uploadedImage.name : copy.uploadHint}
+                      </span>
+                    </div>
+                    {uploadedImage?.previewUrl ? (
+                      <div className="overflow-hidden rounded-xl border bg-background">
+                        <img src={uploadedImage.previewUrl} alt={uploadedImage.name} className="h-56 w-full object-cover" />
                       </div>
                     ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-foreground">{copy.promptLabel}</label>
+                    <Textarea
+                      value={prompt}
+                      onChange={(event) => setPrompt(event.target.value)}
+                      rows={6}
+                      placeholder={copy.promptPlaceholder}
+                    />
+                    <p className="text-xs text-muted-foreground">{copy.languageNote(languageLabel(language))}</p>
+                  </div>
+                </div>
 
-      <Card className="border-primary/30 shadow-lg shadow-primary/5">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-xl">
-            <Sparkles className="h-5 w-5 text-primary" />
-            {copy.generatorTitle}
-          </CardTitle>
-          <CardDescription>{copy.generatorDescription}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {selectedProduct ? (
-            <div className="rounded-2xl border bg-muted/30 p-4">
-              <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-foreground">
-                <Package className="h-4 w-4 text-primary" />
-                {selectedProduct.name}
-                <Badge variant="outline" className="text-xs capitalize">
-                  {selectedProduct.category}
-                </Badge>
-                {selectedProduct.grade ? (
-                  <Badge variant="secondary" className="text-xs">
-                    {copy.gradeBadgePrefix} {selectedProduct.grade}
-                  </Badge>
-                ) : null}
-              </div>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {selectedProduct.description || copy.productSummaryNoDesc}
-              </p>
-              <dl className="mt-3 grid gap-3 text-xs text-muted-foreground sm:grid-cols-3">
-                <div>
-                  <dt className="font-medium text-foreground">{copy.priceLabel}</dt>
-                  <dd>
-                    {new Intl.NumberFormat('zh-TW', {
-                      style: 'currency',
-                      currency: 'TWD',
-                      maximumFractionDigits: 0
-                    }).format(selectedProduct.price ?? 0)}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-foreground">{copy.unitLabel}</dt>
-                  <dd>{selectedProduct.unit || 'unit'}</dd>
-                </div>
-                <div>
-                  <dt className="font-medium text-foreground">{copy.stockLabel}</dt>
-                  <dd>{selectedProduct.stock ?? 0}</dd>
-                </div>
-              </dl>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
-              {copy.selectProductFallback}
-            </div>
-          )}
-
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">{copy.referenceImageLabel}</label>
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleUpload} className="hidden" />
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-2"
-                >
-                  <ImageIcon className="h-4 w-4" />
-                  {uploadedImage ? copy.changeImageButton : copy.uploadImageButton}
-                </Button>
-                {uploadedImage ? (
-                  <Button type="button" variant="ghost" onClick={clearUpload} className="flex items-center gap-2">
-                    <X className="h-4 w-4" />
-                    {copy.removeImageButton}
+                <div className="flex flex-wrap gap-2">
+                  <Button onClick={generate} disabled={isGenerating || !selectedProduct} className="flex items-center gap-2">
+                    {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+                    {isGenerating ? copy.generatingLabel : copy.generateCTA}
                   </Button>
-                ) : null}
-                <span className="text-xs text-muted-foreground">
-                  {uploadedImage ? uploadedImage.name : copy.uploadHint}
-                </span>
-              </div>
-              {uploadedImage?.previewUrl ? (
-                <div className="overflow-hidden rounded-xl border bg-background">
-                  <img src={uploadedImage.previewUrl} alt={uploadedImage.name} className="h-56 w-full object-cover" />
+                  {isGenerating ? (
+                    <Button type="button" variant="outline" onClick={stop}>
+                      {copy.stopLabel}
+                    </Button>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">{copy.promptLabel}</label>
-              <Textarea
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                rows={6}
-                placeholder={copy.promptPlaceholder}
-              />
-              <p className="text-xs text-muted-foreground">{copy.languageNote(languageLabel(language))}</p>
-            </div>
-          </div>
 
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={generate} disabled={isGenerating || !selectedProduct} className="flex items-center gap-2">
-              {isGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              {isGenerating ? copy.generatingLabel : copy.generateCTA}
-            </Button>
-            {isGenerating ? (
-              <Button type="button" variant="outline" onClick={stop}>
-                {copy.stopLabel}
+                {error ? (
+                  <div className="rounded-xl border border-destructive bg-destructive/10 p-4 text-sm text-destructive-foreground">
+                    {error}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : marketingStep === 2 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>{copy.outputCardTitle}</CardTitle>
+                <CardDescription>{copy.outputCardDescription}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                {outputText ? (
+                  <MarkdownRenderer
+                    content={outputText}
+                    className="prose-sm rounded-2xl border bg-background p-4 text-sm"
+                  />
+                ) : (
+                  <div className="text-sm text-muted-foreground">{copy.noTextYet}</div>
+                )}
+
+                {outputImages.length > 0 ? (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {outputImages.map((image, index) => {
+                      const dataUrl = `data:${image.mimeType};base64,${image.base64}`;
+                      return (
+                        <div key={`${image.mimeType}-${index}`} className="rounded-2xl border bg-muted/30 p-3">
+                          <div className="relative overflow-hidden rounded-xl bg-background">
+                            <img src={dataUrl} alt={`Generated ${index + 1}`} className="h-64 w-full object-cover" />
+                          </div>
+                          <div className="mt-3 flex flex-col gap-2">
+                            <Button
+                              type="button"
+                              onClick={() => handleAttachImageToProduct(image, index)}
+                              disabled={savingImageIndex === index}
+                              className="w-full gap-2"
+                            >
+                              {savingImageIndex === index ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <UploadCloud className="h-4 w-4" />
+                              )}
+                              {savingImageIndex === index ? copy.applyImageSaving : copy.applyImageButton}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDownloadImage(image, index)}
+                              className="w-full gap-2"
+                            >
+                              <Download className="h-4 w-4" />
+                              {copy.downloadButton}
+                            </Button>
+                            {savingImageIndex === index ? (
+                              <Progress value={70} className="h-2 animate-pulse" />
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">{copy.noImageYet}</div>
+                )}
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <CardTitle>{copy.nextActionsTitle}</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+                <Button type="button" variant="outline" onClick={handleGenerateMore}>
+                  {copy.generateMoreButton}
+                </Button>
+                <Button type="button" onClick={handleViewProduct} disabled={!selectedProductId}>
+                  {copy.viewProductButton}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {marketingStep < 3 ? (
+          <div className="flex items-center justify-between border-t pt-4">
+            {marketingStep === 0 ? (
+              <span />
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => handleStepChange(marketingStep === 1 ? 0 : 1)}
+              >
+                {t('common.back')}
               </Button>
-            ) : null}
+            )}
+            {marketingStep === 0 ? (
+              <Button type="button" onClick={() => handleStepChange(1)} disabled={!selectedProductId}>
+                {t('common.next')}
+              </Button>
+            ) : marketingStep === 1 ? (
+              <Button
+                type="button"
+                onClick={() => handleStepChange(2)}
+                disabled={!hasGeneratedAssets || isGenerating}
+              >
+                {t('common.next')}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                onClick={() => handleStepChange(3)}
+                disabled={!hasGeneratedAssets}
+              >
+                {t('common.next')}
+              </Button>
+            )}
           </div>
-
-          {error ? (
-            <div className="rounded-xl border border-destructive bg-destructive/10 p-4 text-sm text-destructive-foreground">
-              {error}
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      {(outputText || outputImages.length > 0) && (
-        <Card>
-          <CardHeader className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div>
-              <CardTitle>{copy.outputCardTitle}</CardTitle>
-              <CardDescription>{copy.outputCardDescription}</CardDescription>
-            </div>
-            {outputText ? (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  onClick={handleApplyTextToProduct}
-                  disabled={isSavingText}
-                  className="flex items-center gap-2"
-                >
-                  {isSavingText ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                  {isSavingText ? copy.applyTextSaving : copy.applyTextButton}
-                </Button>
-                <Button type="button" variant="outline" size="sm" onClick={handleCopy} className="flex items-center gap-2">
-                  <Clipboard className="h-4 w-4" />
-                  {copied ? copy.copyButtonCopied : copy.copyButtonIdle}
-                </Button>
-              </div>
-            ) : null}
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {outputText ? (
-              <div className="rounded-2xl border bg-background p-4 text-sm leading-relaxed whitespace-pre-line">{outputText}</div>
-            ) : (
-              <div className="text-sm text-muted-foreground">{copy.noTextYet}</div>
-            )}
-
-            {outputImages.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {outputImages.map((image, index) => {
-                  const dataUrl = `data:${image.mimeType};base64,${image.base64}`;
-                  return (
-                    <div key={`${image.mimeType}-${index}`} className="rounded-2xl border bg-muted/30 p-3">
-                      <div className="relative overflow-hidden rounded-xl bg-background">
-                        <img src={dataUrl} alt={`Generated ${index + 1}`} className="h-64 w-full object-cover" />
-                      </div>
-                      <div className="mt-3 flex flex-col gap-2">
-                        <Button
-                          type="button"
-                          onClick={() => handleAttachImageToProduct(image, index)}
-                          disabled={savingImageIndex === index}
-                          className="w-full gap-2"
-                        >
-                          {savingImageIndex === index ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <UploadCloud className="h-4 w-4" />
-                          )}
-                          {savingImageIndex === index ? copy.applyImageSaving : copy.applyImageButton}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDownloadImage(image, index)}
-                          className="w-full gap-2"
-                        >
-                          <Download className="h-4 w-4" />
-                          {copy.downloadButton}
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground">{copy.noImageYet}</div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+        ) : null}
+      </div>
     </div>
   );
 };

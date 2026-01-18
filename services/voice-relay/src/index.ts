@@ -19,6 +19,10 @@ const MODEL = process.env.GEMINI_LIVE_MODEL || 'models/gemini-2.5-flash-native-a
 const API_BASE_URL = (process.env.API_BASE_URL || '').replace(/\/+$/, '');
 const ALLOW_UNAUTH = process.env.ALLOW_UNAUTH_VOICE === 'true';
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
+const CORS_ORIGINS = CORS_ORIGIN.split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const CORS_ALLOW_ALL = CORS_ORIGINS.length === 0 || CORS_ORIGINS.includes('*');
 const LIVE_SESSION_TTL_MS = 1000 * 60 * 15;
 const LINE_ID_TOKEN_FALLBACK_TTL_MS = 1000 * 60 * 50;
 const LINE_CHANNEL_ID =
@@ -61,7 +65,26 @@ console.info('[voice-relay] boot', {
 });
 
 const app = express();
-app.use(cors({ origin: CORS_ORIGIN, credentials: true }));
+app.use(
+  cors({
+    origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+      if (CORS_ALLOW_ALL) {
+        callback(null, true);
+        return;
+      }
+      if (CORS_ORIGINS.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '2mb' }));
 app.get('/healthz', (_req, res) => res.json({ status: 'ok' }));
 
@@ -236,7 +259,10 @@ type LiveRelaySession = {
   lastUsedAt: number;
   clients: Set<Response>;
   auth: RelayAuth;
-  toolCache: Map<string, { messages: Array<{ role: 'assistant' | 'system'; text: string }>; expiresAt: number }>;
+  toolCache: Map<
+    string,
+    { messages: Array<{ role: 'assistant' | 'system'; text: string }>; expiresAt: number; ui?: Record<string, unknown> }
+  >;
 };
 
 const liveSessions = new Map<string, LiveRelaySession>();
@@ -458,7 +484,11 @@ wss.on('connection', async (ws: any, req: any) => {
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   const toolCache = new Map<
     string,
-    { messages: Array<{ role: 'assistant' | 'system'; text: string }>; expiresAt: number }
+    {
+      messages: Array<{ role: 'assistant' | 'system'; text: string }>;
+      expiresAt: number;
+      ui?: Record<string, unknown>;
+    }
   >();
   const shouldStreamText = RESPONSE_MODALITIES.includes(Modality.TEXT);
   const toolHeaders = buildToolHeaders(auth);
@@ -489,7 +519,19 @@ wss.on('connection', async (ws: any, req: any) => {
                 const callId = call.id || '';
                 const argsSummary = summarizeArgs(args);
                 const callStart = Date.now();
+                if (callId) {
+                  ws.send(
+                    JSON.stringify({
+                      type: 'tool',
+                      phase: 'start',
+                      name,
+                      args,
+                      toolCallId: callId,
+                    })
+                  );
+                }
                 let toolMessages: Array<{ role: 'assistant' | 'system'; text: string }> = [];
+                let toolUi: Record<string, unknown> | undefined;
                 if (index > 0) {
                   console.log('[voice-relay] toolCall skipped', { name, id: callId, reason: 'multiple' });
                   toolMessages = [
@@ -504,6 +546,7 @@ wss.on('connection', async (ws: any, req: any) => {
                   if (cached && cached.expiresAt > now) {
                     console.log('[voice-relay] toolCall cache hit', { name, id: callId });
                     toolMessages = cached.messages;
+                    toolUi = cached.ui;
                   } else {
                     try {
                       if (!API_BASE_URL) {
@@ -527,14 +570,20 @@ wss.on('connection', async (ws: any, req: any) => {
                         });
                         const payload = (await response.json()) as {
                           messages?: Array<{ role: 'assistant' | 'system'; text: string }>;
+                          ui?: Record<string, unknown>;
                         };
                         toolMessages = Array.isArray(payload?.messages) ? payload.messages : [];
+                        toolUi = payload?.ui;
                       }
                     } catch (error) {
                       console.warn('[voice-relay] toolCall error', { name, id: callId, error });
                       toolMessages = [{ role: 'assistant', text: 'Tool execution failed.' }];
                     }
-                    toolCache.set(signature, { messages: toolMessages, expiresAt: now + TOOL_CACHE_TTL_MS });
+                    toolCache.set(signature, {
+                      messages: toolMessages,
+                      expiresAt: now + TOOL_CACHE_TTL_MS,
+                      ui: toolUi,
+                    });
                   }
                 }
 
@@ -542,6 +591,17 @@ wss.on('connection', async (ws: any, req: any) => {
                   console.warn('[voice-relay] toolCall missing id', { name, args: argsSummary });
                   return null;
                 }
+                ws.send(
+                  JSON.stringify({
+                    type: 'tool',
+                    phase: 'done',
+                    name,
+                    args,
+                    toolCallId: call.id,
+                    messages: toolMessages,
+                    ui: toolUi,
+                  })
+                );
                 const text = toolMessages.map((message) => message.text).filter(Boolean).join('\n').slice(0, 2000);
                 console.log('[voice-relay] toolCall done', {
                   name,
@@ -708,7 +768,17 @@ const createLiveSession = async ({
                 const callId = call.id || '';
                 const argsSummary = summarizeArgs(args);
                 const callStart = Date.now();
+                if (callId) {
+                  broadcastLive(sessionId, {
+                    type: 'tool',
+                    phase: 'start',
+                    name,
+                    args,
+                    toolCallId: callId,
+                  });
+                }
                 let toolMessages: Array<{ role: 'assistant' | 'system'; text: string }> = [];
+                let toolUi: Record<string, unknown> | undefined;
                 if (!entry) {
                   console.log('[voice-relay] toolCall skipped (no session)', { name, id: callId });
                   toolMessages = [{ role: 'assistant', text: 'Session expired. Please reconnect.' }];
@@ -726,6 +796,7 @@ const createLiveSession = async ({
                   if (cached && cached.expiresAt > now) {
                     console.log('[voice-relay] toolCall cache hit', { name, id: callId });
                     toolMessages = cached.messages;
+                    toolUi = cached.ui;
                   } else {
                     try {
                       if (!API_BASE_URL) {
@@ -749,14 +820,20 @@ const createLiveSession = async ({
                         });
                         const payload = (await response.json()) as {
                           messages?: Array<{ role: 'assistant' | 'system'; text: string }>;
+                          ui?: Record<string, unknown>;
                         };
                         toolMessages = Array.isArray(payload?.messages) ? payload.messages : [];
+                        toolUi = payload?.ui;
                       }
                     } catch (error) {
                       console.warn('[voice-relay] toolCall error', { name, id: callId, error });
                       toolMessages = [{ role: 'assistant', text: 'Tool execution failed.' }];
                     }
-                    entry.toolCache.set(signature, { messages: toolMessages, expiresAt: now + TOOL_CACHE_TTL_MS });
+                    entry.toolCache.set(signature, {
+                      messages: toolMessages,
+                      expiresAt: now + TOOL_CACHE_TTL_MS,
+                      ui: toolUi,
+                    });
                   }
                 }
 
@@ -764,6 +841,15 @@ const createLiveSession = async ({
                   console.warn('[voice-relay] toolCall missing id', { name, args: argsSummary });
                   return null;
                 }
+                broadcastLive(sessionId, {
+                  type: 'tool',
+                  phase: 'done',
+                  name,
+                  args,
+                  toolCallId: call.id,
+                  messages: toolMessages,
+                  ui: toolUi,
+                });
                 const text = toolMessages.map((message) => message.text).filter(Boolean).join('\n').slice(0, 2000);
                 console.log('[voice-relay] toolCall done', {
                   name,

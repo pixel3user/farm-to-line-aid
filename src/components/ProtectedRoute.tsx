@@ -13,7 +13,7 @@ interface ProtectedRouteProps {
 }
 
 const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole, allowedRoles }) => {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isInLineApp, isLiffReady } = useAuth();
   const location = useLocation();
 
   const isAdmin = !!user?.isAdmin;
@@ -24,7 +24,8 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
     : undefined;
 
   // Show loading while checking authentication
-  if (isLoading) {
+  // If inside LINE app and LIFF is not ready yet, wait for LIFF authentication
+  if (isLoading || (isInLineApp && !isLiffReady && !user)) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -36,7 +37,21 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, requiredRole,
   }
 
   // If not authenticated, redirect to sign in
+  // BUT: If inside LINE app, don't redirect - LIFF will authenticate automatically
   if (!user) {
+    // Inside LINE app - wait for LIFF authentication, don't redirect to signin
+    if (isInLineApp) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto mb-4"></div>
+            <p className="text-gray-600">Authenticating...</p>
+          </div>
+        </div>
+      );
+    }
+    
+    // Outside LINE app - redirect to signin
     savePostOnboardingRedirect(buildPostOnboardingRedirectPath(location));
     return <Navigate to="/auth/signin" state={{ from: location }} replace />;
   }

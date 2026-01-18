@@ -43,12 +43,32 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const LINE_LINK_PROMPT_DISMISSED_KEY = 'farm2market_line_link_prompt_dismissed';
+const LINE_LINK_NUDGE_DISMISSED_KEY = 'farm2market_line_link_nudge_dismissed';
 
 interface AuthProviderProps {
   children: ReactNode;
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+  const getSessionFlag = (key: string) => {
+    try {
+      return sessionStorage.getItem(key) === 'true';
+    } catch {
+      return false;
+    }
+  };
+  const setSessionFlag = (key: string, value: boolean) => {
+    try {
+      if (value) {
+        sessionStorage.setItem(key, 'true');
+      } else {
+        sessionStorage.removeItem(key);
+      }
+    } catch {
+      // Ignore sessionStorage failures (private mode, etc.)
+    }
+  };
   const [user, setUser] = useState<LineUser | null>(() => {
     // Try to restore user from localStorage
     try {
@@ -85,6 +105,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [userMarketingMaterials, setUserMarketingMaterials] = useState<any[]>([]);
   const [showLineIdPrompt, setShowLineIdPrompt] = useState(false);
   const [showLineNudgeBar, setShowLineNudgeBar] = useState(false);
+  const [lineLinkPromptDismissed, setLineLinkPromptDismissed] = useState(() =>
+    getSessionFlag(LINE_LINK_PROMPT_DISMISSED_KEY)
+  );
+  const [lineLinkNudgeDismissed, setLineLinkNudgeDismissed] = useState(() =>
+    getSessionFlag(LINE_LINK_NUDGE_DISMISSED_KEY)
+  );
   const loginInProgressRef = useRef(false);
   const dataLoadingRef = useRef(false);
   const lastLoadTimeRef = useRef(0);
@@ -103,14 +129,30 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   useEffect(() => {
     const hasLiffLink = Boolean(liffUser?.userId);
-    if (user?.role === 'farmer' && !user.lineId && !hasLiffLink) {
+    const shouldSuggestLink = user?.role === 'farmer' && !user.lineId && !hasLiffLink;
+    if (shouldSuggestLink && !lineLinkPromptDismissed) {
       setShowLineIdPrompt(true);
       setShowLineNudgeBar(false);
-    } else {
-      setShowLineIdPrompt(false);
-      setShowLineNudgeBar(false);
+      return;
     }
-  }, [user, liffUser]);
+    if (shouldSuggestLink && !lineLinkNudgeDismissed) {
+      setShowLineIdPrompt(false);
+      setShowLineNudgeBar(true);
+      return;
+    }
+    setShowLineIdPrompt(false);
+    setShowLineNudgeBar(false);
+  }, [user, liffUser, lineLinkPromptDismissed, lineLinkNudgeDismissed]);
+
+  const dismissLineLinkPrompt = () => {
+    setLineLinkPromptDismissed(true);
+    setSessionFlag(LINE_LINK_PROMPT_DISMISSED_KEY, true);
+  };
+
+  const dismissLineLinkNudge = () => {
+    setLineLinkNudgeDismissed(true);
+    setSessionFlag(LINE_LINK_NUDGE_DISMISSED_KEY, true);
+  };
 
   const requestInitialLocation = async (): Promise<{ lat: number; lng: number } | null> => {
     try {
@@ -210,26 +252,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         console.log('Firebase auth available:', !!auth);
         console.log('Firebase db available:', !!db);
         
-        // Check if we're in LINE app environment
+        // Check if we're running inside a LIFF container (not just the LINE in-app browser).
         const userAgent = navigator.userAgent.toLowerCase();
         const uaInLine = userAgent.includes('line');
         const liffId = import.meta.env.VITE_LIFF_ID;
         const hasLiffId = Boolean(liffId && liffId !== 'your-liff-id');
         let liff: typeof import('@line/liff').default | null = null;
-        let inLineClient = uaInLine;
+        let isLiffClient = false;
         console.log('User agent:', userAgent, 'Is in LINE (UA):', uaInLine);
 
         if (hasLiffId) {
           try {
             liff = (await import('@line/liff')).default;
             const liffInClient = typeof liff.isInClient === 'function' ? liff.isInClient() : false;
-            inLineClient = inLineClient || liffInClient;
+            isLiffClient = Boolean(liffInClient);
           } catch (error) {
             console.warn('LIFF SDK load failed:', error);
           }
         }
 
-        setIsInLineApp(inLineClient);
+        setIsInLineApp(isLiffClient);
 
         // If we have a saved user, check if we should restore it
         if (user && liffUser) {
@@ -244,7 +286,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             console.log('Using saved user, loading data...');
             setIsLiffReady(true);
             setIsLoading(false);
-            if (inLineClient && hasLiffId) {
+            if (isLiffClient && hasLiffId) {
               try {
                 const liffInstance = liff ?? (await import('@line/liff')).default;
                 await liffInstance.init({ liffId });
@@ -275,7 +317,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         const linePictureUrl = urlParams.get('pictureUrl');
         console.log('URL params:', { lineUserId, lineDisplayName, linePictureUrl });
 
-        if (inLineClient) {
+        if (isLiffClient) {
           console.log('In LINE app, initializing LIFF...');
           try {
             if (!hasLiffId || !liff) {
@@ -845,9 +887,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Load user profile
       const userRef = doc(db, 'line_users', userId);
       const userSnap = await getDoc(userRef);
+      const userData = userSnap.exists() ? (userSnap.data() as LineUser) : null;
+      const userRole = userData?.role;
       
-      if (userSnap.exists()) {
-        const userData = userSnap.data() as LineUser;
+      if (userData) {
         console.log('Loaded user profile:', userData.displayName);
         setUser({
           ...userData,
@@ -865,12 +908,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       
       // Load user statistics and data
       console.log('Loading user statistics and data...');
+      const storesPromise = userRole === 'farmer'
+        ? UserDataService.getStoresForFarmer(userId)
+        : UserDataService.getUserStores(userId);
+
       const [stats, products, stores, marketingMaterials] = await Promise.all([
         UserDataService.getUserStats(userId),
         UserDataService.getUserProducts(userId), // Increased limit to get more products
-        UserDataService.getUserStores(userId), // Increased limit to get more stores
+        storesPromise, // Increased limit to get more stores
         UserDataService.getMarketingMaterials(userId, 10)
       ]);
+
+      if (userRole === 'farmer') {
+        stats.totalStores = stores.length;
+      }
       
       console.log('Loaded data:', {
         stats: stats,
@@ -938,6 +989,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     
 
     try {
+      const profileToUse = profileOverride ?? liffUser;
+      if (profileToUse && !options?.force) {
+        if (profileOverride) {
+          setLiffUser(profileToUse);
+        }
+        await authenticateWithFirebase(lineIdToken ?? '', profileToUse);
+        return;
+      }
+
       const liff = (await import('@line/liff')).default;
       const liffId = import.meta.env.VITE_LIFF_ID;
 
@@ -956,13 +1016,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (options?.force || !liffUser) {
         await liff.init({ liffId });
         liff.login();
-        return;
-      }
-
-      const profileToUse = profileOverride ?? liffUser;
-      if (profileToUse) {
-        console.log('Using existing LINE profile to authenticate');
-        await authenticateWithFirebase(lineIdToken ?? '', profileToUse);
         return;
       }
 
@@ -1097,8 +1150,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       <Dialog
         open={showLineIdPrompt}
         onOpenChange={(open) => {
-          setShowLineIdPrompt(open);
-          if (!open) setShowLineNudgeBar(true);
+          if (open) {
+            setShowLineIdPrompt(true);
+            return;
+          }
+          setShowLineIdPrompt(false);
+          dismissLineLinkPrompt();
         }}
       >
         <DialogContent>
@@ -1131,6 +1188,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                 variant="outline"
                 size="sm"
                 onClick={() => {
+                  setLineLinkPromptDismissed(false);
+                  setSessionFlag(LINE_LINK_PROMPT_DISMISSED_KEY, false);
                   setShowLineIdPrompt(true);
                   setShowLineNudgeBar(false);
                 }}
@@ -1141,7 +1200,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 text-green-700"
-                onClick={() => setShowLineNudgeBar(false)}
+                onClick={() => {
+                  setShowLineNudgeBar(false);
+                  dismissLineLinkNudge();
+                }}
               >
                 ✕
               </Button>

@@ -14,6 +14,10 @@ export default defineConfig(({ mode }) => ({
         changeOrigin: true,
       },
     },
+    allowedHosts: [
+      "instinctively-overpotent-jazlyn.ngrok-free.dev",
+      "postnasal-gertrud-nonmechanistic.ngrok-free.dev"
+    ],
   },
   plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
   resolve: {

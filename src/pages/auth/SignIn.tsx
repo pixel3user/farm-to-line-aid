@@ -29,7 +29,7 @@ const SignIn: React.FC = () => {
   const [error, setError] = useState('');
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { login, loginWithEmail, user } = useAuth();
+  const { login, loginWithEmail, user, isInLineApp } = useAuth();
   const { t } = useLanguage();
 
   const role = searchParams.get('role') as 'farmer' | 'market' | null;
@@ -59,7 +59,13 @@ const SignIn: React.FC = () => {
       if (email && password) {
         await loginWithEmail(email, password);
       } else {
-        await login();
+        // Only call login() if not inside LINE app
+        // Inside LINE, LIFF will authenticate automatically - don't trigger LINE Login
+        if (!isInLineApp) {
+          await login();
+        } else {
+          setError('Please wait for automatic authentication or use email/password login.');
+        }
       }
       // Navigation will be handled by useEffect
     } catch (err) {

@@ -9,32 +9,29 @@ import { MapPin, MessageSquare, Users, Eye, Phone } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import FarmersMap from '@/components/FarmersMap';
 import { FarmerMapPreview, FarmerRelatedSection } from '@/components/FarmerDetailSections';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 const MarketFarms: React.FC = () => {
   const { t } = useLanguage();
-  const [farmers, setFarmers] = useState<LineUser[]>([]);
+  const queryClient = useQueryClient();
+  const { data: farmers = [], isFetching } = useQuery<LineUser[]>({
+    queryKey: ['market-farmers-all'],
+    queryFn: () => DatabaseService.getFarmers(50),
+    staleTime: Infinity,
+    cacheTime: 30 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    keepPreviousData: true,
+    initialData: () => queryClient.getQueryData(['market-farmers-all']) as LineUser[] | undefined,
+  });
+  const hasFarmers = farmers.length > 0;
+  const isLoading = !hasFarmers && isFetching;
   const [searchTerm, setSearchTerm] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
   const [selectedFarmer, setSelectedFarmer] = useState<LineUser | null>(null);
   const [isFarmerModalOpen, setIsFarmerModalOpen] = useState(false);
   const [farmerProducts, setFarmerProducts] = useState<Product[]>([]);
   const [farmerStores, setFarmerStores] = useState<Store[]>([]);
   const [isFarmerDataLoading, setIsFarmerDataLoading] = useState(false);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const items = await DatabaseService.getFarmers(50);
-        setFarmers(items);
-      } catch (error) {
-        console.error('Failed to load farmers:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    load();
-  }, []);
 
   const filteredFarmers = useMemo(() => {
     return farmers.filter((farmer) =>
@@ -165,9 +162,11 @@ const MarketFarms: React.FC = () => {
           {filteredFarmers.length === 0 ? (
             <p className="text-sm text-gray-500">{t('farms.noResults')}</p>
           ) : (
-            filteredFarmers.map((farmer) => (
+            filteredFarmers.map((farmer, index) => {
+              const farmerKey = farmer.id || farmer.lineUserId || `farmer-${index}`;
+              return (
               <div
-                key={farmer.id}
+                key={farmerKey}
                 role="button"
                 tabIndex={0}
                 onClick={() => openFarmerModal(farmer)}
@@ -209,7 +208,8 @@ const MarketFarms: React.FC = () => {
                   </div>
                 </div>
               </div>
-            ))
+              );
+            })
           )}
         </CardContent>
       </Card>
@@ -261,7 +261,7 @@ const MarketFarms: React.FC = () => {
         </CardContent>
       </Card>
       <Dialog open={isFarmerModalOpen} onOpenChange={handleModalChange}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>{selectedFarmer?.displayName || t('market.certifiedFarmer')}</DialogTitle>
             <DialogDescription>{t('farms.description')}</DialogDescription>

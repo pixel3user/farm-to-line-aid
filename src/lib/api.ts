@@ -22,7 +22,7 @@ export const resolveApiBaseUrl = (): string => {
     const origin = window.location.origin;
     const fallbackHost =
       (import.meta.env.VITE_FRONTEND_BASE_URL as string | undefined)?.replace(/\/+$/, '') ||
-      'https://farm2market-99.web.app';
+      'https://farm2market.tw';
     if (/liff\.line\.me/i.test(origin)) {
       return fallbackHost;
     }

@@ -1,28 +1,35 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import TopNavigation from './TopNavigation';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { featureFlags } from '@/config/featureFlags';
 import LocationReminder from '@/components/LocationReminder';
 import { Toaster } from '@/components/ui/toaster';
 import { Toaster as Sonner } from '@/components/ui/sonner';
-import MarketOnboarding from '@/components/MarketOnboarding';
-import MarketTutorial from '@/components/MarketTutorial';
 import { useAuth } from '@/contexts/AuthContext';
-import VoiceAssistantPopup from '@/components/VoiceAssistantPopup';
 import { 
   LayoutDashboard, 
+  BarChart3,
+  BookOpen,
+  Megaphone,
   Trees, 
   Package, 
   Calendar, 
   Star,
+  Store,
+  Truck,
   Menu,
   X,
   Search,
   MapPin,
   Filter
 } from 'lucide-react';
+
+const MarketOnboarding = React.lazy(() => import('@/components/MarketOnboarding'));
+const MarketTutorial = React.lazy(() => import('@/components/MarketTutorial'));
+const VoiceAssistantPopup = React.lazy(() => import('@/components/VoiceAssistantPopup'));
 
 const MarketLayout: React.FC = () => {
   const { t } = useLanguage();
@@ -34,6 +41,7 @@ const MarketLayout: React.FC = () => {
   const isMobile = useIsMobile();
   const showDesktopSidebar = !isMobile && !isLiffApp;
   const showVoiceAssistant = Boolean(user || firebaseUser || liffUser);
+  const isFarmer = user?.role === 'farmer';
 
   useEffect(() => {
     const userAgent = navigator.userAgent.toLowerCase();
@@ -74,11 +82,76 @@ const MarketLayout: React.FC = () => {
     },
   ];
 
+  const farmerNavigationItems = [
+    { 
+      label: t('dashboard.overview'), 
+      href: '/farmer', 
+      icon: LayoutDashboard,
+      key: 'dashboard'
+    },
+    { 
+      label: t('products.title'), 
+      href: '/farmer/products', 
+      icon: Package,
+      key: 'products'
+    },
+    { 
+      label: t('stores.title'), 
+      href: '/farmer/stores', 
+      icon: Store,
+      key: 'stores'
+    },
+    { 
+      label: t('schedule.title'), 
+      href: '/farmer/delivery', 
+      icon: Truck,
+      key: 'delivery'
+    },
+    { 
+      label: t('marketing.title'), 
+      href: '/farmer/marketing', 
+      icon: Megaphone,
+      key: 'marketing'
+    },
+    { 
+      label: t('analytics.title'), 
+      href: '/farmer/analytics', 
+      icon: BarChart3,
+      key: 'analytics'
+    },
+    { 
+      label: t('references.title'), 
+      href: '/farmer/references', 
+      icon: BookOpen,
+      key: 'references'
+    },
+  ].filter((item) => {
+    if (item.key === 'marketing') {
+      return featureFlags.marketingTools;
+    }
+    if (item.key === 'analytics') {
+      return featureFlags.analytics;
+    }
+    if (item.key === 'references') {
+      return featureFlags.references;
+    }
+    return true;
+  });
+
+  const liffNavigationItems = isFarmer ? farmerNavigationItems : navigationItems;
+
   const isActive = (path: string) => {
     if (path === '/market') {
       return location.pathname === '/market';
     }
     return location.pathname.startsWith(path);
+  };
+
+  const isLiffNavActive = (item: { href: string; key: string }) => {
+    if (isFarmer && location.pathname.startsWith('/market/products')) {
+      return item.key === 'products';
+    }
+    return isActive(item.href);
   };
 
   return (
@@ -163,34 +236,44 @@ const MarketLayout: React.FC = () => {
         {/* Page content */}
         <div className="p-4 sm:p-6 lg:p-8">
           <LocationReminder />
-          <MarketOnboarding>
-            <>
-              <MarketTutorial />
-              <Outlet />
-            </>
-          </MarketOnboarding>
+          <Suspense fallback={null}>
+            <MarketOnboarding>
+              <>
+                <MarketTutorial />
+                <Outlet />
+              </>
+            </MarketOnboarding>
+          </Suspense>
         </div>
       </div>
 
       {/* Toast containers for protected routes */}
       <Toaster />
       <Sonner />
-      {showVoiceAssistant && <VoiceAssistantPopup />}
+      {showVoiceAssistant && (
+        <Suspense fallback={null}>
+          <VoiceAssistantPopup />
+        </Suspense>
+      )}
 
       {isLiffApp && (
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-40">
           <div
             className="grid"
-            style={{ gridTemplateColumns: `repeat(${navigationItems.length}, minmax(0, 1fr))` }}
+            style={{ gridTemplateColumns: `repeat(${liffNavigationItems.length}, minmax(0, 1fr))` }}
           >
-            {navigationItems.map((item) => {
+            {liffNavigationItems.map((item) => {
               const Icon = item.icon;
-              const active = isActive(item.href);
+              const active = isLiffNavActive(item);
               return (
                 <button
                   key={item.key}
                   className={`flex flex-col items-center gap-1 py-2 px-1 text-xs ${
-                    active ? 'text-blue-600 font-semibold' : 'text-gray-600'
+                    active
+                      ? isFarmer
+                        ? 'text-green-600 font-semibold'
+                        : 'text-blue-600 font-semibold'
+                      : 'text-gray-600'
                   }`}
                   onClick={() => navigate(item.href)}
                   type="button"

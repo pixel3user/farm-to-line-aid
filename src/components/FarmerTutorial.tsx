@@ -281,7 +281,7 @@ const FarmerTutorial: React.FC = () => {
     )}
 
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="max-w-3xl w-full max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl w-full">
         <DialogHeader>
           <DialogTitle>{t('tutorial.farmer.title')}</DialogTitle>
         </DialogHeader>

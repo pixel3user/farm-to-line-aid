@@ -3,7 +3,10 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
+import useDebouncedValue from '@/hooks/useDebouncedValue';
 import { DatabaseService, Store } from '@/lib/database';
+import { UserDataService } from '@/services/userDataService';
+import { AddressCandidate, lookupAddress, reverseLookupAddress, resolveYamatoZip } from '@/lib/address';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -17,9 +20,10 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { CheckCircle2, Circle, CircleDot, Leaf, Loader2, Package, Store as StoreIcon } from 'lucide-react';
+import { CheckCircle2, Circle, CircleDot, Leaf, Loader2, Package, Store as StoreIcon, MapPin } from 'lucide-react';
 import { storage } from '@/lib/firebase';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { Timestamp } from 'firebase/firestore';
 import {
   buildPostOnboardingRedirectPath,
   consumePostOnboardingRedirect,
@@ -36,7 +40,6 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
   const {
     user,
     userStats,
-    userStores,
     userProducts,
     refreshUserData,
     updateUserProfile,
@@ -55,9 +58,12 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
     name: '',
     type: 'mixed' as Store['type'],
     location: '',
+    pickupAddress: '',
     contactName: '',
     contactPhone: '',
-    notes: ''
+    notes: '',
+    pickupPostNumber: '',
+    pickupYamatoZipCode: ''
   });
   const [productForm, setProductForm] = useState({
     name: '',
@@ -66,16 +72,42 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
     unitOther: '',
     price: '',
     stock: '',
-    description: ''
+    description: '',
+    pickupAddress: '',
+    pickupContactName: '',
+    pickupContactTel: '',
+    pickupContactMobile: '',
+    pickupPostNumber: '',
+    pickupYamatoZipCode: ''
   });
   const [profileSaving, setProfileSaving] = useState(false);
   const [storeSaving, setStoreSaving] = useState(false);
+  const [ownedStores, setOwnedStores] = useState<Store[]>([]);
+  const [isStorePickupSearching, setIsStorePickupSearching] = useState(false);
+  const [isStorePickupVerifying, setIsStorePickupVerifying] = useState(false);
+  const [storePickupSuggestions, setStorePickupSuggestions] = useState<AddressCandidate[]>([]);
+  const [storePickupLookupError, setStorePickupLookupError] = useState<string | null>(null);
+  const [storePickupVerifyError, setStorePickupVerifyError] = useState<string | null>(null);
   const [productSaving, setProductSaving] = useState(false);
+  const [isProductPickupSearching, setIsProductPickupSearching] = useState(false);
+  const [isProductPickupVerifying, setIsProductPickupVerifying] = useState(false);
+  const [productPickupSuggestions, setProductPickupSuggestions] = useState<AddressCandidate[]>([]);
+  const [productPickupLookupError, setProductPickupLookupError] = useState<string | null>(null);
+  const [productPickupVerifyError, setProductPickupVerifyError] = useState<string | null>(null);
+  const [selectedProductPickupStoreId, setSelectedProductPickupStoreId] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
+  const storePickupAddressRef = useRef('');
+  const productPickupAddressRef = useRef('');
+  const storeAutoFillRef = useRef<string | null>(null);
+  const productAutoFillRef = useRef<string | null>(null);
+  const storeLookupIdRef = useRef(0);
+  const productLookupIdRef = useRef(0);
   const initialLoadRequestedRef = useRef(false);
   const [productImageFile, setProductImageFile] = useState<File | null>(null);
   const [productImagePreview, setProductImagePreview] = useState<string | null>(null);
   const [viewStep, setViewStep] = useState<StepKey | null>(null);
+  const debouncedStorePickupAddress = useDebouncedValue(storeForm.pickupAddress, 400);
+  const debouncedProductPickupAddress = useDebouncedValue(productForm.pickupAddress, 400);
 
   useEffect(() => {
     setProfileForm({
@@ -83,6 +115,14 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
       email: user?.email || ''
     });
   }, [user?.displayName, user?.email]);
+
+  useEffect(() => {
+    storePickupAddressRef.current = storeForm.pickupAddress;
+  }, [storeForm.pickupAddress]);
+
+  useEffect(() => {
+    productPickupAddressRef.current = productForm.pickupAddress;
+  }, [productForm.pickupAddress]);
 
   useEffect(() => {
     if (user?.role === 'farmer' && user?.id && !initialLoadRequestedRef.current && !isRefreshingData) {
@@ -93,8 +133,27 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
     }
   }, [user?.role, user?.id, isRefreshingData, refreshUserData]);
 
+  const loadOwnedStores = React.useCallback(async () => {
+    if (!user?.id || user.role !== 'farmer') {
+      setOwnedStores([]);
+      return;
+    }
+
+    try {
+      const stores = await UserDataService.getUserStores(user.id);
+      setOwnedStores(stores);
+    } catch (error) {
+      console.error('FarmerOnboarding: failed to load owned stores', error);
+      setOwnedStores([]);
+    }
+  }, [user?.id, user?.role]);
+
+  useEffect(() => {
+    loadOwnedStores();
+  }, [loadOwnedStores]);
+
   const needsProfile = user?.role === 'farmer' && (!user?.displayName || !user?.email);
-  const needsStore = user?.role === 'farmer' && ((userStores?.length || 0) === 0);
+  const needsStore = user?.role === 'farmer' && ownedStores.length === 0;
   const needsProduct = user?.role === 'farmer' && ((userProducts?.length || 0) === 0);
 
   const steps = useMemo(
@@ -123,6 +182,12 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
     ],
     [needsProfile, needsStore, needsProduct, t]
   );
+
+  const verifiedStores = useMemo(() => {
+    return ownedStores.filter(
+      (store: Store) => Boolean(store?.pickup?.yamatoZipCode && store?.pickup?.address)
+    ) as Store[];
+  }, [ownedStores]);
 
   const currentStep = useMemo<StepKey>(() => {
     if (needsProfile) return 'profile';
@@ -197,23 +262,97 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
       return;
     }
 
+    if (!storeForm.pickupAddress.trim()) {
+      setFormError(t('onboarding.farmer.store.pickupAddressRequired'));
+      return;
+    }
+
     setStoreSaving(true);
     try {
+      let pickupAddress = storeForm.pickupAddress.trim();
+      let pickupPostNumber = storeForm.pickupPostNumber.trim();
+      let pickupYamatoZipCode = storeForm.pickupYamatoZipCode.trim();
+      let pickupLat: number | undefined;
+      let pickupLng: number | undefined;
+      let pickupPlaceId: string | undefined;
+
+      if (!pickupYamatoZipCode) {
+        setIsStorePickupVerifying(true);
+        setStorePickupVerifyError(null);
+        try {
+          const result = await resolveYamatoZip(pickupAddress);
+          pickupAddress = result.normalizedAddress || pickupAddress;
+          pickupPostNumber = result.postNumber;
+          pickupYamatoZipCode = result.yamatoZipCode;
+          setStoreForm((prev) => ({
+            ...prev,
+            pickupAddress,
+            pickupPostNumber,
+            pickupYamatoZipCode
+          }));
+          setStorePickupSuggestions([]);
+        } catch (error: any) {
+          setStorePickupVerifyError(error?.message || t('onboarding.farmer.store.pickupVerifyFailed'));
+          return;
+        } finally {
+          setIsStorePickupVerifying(false);
+        }
+      }
+
+      if (!pickupYamatoZipCode) {
+        setFormError(t('onboarding.farmer.store.pickupVerifyRequired'));
+        return;
+      }
+
+      try {
+        const geocodeResult = await lookupAddress(pickupAddress, 1);
+        const candidate = geocodeResult.candidates[0];
+        if (candidate?.address) {
+          pickupAddress = candidate.address;
+          pickupLat = candidate.lat;
+          pickupLng = candidate.lng;
+          pickupPlaceId = candidate.placeId;
+          setStoreForm((prev) => ({
+            ...prev,
+            pickupAddress,
+            pickupPostNumber,
+            pickupYamatoZipCode
+          }));
+        }
+      } catch (error) {
+        console.warn('FarmerOnboarding: failed to geocode store address, using verified address', error);
+      }
+
       const contact: any = {};
       if (storeForm.contactName.trim()) contact.name = storeForm.contactName.trim();
       if (storeForm.contactPhone.trim()) contact.phone = storeForm.contactPhone.trim();
+      const pickup = pickupAddress
+        ? {
+          address: pickupAddress,
+          yamatoZipCode: pickupYamatoZipCode,
+          postNumber: pickupPostNumber,
+          lat: pickupLat,
+          lng: pickupLng,
+          placeId: pickupPlaceId,
+          contactName: storeForm.contactName.trim() || storeForm.name.trim(),
+          contactTel: storeForm.contactPhone.trim(),
+          verifiedAt: pickupYamatoZipCode ? Timestamp.now() : undefined
+        }
+        : undefined;
 
       await DatabaseService.createStore(user.id, {
         name: storeForm.name.trim(),
         type: storeForm.type,
         location: storeForm.location.trim(),
         contact: Object.keys(contact).length ? contact : undefined,
+        pickup,
         metadata: {
           notes: storeForm.notes.trim() ? [storeForm.notes.trim()] : []
         }
       });
 
       await refreshUserData();
+      await loadOwnedStores();
       setViewStep(null);
       toast({
         title: t('onboarding.farmer.store.savedTitle'),
@@ -223,10 +362,16 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
         name: '',
         type: 'farmers_market',
         location: '',
+        pickupAddress: '',
         contactName: '',
         contactPhone: '',
-        notes: ''
+        notes: '',
+        pickupPostNumber: '',
+        pickupYamatoZipCode: ''
       });
+      setStorePickupSuggestions([]);
+      setStorePickupLookupError(null);
+      setStorePickupVerifyError(null);
     } catch (error) {
       console.error('Failed to save store', error);
       toast({
@@ -237,6 +382,322 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
     } finally {
       setStoreSaving(false);
     }
+  };
+
+  const requestCurrentLocation = () =>
+    new Promise<{ lat: number; lng: number }>((resolve, reject) => {
+      if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+        reject(new Error(t('onboarding.farmer.store.pickupGeoUnavailable')));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (position) => resolve({ lat: position.coords.latitude, lng: position.coords.longitude }),
+        () => reject(new Error(t('onboarding.farmer.store.pickupGeoDenied')))
+      );
+    });
+
+  const handleLookupStoreAddress = async () => {
+    const query = storeForm.pickupAddress.trim();
+    if (!query) {
+      setStorePickupLookupError(t('onboarding.farmer.store.pickupLookupRequired'));
+      return;
+    }
+    setIsStorePickupSearching(true);
+    setStorePickupLookupError(null);
+    try {
+      const result = await lookupAddress(query);
+      if (result.candidates.length === 0) {
+        setStorePickupLookupError(t('onboarding.farmer.store.pickupLookupEmpty'));
+      }
+      setStorePickupSuggestions(result.candidates);
+      const topCandidate = result.candidates[0];
+      if (topCandidate?.address && topCandidate.address.startsWith(query)) {
+        storeAutoFillRef.current = topCandidate.address;
+        setStoreForm((prev) => ({
+          ...prev,
+          pickupAddress: topCandidate.address,
+          pickupPostNumber: '',
+          pickupYamatoZipCode: ''
+        }));
+      }
+    } catch (error: any) {
+      setStorePickupLookupError(error?.message || t('onboarding.farmer.store.pickupLookupFailed'));
+    } finally {
+      setIsStorePickupSearching(false);
+    }
+  };
+
+  const handleUseLocationForStore = async () => {
+    setIsStorePickupSearching(true);
+    setStorePickupLookupError(null);
+    try {
+      const { lat, lng } = await requestCurrentLocation();
+      const result = await reverseLookupAddress(lat, lng);
+      if (result.candidates.length === 0) {
+        setStorePickupLookupError(t('onboarding.farmer.store.pickupLookupEmpty'));
+      }
+      setStorePickupSuggestions(result.candidates);
+      const topCandidate = result.candidates[0];
+      if (topCandidate?.address) {
+        storeAutoFillRef.current = topCandidate.address;
+        setStoreForm((prev) => ({
+          ...prev,
+          pickupAddress: topCandidate.address,
+          pickupPostNumber: '',
+          pickupYamatoZipCode: ''
+        }));
+      }
+    } catch (error: any) {
+      setStorePickupLookupError(error?.message || t('onboarding.farmer.store.pickupLookupFailed'));
+    } finally {
+      setIsStorePickupSearching(false);
+    }
+  };
+
+  const applyStoreSuggestion = (candidate: AddressCandidate) => {
+    setStoreForm((prev) => ({
+      ...prev,
+      pickupAddress: candidate.address,
+      pickupPostNumber: '',
+      pickupYamatoZipCode: ''
+    }));
+    setStorePickupSuggestions([]);
+    setStorePickupLookupError(null);
+    setStorePickupVerifyError(null);
+  };
+
+  const handleVerifyStoreAddress = async () => {
+    const address = storeForm.pickupAddress.trim();
+    if (!address) {
+      setStorePickupVerifyError(t('onboarding.farmer.store.pickupAddressRequired'));
+      return;
+    }
+    setStorePickupVerifyError(null);
+    setIsStorePickupVerifying(true);
+    try {
+      const result = await resolveYamatoZip(address);
+      setStoreForm((prev) => ({
+        ...prev,
+        pickupAddress: result.normalizedAddress || prev.pickupAddress,
+        pickupPostNumber: result.postNumber,
+        pickupYamatoZipCode: result.yamatoZipCode
+      }));
+      setStorePickupSuggestions([]);
+    } catch (error: any) {
+      setStorePickupVerifyError(error?.message || t('onboarding.farmer.store.pickupVerifyFailed'));
+    } finally {
+      setIsStorePickupVerifying(false);
+    }
+  };
+
+  const handleLookupProductPickupAddress = async () => {
+    const query = productForm.pickupAddress.trim();
+    if (!query) {
+      setProductPickupLookupError(t('onboarding.farmer.product.pickupLookupRequired'));
+      return;
+    }
+    setIsProductPickupSearching(true);
+    setProductPickupLookupError(null);
+    try {
+      const result = await lookupAddress(query);
+      if (result.candidates.length === 0) {
+        setProductPickupLookupError(t('onboarding.farmer.product.pickupLookupEmpty'));
+      }
+      setProductPickupSuggestions(result.candidates);
+      setSelectedProductPickupStoreId('');
+      const topCandidate = result.candidates[0];
+      if (topCandidate?.address && topCandidate.address.startsWith(query)) {
+        productAutoFillRef.current = topCandidate.address;
+        setProductForm((prev) => ({
+          ...prev,
+          pickupAddress: topCandidate.address,
+          pickupPostNumber: '',
+          pickupYamatoZipCode: ''
+        }));
+      }
+    } catch (error: any) {
+      setProductPickupLookupError(error?.message || t('onboarding.farmer.product.pickupLookupFailed'));
+    } finally {
+      setIsProductPickupSearching(false);
+    }
+  };
+
+  const handleUseLocationForProductPickup = async () => {
+    setIsProductPickupSearching(true);
+    setProductPickupLookupError(null);
+    try {
+      const { lat, lng } = await requestCurrentLocation();
+      const result = await reverseLookupAddress(lat, lng);
+      if (result.candidates.length === 0) {
+        setProductPickupLookupError(t('onboarding.farmer.product.pickupLookupEmpty'));
+      }
+      setProductPickupSuggestions(result.candidates);
+      setSelectedProductPickupStoreId('');
+      const topCandidate = result.candidates[0];
+      if (topCandidate?.address) {
+        productAutoFillRef.current = topCandidate.address;
+        setProductForm((prev) => ({
+          ...prev,
+          pickupAddress: topCandidate.address,
+          pickupPostNumber: '',
+          pickupYamatoZipCode: ''
+        }));
+      }
+    } catch (error: any) {
+      setProductPickupLookupError(error?.message || t('onboarding.farmer.product.pickupLookupFailed'));
+    } finally {
+      setIsProductPickupSearching(false);
+    }
+  };
+
+  useEffect(() => {
+    const query = debouncedStorePickupAddress.trim();
+    if (query.length < 3) {
+      storeLookupIdRef.current += 1;
+      setStorePickupSuggestions([]);
+      setStorePickupLookupError(null);
+      return;
+    }
+    if (storeAutoFillRef.current === query) {
+      storeAutoFillRef.current = null;
+      return;
+    }
+    const lookupId = (storeLookupIdRef.current += 1);
+    setStorePickupLookupError(null);
+    lookupAddress(query)
+      .then((result) => {
+        if (storeLookupIdRef.current !== lookupId) return;
+        if (storePickupAddressRef.current.trim() !== query) return;
+        setStorePickupSuggestions(result.candidates);
+        if (result.candidates.length === 0) {
+          setStorePickupLookupError(t('onboarding.farmer.store.pickupLookupEmpty'));
+          return;
+        }
+        const topCandidate = result.candidates[0];
+        if (
+          topCandidate?.address &&
+          topCandidate.address !== storePickupAddressRef.current.trim() &&
+          topCandidate.address.startsWith(query)
+        ) {
+          storeAutoFillRef.current = topCandidate.address;
+          setStoreForm((prev) => ({
+            ...prev,
+            pickupAddress: topCandidate.address,
+            pickupPostNumber: '',
+            pickupYamatoZipCode: ''
+          }));
+        }
+      })
+      .catch((error: any) => {
+        if (storeLookupIdRef.current !== lookupId) return;
+        if (storePickupAddressRef.current.trim() !== query) return;
+        setStorePickupLookupError(error?.message || t('onboarding.farmer.store.pickupLookupFailed'));
+      })
+      .finally(() => {
+        if (storeLookupIdRef.current !== lookupId) return;
+      });
+  }, [debouncedStorePickupAddress, t]);
+
+  useEffect(() => {
+    const query = debouncedProductPickupAddress.trim();
+    if (query.length < 3) {
+      productLookupIdRef.current += 1;
+      setProductPickupSuggestions([]);
+      setProductPickupLookupError(null);
+      return;
+    }
+    if (productAutoFillRef.current === query) {
+      productAutoFillRef.current = null;
+      return;
+    }
+    const lookupId = (productLookupIdRef.current += 1);
+    setProductPickupLookupError(null);
+    lookupAddress(query)
+      .then((result) => {
+        if (productLookupIdRef.current !== lookupId) return;
+        if (productPickupAddressRef.current.trim() !== query) return;
+        setProductPickupSuggestions(result.candidates);
+        if (result.candidates.length === 0) {
+          setProductPickupLookupError(t('onboarding.farmer.product.pickupLookupEmpty'));
+          return;
+        }
+        const topCandidate = result.candidates[0];
+        if (
+          topCandidate?.address &&
+          topCandidate.address !== productPickupAddressRef.current.trim() &&
+          topCandidate.address.startsWith(query)
+        ) {
+          productAutoFillRef.current = topCandidate.address;
+          setProductForm((prev) => ({
+            ...prev,
+            pickupAddress: topCandidate.address,
+            pickupPostNumber: '',
+            pickupYamatoZipCode: ''
+          }));
+        }
+      })
+      .catch((error: any) => {
+        if (productLookupIdRef.current !== lookupId) return;
+        if (productPickupAddressRef.current.trim() !== query) return;
+        setProductPickupLookupError(error?.message || t('onboarding.farmer.product.pickupLookupFailed'));
+      })
+      .finally(() => {
+        if (productLookupIdRef.current !== lookupId) return;
+      });
+  }, [debouncedProductPickupAddress, t]);
+
+  const applyProductPickupSuggestion = (candidate: AddressCandidate) => {
+    setProductForm((prev) => ({
+      ...prev,
+      pickupAddress: candidate.address,
+      pickupPostNumber: '',
+      pickupYamatoZipCode: ''
+    }));
+    setProductPickupSuggestions([]);
+    setProductPickupLookupError(null);
+    setProductPickupVerifyError(null);
+  };
+
+  const handleVerifyProductPickup = async () => {
+    const address = productForm.pickupAddress.trim();
+    if (!address) {
+      setProductPickupVerifyError(t('onboarding.farmer.product.pickupAddressRequired'));
+      return;
+    }
+    setProductPickupVerifyError(null);
+    setIsProductPickupVerifying(true);
+    try {
+      const result = await resolveYamatoZip(address);
+      setProductForm((prev) => ({
+        ...prev,
+        pickupAddress: result.normalizedAddress || prev.pickupAddress,
+        pickupPostNumber: result.postNumber,
+        pickupYamatoZipCode: result.yamatoZipCode
+      }));
+      setProductPickupSuggestions([]);
+    } catch (error: any) {
+      setProductPickupVerifyError(error?.message || t('onboarding.farmer.product.pickupVerifyFailed'));
+    } finally {
+      setIsProductPickupVerifying(false);
+    }
+  };
+
+  const handleSelectProductPickupStore = (storeId: string) => {
+    const store = verifiedStores.find((item) => item.id === storeId);
+    if (!store) return;
+    setSelectedProductPickupStoreId(storeId);
+    setProductForm((prev) => ({
+      ...prev,
+      pickupAddress: store.pickup?.address || store.location || '',
+      pickupContactName: store.pickup?.contactName || store.contact?.name || store.name || '',
+      pickupContactTel: store.pickup?.contactTel || store.contact?.phone || '',
+      pickupContactMobile: store.pickup?.contactMobile || '',
+      pickupPostNumber: store.pickup?.postNumber || '',
+      pickupYamatoZipCode: store.pickup?.yamatoZipCode || ''
+    }));
+    setProductPickupSuggestions([]);
+    setProductPickupLookupError(null);
+    setProductPickupVerifyError(null);
   };
 
   const handleProductSubmit = async (event: React.FormEvent) => {
@@ -251,6 +712,52 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
 
     if (productForm.unit === 'other' && !productForm.unitOther.trim()) {
       setFormError(t('onboarding.farmer.product.unitOtherRequired'));
+      return;
+    }
+
+    if (!productForm.pickupAddress.trim()) {
+      setFormError(t('onboarding.farmer.product.pickupAddressRequired'));
+      return;
+    }
+
+    if (
+      !productForm.pickupContactName.trim() ||
+      !productForm.pickupContactTel.trim() ||
+      !productForm.pickupContactMobile.trim()
+    ) {
+      setFormError(t('onboarding.farmer.product.pickupContactRequired'));
+      return;
+    }
+
+    let pickupAddress = productForm.pickupAddress.trim();
+    let pickupPostNumber = productForm.pickupPostNumber.trim();
+    let pickupYamatoZipCode = productForm.pickupYamatoZipCode.trim();
+
+    if (!pickupYamatoZipCode) {
+      setIsProductPickupVerifying(true);
+      setProductPickupVerifyError(null);
+      try {
+        const result = await resolveYamatoZip(pickupAddress);
+        pickupAddress = result.normalizedAddress || pickupAddress;
+        pickupPostNumber = result.postNumber;
+        pickupYamatoZipCode = result.yamatoZipCode;
+        setProductForm((prev) => ({
+          ...prev,
+          pickupAddress,
+          pickupPostNumber,
+          pickupYamatoZipCode
+        }));
+        setProductPickupSuggestions([]);
+      } catch (error: any) {
+        setProductPickupVerifyError(error?.message || t('onboarding.farmer.product.pickupVerifyFailed'));
+        return;
+      } finally {
+        setIsProductPickupVerifying(false);
+      }
+    }
+
+    if (!pickupYamatoZipCode) {
+      setFormError(t('onboarding.farmer.product.pickupVerifyRequired'));
       return;
     }
 
@@ -273,6 +780,18 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
         imageUrl = await getDownloadURL(imageRef);
       }
 
+      const pickup = pickupAddress
+        ? {
+            address: pickupAddress,
+            yamatoZipCode: pickupYamatoZipCode,
+            postNumber: pickupPostNumber,
+            contactName: productForm.pickupContactName.trim(),
+            contactTel: productForm.pickupContactTel.trim(),
+            contactMobile: productForm.pickupContactMobile.trim(),
+            verifiedAt: pickupYamatoZipCode ? Timestamp.now() : undefined
+          }
+        : undefined;
+
       await DatabaseService.createProduct(user.id, {
         name: productForm.name.trim(),
         category: productForm.category,
@@ -280,6 +799,7 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
         price,
         stock,
         description: productForm.description.trim(),
+        pickup,
         images: imageUrl ? [imageUrl] : [],
         tags: []
       });
@@ -297,8 +817,18 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
         unitOther: '',
         price: '',
         stock: '',
-        description: ''
+        description: '',
+        pickupAddress: '',
+        pickupContactName: '',
+        pickupContactTel: '',
+        pickupContactMobile: '',
+        pickupPostNumber: '',
+        pickupYamatoZipCode: ''
       });
+      setProductPickupSuggestions([]);
+      setProductPickupLookupError(null);
+      setProductPickupVerifyError(null);
+      setSelectedProductPickupStoreId('');
       setProductImageFile(null);
       setProductImagePreview(null);
     } catch (error) {
@@ -425,9 +955,13 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
                 </label>
                 <Input
                   value={storeForm.location}
-                  onChange={(event) =>
-                    setStoreForm((prev) => ({ ...prev, location: event.target.value }))
-                  }
+                  onChange={(event) => {
+                    const nextValue = event.target.value;
+                    setStoreForm((prev) => ({
+                      ...prev,
+                      location: nextValue
+                    }));
+                  }}
                   placeholder={t('onboarding.farmer.store.locationPlaceholder')}
                   required
                 />
@@ -444,6 +978,131 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
                   placeholder={t('onboarding.farmer.store.contactPlaceholder')}
                 />
               </div>
+            </div>
+            <div className="space-y-4 rounded-lg border border-gray-200 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-800">
+                    {t('onboarding.farmer.store.pickupSectionTitle')}
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    {t('onboarding.farmer.store.pickupSectionHint')}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleUseLocationForStore}
+                    disabled={isStorePickupSearching}
+                    className="gap-2"
+                  >
+                    {isStorePickupSearching ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        {t('onboarding.farmer.store.pickupSearching')}
+                      </>
+                    ) : (
+                      <>
+                        <MapPin className="w-4 h-4" />
+                        {t('onboarding.farmer.store.pickupUseLocation')}
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleLookupStoreAddress}
+                    disabled={isStorePickupSearching || !storeForm.pickupAddress.trim()}
+                  >
+                    {t('onboarding.farmer.store.pickupSearch')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleVerifyStoreAddress}
+                    disabled={isStorePickupVerifying || !storeForm.pickupAddress.trim()}
+                    className="gap-2"
+                  >
+                    {isStorePickupVerifying ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        {t('onboarding.farmer.store.pickupVerifying')}
+                      </>
+                    ) : (
+                      t('onboarding.farmer.store.pickupVerify')
+                    )}
+                  </Button>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2 md:col-span-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    {t('onboarding.farmer.store.pickupAddress')}
+                  </label>
+                  <Input
+                    value={storeForm.pickupAddress}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setStoreForm((prev) => ({
+                        ...prev,
+                        pickupAddress: nextValue,
+                        pickupPostNumber: '',
+                        pickupYamatoZipCode: ''
+                      }));
+                      setStorePickupLookupError(null);
+                      setStorePickupVerifyError(null);
+                      setStorePickupSuggestions([]);
+                    }}
+                    placeholder={t('onboarding.farmer.store.pickupAddressPlaceholder')}
+                  />
+                  {storePickupSuggestions.length > 0 && (
+                    <div className="rounded-md border border-gray-200 bg-white p-2">
+                      <p className="text-xs text-gray-500">
+                        {t('onboarding.farmer.store.pickupSuggestions')}
+                      </p>
+                      <div className="flex flex-col gap-2 mt-2">
+                        {storePickupSuggestions.map((candidate, index) => (
+                          <button
+                            key={`${candidate.address}-${index}`}
+                            type="button"
+                            onClick={() => applyStoreSuggestion(candidate)}
+                            className="rounded-md border border-gray-200 px-3 py-2 text-left text-sm text-gray-700 hover:border-purple-400 hover:bg-purple-50"
+                          >
+                            {candidate.address}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {storePickupLookupError && (
+                    <div className="text-sm text-red-600">{storePickupLookupError}</div>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    {t('onboarding.farmer.store.pickupPostNumber')}
+                  </label>
+                  <Input
+                    value={storeForm.pickupPostNumber}
+                    readOnly
+                    placeholder={t('onboarding.farmer.store.pickupPostNumberPlaceholder')}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    {t('onboarding.farmer.store.pickupYamatoZipCode')}
+                  </label>
+                  <Input
+                    value={storeForm.pickupYamatoZipCode}
+                    readOnly
+                    placeholder={t('onboarding.farmer.store.pickupYamatoZipCodePlaceholder')}
+                  />
+                </div>
+              </div>
+              {storePickupVerifyError && (
+                <div className="text-sm text-red-600">{storePickupVerifyError}</div>
+              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -479,7 +1138,7 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
                 )}
                 <p className="text-sm text-gray-500">{t('onboarding.farmer.reminder')}</p>
               </div>
-              <Button type="submit" disabled={storeSaving}>
+              <Button type="submit" disabled={storeSaving || isStorePickupVerifying}>
                 {storeSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 {t('onboarding.farmer.store.cta')}
               </Button>
@@ -596,6 +1255,186 @@ const FarmerOnboarding: React.FC<FarmerOnboardingProps> = ({ children }) => {
                 placeholder={t('onboarding.farmer.product.descriptionPlaceholder')}
                 className="min-h-[100px]"
               />
+            </div>
+            <div className="space-y-4 rounded-lg border border-gray-200 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-800">
+                    {t('onboarding.farmer.product.pickupSectionTitle')}
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    {t('onboarding.farmer.product.pickupSectionHint')}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleUseLocationForProductPickup}
+                    disabled={isProductPickupSearching}
+                    className="gap-2"
+                  >
+                    {isProductPickupSearching ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        {t('onboarding.farmer.product.pickupSearching')}
+                      </>
+                    ) : (
+                      <>
+                        <MapPin className="w-4 h-4" />
+                        {t('onboarding.farmer.product.pickupUseLocation')}
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleLookupProductPickupAddress}
+                    disabled={isProductPickupSearching || !productForm.pickupAddress.trim()}
+                  >
+                    {t('onboarding.farmer.product.pickupSearch')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleVerifyProductPickup}
+                    disabled={isProductPickupVerifying || !productForm.pickupAddress.trim()}
+                    className="gap-2"
+                  >
+                    {isProductPickupVerifying ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        {t('onboarding.farmer.product.pickupVerifying')}
+                      </>
+                    ) : (
+                      t('onboarding.farmer.product.pickupVerify')
+                    )}
+                  </Button>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {verifiedStores.length > 0 && (
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-sm font-semibold text-gray-700">
+                      {t('onboarding.farmer.product.pickupUseStore')}
+                    </label>
+                    <Select value={selectedProductPickupStoreId} onValueChange={handleSelectProductPickupStore}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={t('onboarding.farmer.product.pickupUseStorePlaceholder')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {verifiedStores.map((store) => (
+                          <SelectItem key={store.id} value={store.id}>
+                            {store.name} - {store.pickup?.address || store.location}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="space-y-2 md:col-span-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    {t('onboarding.farmer.product.pickupAddress')}
+                  </label>
+                  <Input
+                    value={productForm.pickupAddress}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setProductForm((prev) => ({
+                        ...prev,
+                        pickupAddress: nextValue,
+                        pickupPostNumber: '',
+                        pickupYamatoZipCode: ''
+                      }));
+                      setProductPickupLookupError(null);
+                      setProductPickupVerifyError(null);
+                      setProductPickupSuggestions([]);
+                      setSelectedProductPickupStoreId('');
+                    }}
+                    placeholder={t('onboarding.farmer.product.pickupAddressPlaceholder')}
+                  />
+                  {productPickupSuggestions.length > 0 && (
+                    <div className="rounded-md border border-gray-200 bg-white p-2">
+                      <p className="text-xs text-gray-500">
+                        {t('onboarding.farmer.product.pickupSuggestions')}
+                      </p>
+                      <div className="flex flex-col gap-2 mt-2">
+                        {productPickupSuggestions.map((candidate, index) => (
+                          <button
+                            key={`${candidate.address}-${index}`}
+                            type="button"
+                            onClick={() => applyProductPickupSuggestion(candidate)}
+                            className="rounded-md border border-gray-200 px-3 py-2 text-left text-sm text-gray-700 hover:border-green-400 hover:bg-green-50"
+                          >
+                            {candidate.address}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {productPickupLookupError && (
+                    <div className="text-sm text-red-600">{productPickupLookupError}</div>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    {t('onboarding.farmer.product.pickupContactName')}
+                  </label>
+                  <Input
+                    value={productForm.pickupContactName}
+                    onChange={(event) => setProductForm((prev) => ({ ...prev, pickupContactName: event.target.value }))}
+                    placeholder={t('onboarding.farmer.product.pickupContactNamePlaceholder')}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    {t('onboarding.farmer.product.pickupContactTel')}
+                  </label>
+                  <Input
+                    value={productForm.pickupContactTel}
+                    onChange={(event) => setProductForm((prev) => ({ ...prev, pickupContactTel: event.target.value }))}
+                    placeholder={t('onboarding.farmer.product.pickupContactTelPlaceholder')}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    {t('onboarding.farmer.product.pickupContactMobile')}
+                  </label>
+                  <Input
+                    value={productForm.pickupContactMobile}
+                    onChange={(event) =>
+                      setProductForm((prev) => ({ ...prev, pickupContactMobile: event.target.value }))
+                    }
+                    placeholder={t('onboarding.farmer.product.pickupContactMobilePlaceholder')}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    {t('onboarding.farmer.product.pickupPostNumber')}
+                  </label>
+                  <Input
+                    value={productForm.pickupPostNumber}
+                    readOnly
+                    placeholder={t('onboarding.farmer.product.pickupPostNumberPlaceholder')}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold text-gray-700">
+                    {t('onboarding.farmer.product.pickupYamatoZipCode')}
+                  </label>
+                  <Input
+                    value={productForm.pickupYamatoZipCode}
+                    readOnly
+                    placeholder={t('onboarding.farmer.product.pickupYamatoZipCodePlaceholder')}
+                  />
+                </div>
+              </div>
+              {productPickupVerifyError && (
+                <div className="text-sm text-red-600">{productPickupVerifyError}</div>
+              )}
             </div>
             <div className="space-y-2">
               <label className="text-sm font-semibold text-gray-700">

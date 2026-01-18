@@ -1,6 +1,8 @@
 import { config as functionsConfig } from 'firebase-functions';
 
 interface RuntimeConfig {
+  lineChannelId?: string;
+  lineLoginChannelId?: string;
   lineAccessToken?: string;
   lineChannelSecret?: string;
   lineLoginChannelSecret?: string;
@@ -16,6 +18,20 @@ interface RuntimeConfig {
   linePaySandbox?: boolean;
   frontendBaseUrl?: string;
   apiBaseUrl?: string;
+  yamatoCustomerId?: string;
+  yamatoCustomerToken?: string;
+  yamatoEnvironment?: string;
+  yamatoBaseUrl?: string;
+  yamatoTimeoutMs?: number;
+  yamatoB2sMapUrl?: string;
+  yamatoB2sMobileMapUrl?: string;
+  yamatoPickupMapUrl?: string;
+  yamatoPickupUid?: string;
+  yamatoPickupCustNo?: string;
+  yamatoPickupPkey?: string;
+  geocodingProvider?: string;
+  geocodingApiKey?: string;
+  geocodingBaseUrl?: string;
 }
 
 function readFunctionsConfig(): Record<string, any> {
@@ -45,7 +61,26 @@ function getBooleanEnv(value: unknown, fallback: boolean = false): boolean {
   return fallback;
 }
 
+function getNumberEnv(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
 const runtimeConfig: RuntimeConfig = {
+  lineChannelId:
+    process.env.LINE_CHANNEL_ID ||
+    fnConfig?.line?.channel_id,
+  lineLoginChannelId:
+    process.env.LINE_LOGIN_CHANNEL_ID ||
+    process.env.LINE_LIFF_CHANNEL_ID ||
+    fnConfig?.line?.login_channel_id ||
+    fnConfig?.line?.liff_channel_id,
   lineAccessToken:
     process.env.LINE_CHANNEL_ACCESS_TOKEN ||
     process.env.CHANNEL_ACCESS_TOKEN ||
@@ -86,6 +121,48 @@ const runtimeConfig: RuntimeConfig = {
   apiBaseUrl:
     process.env.API_BASE_URL ||
     fnConfig?.app?.api_base_url,
+  yamatoCustomerId:
+    process.env.YAMATO_CUSTOMER_ID ||
+    fnConfig?.yamato?.customer_id,
+  yamatoCustomerToken:
+    process.env.YAMATO_CUSTOMER_TOKEN ||
+    fnConfig?.yamato?.customer_token,
+  yamatoEnvironment:
+    process.env.YAMATO_ENV ||
+    fnConfig?.yamato?.environment,
+  yamatoBaseUrl:
+    process.env.YAMATO_BASE_URL ||
+    fnConfig?.yamato?.base_url,
+  yamatoTimeoutMs:
+    getNumberEnv(process.env.YAMATO_TIMEOUT_MS) ||
+    getNumberEnv(fnConfig?.yamato?.timeout_ms),
+  yamatoB2sMapUrl:
+    process.env.YAMATO_B2S_MAP_URL ||
+    fnConfig?.yamato?.b2s_map_url,
+  yamatoB2sMobileMapUrl:
+    process.env.YAMATO_B2S_MOBILE_MAP_URL ||
+    fnConfig?.yamato?.b2s_mobile_map_url,
+  yamatoPickupMapUrl:
+    process.env.YAMATO_PICKUP_MAP_URL ||
+    fnConfig?.yamato?.pickup_map_url,
+  yamatoPickupUid:
+    process.env.YAMATO_PICKUP_UID ||
+    fnConfig?.yamato?.pickup_uid,
+  yamatoPickupCustNo:
+    process.env.YAMATO_PICKUP_CUST_NO ||
+    fnConfig?.yamato?.pickup_cust_no,
+  yamatoPickupPkey:
+    process.env.YAMATO_PICKUP_PKEY ||
+    fnConfig?.yamato?.pickup_pkey,
+  geocodingProvider:
+    process.env.GEOCODING_PROVIDER ||
+    fnConfig?.geocoding?.provider,
+  geocodingApiKey:
+    process.env.GEOCODING_API_KEY ||
+    fnConfig?.geocoding?.api_key,
+  geocodingBaseUrl:
+    process.env.GEOCODING_BASE_URL ||
+    fnConfig?.geocoding?.base_url,
 };
 
 export default runtimeConfig;

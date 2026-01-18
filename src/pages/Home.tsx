@@ -21,9 +21,9 @@ import {
   Users,
   Clock3
 } from 'lucide-react';
-import heroImage from '@/assets/hero-farm-tech.jpg';
+import heroImage from '@/assets/hero-farm-tech.webp';
 import heroVideo from '@/assets/farmer-video.mp4';
-import phoneShowcase from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt.png';
+import phoneShowcase from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt.webp';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
 import { useLanguage } from '@/contexts/LanguageContext';
 
@@ -31,7 +31,10 @@ const Home: React.FC = () => {
   const revealContainerRef = useScrollReveal({ selector: '.reveal' });
   const { t } = useLanguage();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [isMobile, setIsMobile] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(max-width: 768px)').matches;
+  });
 
   // Light mobile guard so we keep the video only on larger screens.
   useEffect(() => {

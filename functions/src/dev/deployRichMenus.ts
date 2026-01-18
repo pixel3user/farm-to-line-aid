@@ -26,7 +26,7 @@ const images = {
   market: path.join(root, 'market.jpg'),
 };
 
-const baseUrl = process.env.LIFF_URL || runtimeConfig.liffUrl || 'https://farm2market-99.web.app';
+const baseUrl = process.env.LIFF_URL || runtimeConfig.liffUrl || runtimeConfig.frontendBaseUrl || 'https://farm2market.tw';
 const channelAccessToken =
   process.env.LINE_CHANNEL_ACCESS_TOKEN ||
   process.env.CHANNEL_ACCESS_TOKEN ||

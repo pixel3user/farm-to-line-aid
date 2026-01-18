@@ -65,14 +65,14 @@ NODE_ENV=production
 
 ### 3. Development Mode
 ```bash
-# Start both frontend and webhook server
+# Start frontend + Firebase emulators
 npm run dev
 
 # Frontend only
 npm run dev:client
 
-# Server only (for webhook testing)
-npm run dev:server
+# Emulators only (functions + firestore)
+npm run dev:emulators
 ```
 
 ### 4. Production Build
@@ -181,8 +181,8 @@ Visit `/dashboard` for admin controls:
 
 ### Logs and Monitoring
 ```bash
-# Server logs
-npm run dev:server
+# Emulator logs
+npm run dev:emulators
 
 # Health check
 curl https://your-domain.com/health
@@ -243,5 +243,4 @@ Track these KPIs for bot success:
 ---
 
 Built with ❤️ using React, Firebase, Gemini AI, and LINE Messaging API.
-
 

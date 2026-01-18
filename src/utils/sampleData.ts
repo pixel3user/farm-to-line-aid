@@ -58,7 +58,7 @@ export const createSampleDataForUser = async (userId: string) => {
       {
         name: "綠色有機超市",
         type: "supermarket" as const,
-        location: "新竹市中心",
+        location: "新竹市東區中央路 102 號",
         contact: {
           name: "張經理",
           phone: "+886-3-123-4567",
@@ -82,7 +82,7 @@ export const createSampleDataForUser = async (userId: string) => {
       {
         name: "新鮮便利超商",
         type: "supermarket" as const,
-        location: "竹北區",
+        location: "新竹縣竹北市光明六路東二段 100 號",
         contact: {
           name: "李店長",
           phone: "+886-3-987-6543",
@@ -105,7 +105,7 @@ export const createSampleDataForUser = async (userId: string) => {
       {
         name: "有機谷市場",
         type: "farmers_market" as const,
-        location: "新埔鎮",
+        location: "新竹縣新埔鎮中正路 330 號",
         contact: {
           name: "王老闆",
           phone: "+886-3-555-7890",
@@ -122,6 +122,74 @@ export const createSampleDataForUser = async (userId: string) => {
           aiSuggestedOutreach: "建議提供樣品試用，並安排農場參觀",
           relationshipStage: "prospecting",
           nextAction: "安排會面，展示產品品質和農場環境"
+        }
+      },
+      {
+        name: "北大路友善食材店",
+        type: "supermarket" as const,
+        location: "新竹市北區北大路 120 號",
+        contact: {
+          name: "陳店長",
+          phone: "+886-3-234-5678",
+          email: "hello@friendlyfoods.tw"
+        },
+        status: "contacted" as const,
+        metadata: {
+          firstContact: Timestamp.now(),
+          lastOrder: Timestamp.now(),
+          totalOrders: 6,
+          totalRevenue: 1480,
+          notes: ["試單合作", "偏好在地蔬果", "週末進貨"]
+        },
+        geminiData: {
+          aiSuggestedOutreach: "可提供小量多樣組合，提高回購",
+          relationshipStage: "engaged",
+          nextAction: "跟進週末補貨需求"
+        }
+      },
+      {
+        name: "竹科午餐合作社",
+        type: "restaurant" as const,
+        location: "新竹市東區新安路 2 號",
+        contact: {
+          name: "林主廚",
+          phone: "+886-3-222-3344",
+          email: "kitchen@scilunch.tw",
+          website: "https://scilunch.tw"
+        },
+        status: "potential" as const,
+        metadata: {
+          firstContact: Timestamp.now(),
+          totalOrders: 0,
+          totalRevenue: 0,
+          notes: ["園區團膳", "需要穩定供貨", "重視交期"]
+        },
+        geminiData: {
+          aiSuggestedOutreach: "提供固定供貨時段與報價方案",
+          relationshipStage: "prospecting",
+          nextAction: "安排試菜與樣品"
+        }
+      },
+      {
+        name: "城隍廟小農攤位",
+        type: "farmers_market" as const,
+        location: "新竹市北區中山路 75 號",
+        contact: {
+          name: "謝小姐",
+          phone: "+886-3-333-2211"
+        },
+        status: "customer" as const,
+        metadata: {
+          firstContact: Timestamp.now(),
+          lastOrder: Timestamp.now(),
+          totalOrders: 14,
+          totalRevenue: 3360,
+          notes: ["觀光人潮多", "需求變動大", "偏好小包裝"]
+        },
+        geminiData: {
+          aiSuggestedOutreach: "建議提供週末限定組合包",
+          relationshipStage: "established",
+          nextAction: "確認下一次出攤量"
         }
       }
     ];

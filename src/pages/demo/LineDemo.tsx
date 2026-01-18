@@ -19,10 +19,10 @@ import {
   Store
 } from 'lucide-react';
 import heroImage from '@/assets/hero-farm-tech.jpg';
-import phoneShowcase from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt.png';
-import step1Img from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (1).png';
-import step2Img from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (2).png';
-import step3Img from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (3).png';
+import phoneShowcase from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt.webp';
+import step1Img from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (1).webp';
+import step2Img from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (2).webp';
+import step3Img from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (3).webp';
 
 const LineDemo: React.FC = () => {
   const { t } = useLanguage();

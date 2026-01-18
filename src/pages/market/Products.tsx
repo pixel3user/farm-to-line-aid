@@ -10,6 +10,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/co
 import { Slider } from '@/components/ui/slider';
 import { Pagination, PaginationContent, PaginationItem, PaginationNext, PaginationPrevious, PaginationLink } from '@/components/ui/pagination';
 import { useToast } from '@/components/ui/use-toast';
+import MarkdownRenderer from '@/components/MarkdownRenderer';
 import { DatabaseService, Product } from '@/lib/database';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -110,6 +111,23 @@ const MarketProducts: React.FC = () => {
   });
   const [showCartPopup, setShowCartPopup] = useState(false);
   const [addedProduct, setAddedProduct] = useState<{ product: CatalogProduct; quantity: number } | null>(null);
+  const [reviews, setReviews] = useState<Array<{
+    id: string;
+    productId: string;
+    userId: string;
+    rating: number;
+    comment: string;
+    reviewerName: string;
+    createdAt: any;
+  }>>([]);
+  const [isLoadingReviews, setIsLoadingReviews] = useState(false);
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewFormData, setReviewFormData] = useState({
+    rating: 5,
+    comment: '',
+    reviewerName: ''
+  });
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const navigate = useNavigate();
 
   // Load products using the same source as the market featured products
@@ -201,7 +219,55 @@ const MarketProducts: React.FC = () => {
   useEffect(() => {
     setDialogQty(1);
     setImageIndex(0);
+    if (selectedProduct) {
+      loadReviews(selectedProduct.id);
+    } else {
+      setReviews([]);
+    }
   }, [selectedProduct]);
+
+  const loadReviews = async (productId: string) => {
+    setIsLoadingReviews(true);
+    try {
+      const reviewList = await DatabaseService.getReviewsByProduct(productId);
+      setReviews(reviewList);
+    } catch (error) {
+      console.error('Failed to load reviews', error);
+      setReviews([]);
+    } finally {
+      setIsLoadingReviews(false);
+    }
+  };
+
+  const handleSubmitReview = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedProduct || !user?.id) {
+      toast({ title: 'Error', description: 'Please log in to submit a review.', variant: 'destructive' });
+      return;
+    }
+    if (!reviewFormData.comment.trim()) {
+      toast({ title: 'Error', description: 'Please enter a review comment.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSubmittingReview(true);
+    try {
+      await DatabaseService.createReview(selectedProduct.id, user.id, {
+        rating: reviewFormData.rating,
+        comment: reviewFormData.comment.trim(),
+        reviewerName: reviewFormData.reviewerName.trim() || user.displayName || 'Anonymous'
+      });
+      toast({ title: 'Review submitted', description: 'Thank you for your review!' });
+      setReviewFormData({ rating: 5, comment: '', reviewerName: '' });
+      setShowReviewForm(false);
+      await loadReviews(selectedProduct.id);
+    } catch (error) {
+      console.error('Failed to submit review:', error);
+      toast({ title: 'Error', description: 'Failed to submit review. Please try again.', variant: 'destructive' });
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
 
   // Handle scroll position when switching between catalog and product detail
   useEffect(() => {
@@ -643,7 +709,11 @@ const MarketProducts: React.FC = () => {
                         <Heart className="w-4 h-4" />
                           </Button>
                     </div>
-                    <p className="text-xs md:text-sm text-gray-600 line-clamp-2" title={p.description}>{p.description}</p>
+                    <MarkdownRenderer
+                      content={p.description || ''}
+                      compact
+                      className="line-clamp-2 text-xs md:text-sm text-gray-600 prose-p:my-0"
+                    />
                     <div className="flex items-center gap-1">
                       {Array.from({ length: 5 }).map((_, i) => (
                         <Star key={i} className={`w-3 h-3 md:w-4 md:h-4 ${i < Math.round((p.rating || 0)) ? 'text-yellow-500' : 'text-gray-300'}`} />
@@ -696,7 +766,7 @@ const MarketProducts: React.FC = () => {
         // Full-page product detail view
         <div className="space-y-6">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="flex-1 min-w-0">
               <Button variant="outline" onClick={() => {
                 setSelectedProduct(null);
                 setSearchParams(prev => {
@@ -705,17 +775,17 @@ const MarketProducts: React.FC = () => {
                   return next;
                 }, { replace: true });
               }}>← Back to Catalog</Button>
-              <h1 className="text-xl font-semibold truncate">{selectedProduct.name}</h1>
+              <h1 className="text-xl font-semibold mt-2">{selectedProduct.name}</h1>
             </div>
             <div className="flex items-center gap-2">
               {user?.id && (isAdmin || selectedProduct.ownerId === user.id) && (
                 <Button 
                   variant="outline" 
+                  size="icon"
                   onClick={() => handleModifyClick(selectedProduct)}
                   className="bg-red-600 text-white hover:bg-red-700 border-red-600 hover:border-red-700"
                 >
-                  <Edit className="w-4 h-4 mr-2" />
-                  Modify
+                  <Edit className="w-4 h-4" />
                 </Button>
               )}
               <SheetTrigger asChild>
@@ -821,17 +891,12 @@ const MarketProducts: React.FC = () => {
           {selectedProduct.description && (
             <div>
               <h4 className="font-medium mb-2">Description</h4>
-              <p className="text-sm text-gray-700">{selectedProduct.description}</p>
+              <MarkdownRenderer
+                content={selectedProduct.description}
+                className="prose-sm text-gray-700"
+              />
             </div>
           )}
-          <div>
-            <h4 className="font-medium mb-2">Highlights</h4>
-            <ul className="list-disc pl-5 text-sm text-gray-700 space-y-1">
-              <li>Fresh from local farms</li>
-              <li>Quality assured and sustainably sourced</li>
-              <li>Transparent pricing and reliable delivery</li>
-            </ul>
-          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="bg-gray-50 rounded p-4">
               <h5 className="font-medium mb-2">Specifications</h5>
@@ -847,31 +912,136 @@ const MarketProducts: React.FC = () => {
               <p className="text-sm text-gray-700">Standard shipping in 2–4 business days. Free returns within 7 days of delivery in original condition.</p>
             </div>
           </div>
+
+          {/* Reviews Section */}
           <div>
-            <h4 className="font-medium mb-2">Recent Reviews</h4>
-            <div className="space-y-2">
-              {Array.from({ length: Math.min(3, (selectedProduct.reviewCount || 0)) }).map((_, idx) => (
-                <div key={idx} className="p-3 bg-gray-50 rounded">
-                  <div className="flex items-center gap-2 text-xs text-gray-500 mb-1">
-                    {Array.from({ length: 5 }).map((__, i) => (
-                      <Star key={i} className={`w-3 h-3 ${i < Math.max(3, Math.round((selectedProduct.rating || 0) - (idx % 2))) ? 'text-yellow-500' : 'text-gray-300'}`} />
-                    ))}
-                    <span>by Buyer {idx + 1}</span>
-                  </div>
-                  <p className="text-sm text-gray-700">Great quality and timely delivery. Will reorder.</p>
-                </div>
-              ))}
+            <div className="flex items-center justify-between mb-4">
+              <h4 className="font-medium">Reviews</h4>
+              {user?.id && (
+                <Button variant="outline" size="sm" onClick={() => setShowReviewForm(!showReviewForm)}>
+                  {showReviewForm ? 'Cancel' : 'Add a Review'}
+                </Button>
+              )}
             </div>
+
+            {/* Add Review Form */}
+            {showReviewForm && user?.id && (
+              <Card className="mb-4">
+                <CardContent className="p-4">
+                  <form onSubmit={handleSubmitReview} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="review-name">Your Name (optional)</Label>
+                      <Input
+                        id="review-name"
+                        value={reviewFormData.reviewerName}
+                        onChange={(e) => setReviewFormData(prev => ({ ...prev, reviewerName: e.target.value }))}
+                        placeholder={user.displayName || 'Anonymous'}
+                        className="h-10"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="review-rating">Rating</Label>
+                      <div className="flex items-center gap-2">
+                        {[1, 2, 3, 4, 5].map((rating) => (
+                          <button
+                            key={rating}
+                            type="button"
+                            onClick={() => setReviewFormData(prev => ({ ...prev, rating }))}
+                            className="focus:outline-none"
+                          >
+                            <Star
+                              className={`w-6 h-6 ${
+                                rating <= reviewFormData.rating
+                                  ? 'text-yellow-500 fill-yellow-500'
+                                  : 'text-gray-300'
+                              }`}
+                            />
+                          </button>
+                        ))}
+                        <span className="text-sm text-gray-600 ml-2">{reviewFormData.rating} / 5</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="review-comment">Your Review *</Label>
+                      <Textarea
+                        id="review-comment"
+                        value={reviewFormData.comment}
+                        onChange={(e) => setReviewFormData(prev => ({ ...prev, comment: e.target.value }))}
+                        placeholder="Share your experience with this product..."
+                        className="min-h-[100px]"
+                        required
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        type="submit"
+                        disabled={isSubmittingReview}
+                        className="flex-1"
+                      >
+                        {isSubmittingReview ? 'Submitting...' : 'Submit Review'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setShowReviewForm(false);
+                          setReviewFormData({ rating: 5, comment: '', reviewerName: '' });
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Reviews List */}
+            {isLoadingReviews ? (
+              <div className="text-center py-8 text-gray-500">Loading reviews...</div>
+            ) : reviews.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">
+                <p>No reviews yet. Be the first to review this product!</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {reviews.map((review) => (
+                  <Card key={review.id}>
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <p className="font-medium text-sm">{review.reviewerName}</p>
+                          <p className="text-xs text-gray-500">
+                            {review.createdAt?.toDate ? new Date(review.createdAt.toDate()).toLocaleDateString() : 'Recently'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {Array.from({ length: 5 }).map((_, i) => (
+                            <Star
+                              key={i}
+                              className={`w-4 h-4 ${
+                                i < review.rating ? 'text-yellow-500 fill-yellow-500' : 'text-gray-300'
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <p className="text-sm text-gray-700 mt-2">{review.comment}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
 
       {/* Edit Product Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader className="pb-4">
-            <DialogTitle className="text-2xl font-bold">Modify Product</DialogTitle>
-            <DialogDescription className="text-base">View and edit your product details</DialogDescription>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Modify Product</DialogTitle>
+            <DialogDescription>View and edit your product details</DialogDescription>
           </DialogHeader>
           <form className="space-y-6" onSubmit={handleEditSubmit}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1016,7 +1186,7 @@ const MarketProducts: React.FC = () => {
               )}
             </div>
             
-            <div className="flex justify-between pt-4 border-t">
+            <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
               <Button 
                 type="button" 
                 variant="destructive"
@@ -1024,20 +1194,20 @@ const MarketProducts: React.FC = () => {
                   setIsEditDialogOpen(false);
                   handleDeleteClick();
                 }}
-                className="px-6"
+                className="w-full px-6 sm:w-auto"
                 disabled={isSubmitting || isUploadingImages}
               >
                 <Trash2 className="w-4 h-4 mr-2" />
                 Delete Product
               </Button>
-              <div className="flex space-x-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <Button 
                   type="button" 
                   variant="outline" 
                   onClick={() => {
                     setIsEditDialogOpen(false);
                   }} 
-                  className="px-6"
+                  className="w-full px-6 sm:w-auto"
                   disabled={isSubmitting || isUploadingImages}
                 >
                   Cancel
@@ -1045,7 +1215,7 @@ const MarketProducts: React.FC = () => {
                 <Button
                   type="submit"
                   disabled={isSubmitting || isUploadingImages}
-                  className="px-6 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800"
+                  className="w-full px-6 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 sm:w-auto"
                 >
                   {isSubmitting ? (
                     <div className="flex items-center">

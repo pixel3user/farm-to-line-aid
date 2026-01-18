@@ -22,9 +22,9 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { DatabaseService } from "@/lib/database";
-import eggImage1 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (1).png";
-import eggImage2 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (2).png";
-import eggImage3 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (3).png";
+import eggImage1 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (1).webp";
+import eggImage2 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (2).webp";
+import eggImage3 from "@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt (3).webp";
 
 const ProductManagement = () => {
   const [showAddProduct, setShowAddProduct] = useState(false);

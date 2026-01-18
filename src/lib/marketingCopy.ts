@@ -60,6 +60,9 @@ export const getMarketingCopy = (language: string) => {
       resultGenerating: '正在生成行銷素材…',
       resultBackButton: '返回生成介面',
       resultLoading: '正在為您生成圖像與文案，請稍候…',
+      generateMoreButton: '再生成行銷素材',
+      viewProductButton: '查看商品',
+      nextActionsTitle: '後續操作',
       noTextYet: '尚未產生文案，請點擊「生成」。',
       noImageYet: '尚未產生圖片。',
       downloadButton: '下載',
@@ -73,7 +76,9 @@ export const getMarketingCopy = (language: string) => {
       requireDescriptionDesc: '尚未提供圖片，請先填寫商品描述以產生行銷圖像。',
       applyAssetsButton: '套用AI素材',
       applyAssetsSaving: '套用中…',
-      applyAssetsSuccess: '行銷素材已套用'
+      applyAssetsSuccess: '行銷素材已套用',
+      videoProductButton: '商品影片',
+      videoProductComingSoon: '影片生成功能即將推出。'
     } as const;
   }
 
@@ -135,6 +140,9 @@ export const getMarketingCopy = (language: string) => {
     resultGenerating: 'Generating marketing materials…',
     resultBackButton: 'Back to generator',
     resultLoading: 'Generating your image and copy, please wait…',
+    generateMoreButton: 'Generate more marketing material',
+    viewProductButton: 'View product',
+    nextActionsTitle: 'Next steps',
     noTextYet: 'No copy yet – generate to see Gemini’s pitch.',
     noImageYet: 'No enhanced image yet.',
     downloadButton: 'Download',
@@ -148,6 +156,8 @@ export const getMarketingCopy = (language: string) => {
     requireDescriptionDesc: 'Provide some product details so we can generate an image without reference photos.',
     applyAssetsButton: 'Apply AI assets',
     applyAssetsSaving: 'Applying assets…',
-    applyAssetsSuccess: 'Marketing assets applied'
+    applyAssetsSuccess: 'Marketing assets applied',
+    videoProductButton: 'Video product',
+    videoProductComingSoon: 'Video generation is coming soon.'
   } as const;
 };
