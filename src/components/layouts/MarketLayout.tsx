@@ -24,7 +24,8 @@ import {
   X,
   Search,
   MapPin,
-  Filter
+  Filter,
+  FileText
 } from 'lucide-react';
 
 const MarketOnboarding = React.lazy(() => import('@/components/MarketOnboarding'));
@@ -80,7 +81,18 @@ const MarketLayout: React.FC = () => {
       icon: Star,
       key: 'ratings'
     },
-  ];
+    { 
+      label: 'Invoice Management', 
+      href: '/invoices', 
+      icon: FileText,
+      key: 'invoices'
+    },
+  ].filter((item) => {
+    if (item.key === 'invoices') {
+      return featureFlags.invoiceManager;
+    }
+    return true;
+  });
 
   const farmerNavigationItems = [
     { 
@@ -106,6 +118,12 @@ const MarketLayout: React.FC = () => {
       href: '/farmer/delivery', 
       icon: Truck,
       key: 'delivery'
+    },
+    { 
+      label: 'Invoice Management', 
+      href: '/invoices', 
+      icon: FileText,
+      key: 'invoices'
     },
     { 
       label: t('marketing.title'), 
@@ -134,6 +152,9 @@ const MarketLayout: React.FC = () => {
     }
     if (item.key === 'references') {
       return featureFlags.references;
+    }
+    if (item.key === 'invoices') {
+      return featureFlags.invoiceManager;
     }
     return true;
   });
@@ -237,12 +258,12 @@ const MarketLayout: React.FC = () => {
         <div className="p-4 sm:p-6 lg:p-8">
           <LocationReminder />
           <Suspense fallback={null}>
-            <MarketOnboarding>
-              <>
-                <MarketTutorial />
+            <>
+              <MarketTutorial />
+              <MarketOnboarding>
                 <Outlet />
-              </>
-            </MarketOnboarding>
+              </MarketOnboarding>
+            </>
           </Suspense>
         </div>
       </div>

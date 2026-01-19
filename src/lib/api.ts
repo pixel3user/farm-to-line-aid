@@ -1,5 +1,6 @@
 export const resolveApiBaseUrl = (): string => {
   const envBaseUrl = import.meta.env.VITE_API_BASE_URL as string | undefined;
+  const forceProd = (import.meta.env.VITE_FORCE_PROD_API as string | undefined)?.toLowerCase() === 'true';
   if (envBaseUrl) {
     const trimmed = envBaseUrl.trim().replace(/\/+$/, '');
     if (typeof window !== 'undefined') {
@@ -24,6 +25,9 @@ export const resolveApiBaseUrl = (): string => {
       (import.meta.env.VITE_FRONTEND_BASE_URL as string | undefined)?.replace(/\/+$/, '') ||
       'https://farm2market.tw';
     if (/liff\.line\.me/i.test(origin)) {
+      return fallbackHost;
+    }
+    if (forceProd) {
       return fallbackHost;
     }
     return origin;

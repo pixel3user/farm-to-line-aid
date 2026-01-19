@@ -76,6 +76,12 @@ const FarmerLayout: React.FC = () => {
       key: 'delivery'
     },
     { 
+      label: 'Invoice Management', 
+      href: '/invoices', 
+      icon: FileText,
+      key: 'invoices'
+    },
+    { 
       label: t('marketing.title'), 
       href: '/farmer/marketing', 
       icon: Megaphone,
@@ -102,6 +108,9 @@ const FarmerLayout: React.FC = () => {
     }
     if (item.key === 'references') {
       return featureFlags.references;
+    }
+    if (item.key === 'invoices') {
+      return featureFlags.invoiceManager;
     }
     return true;
   });

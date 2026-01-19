@@ -1,6 +1,7 @@
 import runtimeConfig from './runtimeConfig';
 import { ConversationStore } from './conversationStore';
 import { DatabaseService, type ProductRecord, type StoreRecord } from './database-server';
+import { matchesProductSearch } from './search';
 import { generateConversationPlan } from './gemini-client';
 import type { LineMessage } from '../api/lineBot';
 import { GoogleGenAI } from '@google/genai';
@@ -28,6 +29,7 @@ export type VoiceToolUiAction = {
   label: string;
   prompt?: string;
   href?: string;
+  auto?: boolean;
 };
 
 export type VoiceToolUiProduct = {
@@ -206,7 +208,8 @@ const COPY = {
     productUpdated: (name: string) => `已更新產品 ${name}。`,
     productUpdateNotFound: '找不到符合的產品，請告訴我完整名稱。',
     productUpdateMultiple: (names: string) => `找到多個符合的產品：${names}。請告訴我完整名稱。`,
-    productDetailsPrompt: '要補上圖片或取貨地址嗎？你可以說「新增產品圖片 ...」、「新增取貨地址 ...」或「用店家名稱作為取貨地址」。',
+    productDetailsPrompt:
+      '接下來請補上產品圖片，並設定取貨地址（必填）。你可以說「新增產品圖片 ...」、「新增取貨地址 ...」或「用店家名稱作為取貨地址」。',
     productUpdateMissing: '請告訴我想更新的內容，例如圖片網址或取貨地址，也可以直接點擊下方上傳照片/開啟相機。',
     pickupStoreNotFound: '找不到符合的店家，請告訴我完整店家名稱。',
     pickupStoreMultiple: (names: string) => `找到多個店家：${names}。請告訴我完整名稱。`,
@@ -241,7 +244,8 @@ const COPY = {
     productUpdated: (name: string) => `Updated product ${name}.`,
     productUpdateNotFound: 'I could not find that product. Please tell me the exact name.',
     productUpdateMultiple: (names: string) => `I found multiple products: ${names}. Which one should I update?`,
-    productDetailsPrompt: 'Want to add an image or pickup address? Say “add product image …”, “add pickup address …”, or “use store NAME as pickup.”',
+    productDetailsPrompt:
+      'Next, please add a product image and set a pickup address (required). Say “add product image …”, “add pickup address …”, or “use store NAME as pickup.”',
     productUpdateMissing: 'Tell me what to update, like an image URL or pickup address, or use the buttons to upload or open the camera.',
     pickupStoreNotFound: 'I could not find that store. Please tell me the exact store name.',
     pickupStoreMultiple: (names: string) => `I found multiple stores: ${names}. Which one should I use?`,
@@ -1228,13 +1232,15 @@ export async function executeVoiceFunction(
         pickup,
       });
       const canEdit = !!created.id && userProfile?.role !== 'market';
-      const productEditUrl = canEdit ? buildProductEditLink(created.id!, { step: 3 }) : undefined;
-      const productEditActionUrl = canEdit ? buildProductEditLink(created.id!, { step: 3, enhance: true }) : undefined;
+      const productEditUrl = canEdit ? buildProductEditLink(created.id!, { step: 'images' }) : undefined;
+      const productEditActionUrl = canEdit
+        ? buildProductEditLink(created.id!, { step: 'images', enhance: true })
+        : undefined;
       const imageUploadUrl = canEdit
-        ? buildProductEditLink(created.id!, { step: 3, media: 'upload', enhance: true })
+        ? buildProductEditLink(created.id!, { step: 'images', media: 'upload', enhance: true })
         : undefined;
       const imageCameraUrl = canEdit
-        ? buildProductEditLink(created.id!, { step: 3, media: 'camera', enhance: true })
+        ? buildProductEditLink(created.id!, { step: 'images', media: 'camera', enhance: true })
         : undefined;
       const pickupUrl = canEdit ? buildProductEditLink(created.id!, { step: 'pickup' }) : undefined;
       const productDetailUrl = created.id
@@ -1276,14 +1282,146 @@ export async function executeVoiceFunction(
               ? [{ label: isTraditional ? '完成細節' : 'Complete details', href: productEditActionUrl }]
               : [{ label: isTraditional ? '查看產品' : 'View product', href: productDetailUrl }]),
             ...(imageUploadUrl
-              ? [{ label: isTraditional ? '上傳圖片' : 'Upload image', href: imageUploadUrl }]
+              ? [{ label: isTraditional ? '上傳圖片' : 'Upload image', href: imageUploadUrl, auto: !images.length }]
               : [{ label: isTraditional ? '新增圖片' : 'Add image', prompt: imagePrompt }]),
             ...(imageCameraUrl
               ? [{ label: isTraditional ? '開啟相機' : 'Use camera', href: imageCameraUrl }]
               : []),
             ...(pickupUrl
-              ? [{ label: isTraditional ? '新增取貨地址' : 'Add pickup address', href: pickupUrl }]
+              ? [{ label: isTraditional ? '新增取貨地址' : 'Add pickup address', href: pickupUrl, auto: !pickup?.address }]
               : [{ label: isTraditional ? '新增取貨地址' : 'Add pickup address', prompt: pickupPrompt }]),
+          ],
+        }
+      );
+    }
+    case 'product_open_image_upload': {
+      const args = call.args || {};
+      const productId = normalizeString(args.productId) || normalizeString(args.id);
+      const productName = normalizeString(args.productName) || normalizeString(args.name);
+      const media =
+        args.media === 'camera' || args.media === 'upload' ? (args.media as 'camera' | 'upload') : 'upload';
+
+      const products = await DatabaseService.getProductsByUser(userId);
+      if (!products.length) {
+        return buildResult([{ role: 'assistant', text: copy.productListEmpty }]);
+      }
+
+      let target = productId ? products.find((product) => product.id === productId) : undefined;
+      if (!target && productName) {
+        const matches = products.filter((product) => matchesProductSearch(product, productName));
+        if (matches.length > 1) {
+          const names = formatNameList(matches.map((match) => match.name || '').slice(0, 5), lang);
+          return buildResult([{ role: 'assistant', text: copy.productUpdateMultiple(names) }]);
+        }
+        target = matches[0];
+        if (!target) {
+          return buildResult([{ role: 'assistant', text: copy.productUpdateNotFound }]);
+        }
+      }
+      if (!target) {
+        target = products[0];
+      }
+      if (!target?.id) {
+        return buildResult([{ role: 'assistant', text: copy.productUpdateNotFound }]);
+      }
+
+      const canEdit = userProfile?.role !== 'market';
+      const imageUrl = canEdit ? buildProductEditLink(target.id!, { step: 'images', media, enhance: true }) : undefined;
+      const pickupUrl = canEdit ? buildProductEditLink(target.id!, { step: 'pickup' }) : undefined;
+      const productUi: VoiceToolUiProduct = {
+        id: target.id,
+        name: target.name || (isTraditional ? '產品' : 'product'),
+        price: target.price,
+        unit: target.unit,
+        stock: target.stock,
+        category: target.category,
+        imageUrl: target.images?.[0],
+        imageCount: target.images?.length ?? 0,
+        description: target.description,
+        pickup: target.pickup,
+        href: imageUrl || buildProductEditLink(target.id!, { step: 'images' }),
+      };
+
+      return buildResult(
+        [
+          {
+            role: 'assistant',
+            text: isTraditional ? '正在開啟上傳圖片視窗。' : 'Opening the image upload dialog.',
+          },
+        ],
+        {
+          kind: 'product_updated',
+          title: isTraditional ? '上傳產品圖片' : 'Upload product image',
+          description: isTraditional ? '請選擇要上傳的圖片。' : 'Select an image to upload.',
+          product: productUi,
+          actions: [
+            ...(imageUrl ? [{ label: isTraditional ? '上傳圖片' : 'Upload image', href: imageUrl, auto: true }] : []),
+            ...(pickupUrl ? [{ label: isTraditional ? '新增取貨地址' : 'Add pickup address', href: pickupUrl }] : []),
+          ],
+        }
+      );
+    }
+    case 'product_open_pickup_address': {
+      const args = call.args || {};
+      const productId = normalizeString(args.productId) || normalizeString(args.id);
+      const productName = normalizeString(args.productName) || normalizeString(args.name);
+
+      const products = await DatabaseService.getProductsByUser(userId);
+      if (!products.length) {
+        return buildResult([{ role: 'assistant', text: copy.productListEmpty }]);
+      }
+
+      let target = productId ? products.find((product) => product.id === productId) : undefined;
+      if (!target && productName) {
+        const matches = products.filter((product) => matchesProductSearch(product, productName));
+        if (matches.length > 1) {
+          const names = formatNameList(matches.map((match) => match.name || '').slice(0, 5), lang);
+          return buildResult([{ role: 'assistant', text: copy.productUpdateMultiple(names) }]);
+        }
+        target = matches[0];
+        if (!target) {
+          return buildResult([{ role: 'assistant', text: copy.productUpdateNotFound }]);
+        }
+      }
+      if (!target) {
+        target = products[0];
+      }
+      if (!target?.id) {
+        return buildResult([{ role: 'assistant', text: copy.productUpdateNotFound }]);
+      }
+
+      const canEdit = userProfile?.role !== 'market';
+      const pickupUrl = canEdit ? buildProductEditLink(target.id!, { step: 'pickup' }) : undefined;
+      const productUi: VoiceToolUiProduct = {
+        id: target.id,
+        name: target.name || (isTraditional ? '產品' : 'product'),
+        price: target.price,
+        unit: target.unit,
+        stock: target.stock,
+        category: target.category,
+        imageUrl: target.images?.[0],
+        imageCount: target.images?.length ?? 0,
+        description: target.description,
+        pickup: target.pickup,
+        href: pickupUrl || buildProductEditLink(target.id!, { step: 'pickup' }),
+      };
+
+      return buildResult(
+        [
+          {
+            role: 'assistant',
+            text: isTraditional ? '正在開啟取貨地址設定視窗。' : 'Opening the pickup address dialog.',
+          },
+        ],
+        {
+          kind: 'product_updated',
+          title: isTraditional ? '新增取貨地址' : 'Add pickup address',
+          description: isTraditional ? '請填寫取貨地址（必填）。' : 'Enter the pickup address (required).',
+          product: productUi,
+          actions: [
+            ...(pickupUrl
+              ? [{ label: isTraditional ? '新增取貨地址' : 'Add pickup address', href: pickupUrl, auto: true }]
+              : []),
           ],
         }
       );
@@ -1305,9 +1443,7 @@ export async function executeVoiceFunction(
         : undefined;
 
       if (!target && productName) {
-        const matches = products.filter((product) =>
-          (product.name || '').toLowerCase().includes(productName.toLowerCase())
-        );
+        const matches = products.filter((product) => matchesProductSearch(product, productName));
         if (matches.length > 1) {
           const names = formatNameList(
             matches.map((match) => match.name || '').slice(0, 5),
@@ -1397,13 +1533,15 @@ export async function executeVoiceFunction(
       if (!Object.keys(updates).length) {
         const targetName = target.name || productName || (isTraditional ? '產品' : 'product');
         const canEdit = !!target.id && userProfile?.role !== 'market';
-        const productEditUrl = canEdit ? buildProductEditLink(target.id!, { step: 3 }) : undefined;
-        const productEditActionUrl = canEdit ? buildProductEditLink(target.id!, { step: 3, enhance: true }) : undefined;
+        const productEditUrl = canEdit ? buildProductEditLink(target.id!, { step: 'images' }) : undefined;
+        const productEditActionUrl = canEdit
+          ? buildProductEditLink(target.id!, { step: 'images', enhance: true })
+          : undefined;
         const imageUploadUrl = canEdit
-          ? buildProductEditLink(target.id!, { step: 3, media: 'upload', enhance: true })
+          ? buildProductEditLink(target.id!, { step: 'images', media: 'upload', enhance: true })
           : undefined;
         const imageCameraUrl = canEdit
-          ? buildProductEditLink(target.id!, { step: 3, media: 'camera', enhance: true })
+          ? buildProductEditLink(target.id!, { step: 'images', media: 'camera', enhance: true })
           : undefined;
         const pickupUrl = canEdit ? buildProductEditLink(target.id!, { step: 'pickup' }) : undefined;
         const productDetailUrl = target.id
@@ -1463,13 +1601,15 @@ export async function executeVoiceFunction(
       };
       const updatedName = updated.name || productName || target.name || (isTraditional ? '產品' : 'product');
       const canEdit = !!updated.id && userProfile?.role !== 'market';
-      const productEditUrl = canEdit ? buildProductEditLink(updated.id!, { step: 3 }) : undefined;
-      const productEditActionUrl = canEdit ? buildProductEditLink(updated.id!, { step: 3, enhance: true }) : undefined;
+      const productEditUrl = canEdit ? buildProductEditLink(updated.id!, { step: 'images' }) : undefined;
+      const productEditActionUrl = canEdit
+        ? buildProductEditLink(updated.id!, { step: 'images', enhance: true })
+        : undefined;
       const imageUploadUrl = canEdit
-        ? buildProductEditLink(updated.id!, { step: 3, media: 'upload', enhance: true })
+        ? buildProductEditLink(updated.id!, { step: 'images', media: 'upload', enhance: true })
         : undefined;
       const imageCameraUrl = canEdit
-        ? buildProductEditLink(updated.id!, { step: 3, media: 'camera', enhance: true })
+        ? buildProductEditLink(updated.id!, { step: 'images', media: 'camera', enhance: true })
         : undefined;
       const pickupUrl = canEdit ? buildProductEditLink(updated.id!, { step: 'pickup' }) : undefined;
       const productDetailUrl = updated.id

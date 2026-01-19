@@ -287,11 +287,20 @@ export class YamatoService {
         };
       }
       const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      logYamatoDebug('response', {
+        service: 'DownloadOBT',
+        status: response.status,
+        ok: response.ok,
+        contentType,
+        size: buffer.length,
+        contentDisposition: contentDisposition || undefined,
+      });
       return {
         kind: 'binary',
         status: response.status,
         ok: response.ok,
-        data: Buffer.from(arrayBuffer),
+        data: buffer,
         contentType,
         contentDisposition,
       };

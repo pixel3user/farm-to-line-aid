@@ -5,8 +5,8 @@ import DeepLinkRouter from "./components/DeepLinkRouter";
 import DeepLinkHomeGate from "./components/DeepLinkHomeGate";
 import FarmerLayout from "./components/layouts/FarmerLayout";
 import MarketLayout from "./components/layouts/MarketLayout";
+import InvoicesLayout from "./components/layouts/InvoicesLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
-import DebugOverlay from "./components/DebugOverlay";
 
 const Home = lazy(() => import("./pages/Home"));
 const SignIn = lazy(() => import("./pages/auth/SignIn"));
@@ -35,15 +35,19 @@ const MarketCheckout = lazy(() => import("./pages/market/Checkout"));
 // Demo pages
 const LineDemo = lazy(() => import("./pages/demo/LineDemo"));
 const LinePayResult = lazy(() => import("./pages/payments/LinePayResult"));
+const MapReturn = lazy(() => import("./pages/logistics/MapReturn"));
 
 // Settings page
 const Settings = lazy(() => import("./pages/Settings"));
+
+// Invoice pages
+const InvoiceList = lazy(() => import("./pages/Invoices/InvoiceList"));
+const InvoiceCreate = lazy(() => import("./pages/Invoices/InvoiceCreate"));
 
 const App = () => {
   return (
     <BrowserRouter>
       <DeepLinkRouter />
-      <DebugOverlay />
       <Suspense fallback={<div className="p-4 text-center text-sm text-muted-foreground">Loading...</div>}>
         <Routes>
             {/* Public routes */}
@@ -53,6 +57,7 @@ const App = () => {
             <Route path="/auth/line/callback" element={<AppLayout><LineCallback /></AppLayout>} />
             <Route path="/auth/role-selection" element={<AppLayout><RoleSelection /></AppLayout>} />
             <Route path="/payments/line-pay/result" element={<AppLayout><LinePayResult /></AppLayout>} />
+            <Route path="/logistics/yamato/map/return" element={<AppLayout><MapReturn /></AppLayout>} />
         
         {/* Farmer routes - farmers and markets can access */}
         <Route
@@ -89,6 +94,19 @@ const App = () => {
           <Route path="ratings" element={<MarketRatings />} />
         </Route>
         
+        {/* Invoice routes - farmers and markets can access */}
+        <Route
+          path="/invoices"
+          element={
+            <ProtectedRoute allowedRoles={['farmer', 'market']}>
+              <InvoicesLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<InvoiceList />} />
+          <Route path="new" element={<InvoiceCreate />} />
+        </Route>
+
         {/* Demo routes */}
         <Route path="/demo/line" element={<AppLayout><LineDemo /></AppLayout>} />
         

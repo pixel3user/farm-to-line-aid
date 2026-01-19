@@ -18,6 +18,7 @@ import {
   QueryConstraint
 } from 'firebase/firestore';
 import { db } from './firebase';
+import { buildProductSearchTokens } from './search';
 
 // Database Types
 export interface LineUser {
@@ -81,6 +82,9 @@ export interface Product {
   stock: number;
   images: string[];
   tags: string[];
+  aliases?: string[];
+  nameTranslations?: Record<string, string>;
+  searchTokens?: string[];
   isActive: boolean;
   pickup?: {
     address?: string;
@@ -367,6 +371,9 @@ export class DatabaseService {
     const productRef = doc(collection(db, 'products'));
     const now = Timestamp.now();
     
+    const aliases = Array.isArray(productData.aliases) ? productData.aliases : [];
+    const nameTranslations = productData.nameTranslations ?? {};
+
     const productDoc: any = {
       id: productRef.id,
       userId,
@@ -378,6 +385,16 @@ export class DatabaseService {
       stock: productData.stock || 0,
       images: productData.images || [],
       tags: productData.tags || [],
+      aliases,
+      nameTranslations,
+      searchTokens: buildProductSearchTokens({
+        name: productData.name || '',
+        description: productData.description || '',
+        category: productData.category || 'general',
+        tags: productData.tags || [],
+        aliases,
+        nameTranslations
+      }),
       isActive: true,
       createdAt: now,
       updatedAt: now
@@ -454,9 +471,23 @@ export class DatabaseService {
 
   static async updateProduct(productId: string, updates: Partial<Product>): Promise<void> {
     const productRef = doc(db, 'products', productId);
+    const snapshot = await getDoc(productRef);
+    const existing = snapshot.exists() ? (snapshot.data() as Product) : undefined;
+    const merged: Partial<Product> = {
+      ...(existing || {}),
+      ...updates
+    };
     const updateData = {
       ...updates,
-      updatedAt: Timestamp.now()
+      updatedAt: Timestamp.now(),
+      searchTokens: buildProductSearchTokens({
+        name: merged.name,
+        description: merged.description,
+        category: merged.category,
+        tags: merged.tags,
+        aliases: merged.aliases,
+        nameTranslations: merged.nameTranslations
+      })
     };
     
     await updateDoc(productRef, updateData);

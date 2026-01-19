@@ -399,18 +399,18 @@ export class MessageTemplates {
       }
     };
 
-    const quickReply: LineMessage = {
-      type: 'text',
-      text: '您也可以直接告訴我想做什麼，例如「新增雞蛋 120/斤、20 箱」。',
-      quickReply: {
-        items: [
-          { type: 'action', action: { type: 'message', label: '📦 管理產品', text: '我要管理產品' } },
-          { type: 'action', action: { type: 'message', label: '🏪 拓展店家', text: '協助拓展店家' } },
-          { type: 'action', action: { type: 'message', label: '📱 行銷素材', text: '我要行銷建議' } },
-          { type: 'action', action: { type: 'message', label: '📊 看統計', text: '查看營運分析' } }
-        ]
-      }
-    };
+	    const quickReply: LineMessage = {
+	      type: 'text',
+	      text: '您也可以直接告訴我想做什麼，例如「新增雞蛋 120/斤、20 箱」。',
+	      quickReply: {
+	        items: [
+	          { type: 'action', action: { type: 'message', label: '📦 管理產品', text: '我要管理產品' } },
+	          { type: 'action', action: { type: 'message', label: '🏪 拓展店家', text: '協助拓展店家' } },
+	          { type: 'action', action: { type: 'uri', label: '🎙️ 語音轉接', uri: `${LINE_CONFIG.LIFF_URL}?tab=voice&action=start&role=farmer` } },
+	          { type: 'action', action: { type: 'message', label: '📊 看統計', text: '查看營運分析' } }
+	        ]
+	      }
+	    };
 
     return [text, overview, quickReply];
   }
@@ -446,20 +446,20 @@ export class MessageTemplates {
         type: 'bubble',
         header,
         body: { type: 'box', layout: 'vertical', spacing: 'sm', contents: role === 'farmer' ? bodyFarmer : bodyMarket },
-        footer: {
-          type: 'box',
-          layout: 'vertical',
-          spacing: 'sm',
-          contents: role === 'farmer'
-            ? [
-                { type: 'button', style: 'primary', height: 'sm', action: { type: 'message', label: '➕ 新增產品', text: '我要新增產品' } },
-                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '🏪 拓展店家', text: '協助拓展店家' } },
-                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '📱 行銷素材', text: '我要行銷建議' } },
-              ]
-            : [
-                { type: 'button', style: 'primary', height: 'sm', action: { type: 'message', label: '🔍 找供應', text: '我要找供應' } },
-                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '🧾 建立採購', text: '建立採購需求' } },
-                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '📊 看統計', text: '查看營運分析' } },
+	        footer: {
+	          type: 'box',
+	          layout: 'vertical',
+	          spacing: 'sm',
+	          contents: role === 'farmer'
+	            ? [
+	                { type: 'button', style: 'primary', height: 'sm', action: { type: 'message', label: '➕ 新增產品', text: '我要新增產品' } },
+	                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '🏪 拓展店家', text: '協助拓展店家' } },
+	                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'uri', label: '🎙️ 語音轉接', uri: `${LINE_CONFIG.LIFF_URL}?tab=voice&action=start&role=farmer` } },
+	              ]
+	            : [
+	                { type: 'button', style: 'primary', height: 'sm', action: { type: 'message', label: '🔍 找供應', text: '我要找供應' } },
+	                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '🧾 建立採購', text: '建立採購需求' } },
+	                { type: 'button', style: 'secondary', height: 'sm', action: { type: 'message', label: '📊 看統計', text: '查看營運分析' } },
               ]
         }
       }
@@ -470,18 +470,18 @@ export class MessageTemplates {
       text: role === 'farmer'
         ? '告訴我要先做哪件事：例如「新增雞蛋 120/斤 20 箱」。'
         : '告訴我您要找什麼：例如「我要找雞蛋供應，先看附近」。',
-      quickReply: {
-        items: role === 'farmer'
-          ? [
-              { type: 'action', action: { type: 'message', label: '新增產品', text: '我要新增產品' } },
-              { type: 'action', action: { type: 'message', label: '管理產品', text: '我要管理產品' } },
-              { type: 'action', action: { type: 'message', label: '拓展店家', text: '協助拓展店家' } },
-              { type: 'action', action: { type: 'message', label: '行銷素材', text: '我要行銷建議' } },
-            ]
-          : [
-              { type: 'action', action: { type: 'message', label: '找供應', text: '我要找供應' } },
-              { type: 'action', action: { type: 'message', label: '建立採購', text: '建立採購需求' } },
-              { type: 'action', action: { type: 'message', label: '管理供應商', text: '管理店家' } },
+	      quickReply: {
+	        items: role === 'farmer'
+	          ? [
+	              { type: 'action', action: { type: 'message', label: '新增產品', text: '我要新增產品' } },
+	              { type: 'action', action: { type: 'message', label: '管理產品', text: '我要管理產品' } },
+	              { type: 'action', action: { type: 'message', label: '拓展店家', text: '協助拓展店家' } },
+	              { type: 'action', action: { type: 'uri', label: '語音轉接', uri: `${LINE_CONFIG.LIFF_URL}?tab=voice&action=start&role=farmer` } },
+	            ]
+	          : [
+	              { type: 'action', action: { type: 'message', label: '找供應', text: '我要找供應' } },
+	              { type: 'action', action: { type: 'message', label: '建立採購', text: '建立採購需求' } },
+	              { type: 'action', action: { type: 'message', label: '管理供應商', text: '管理店家' } },
               { type: 'action', action: { type: 'message', label: '看統計', text: '查看營運分析' } },
             ]
       }

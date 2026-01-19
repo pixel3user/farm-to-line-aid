@@ -94,7 +94,7 @@ const farmerConfig = {
     { bounds: { x: 1667, y: 0, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=stores&role=farmer`, label: '店家列表' } },
     { bounds: { x: 0, y: 843, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=marketing&role=farmer`, label: '行銷工具' } },
     { bounds: { x: 833, y: 843, width: 834, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=products&action=add&role=farmer`, label: '新增產品' } },
-    { bounds: { x: 1667, y: 843, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=help&role=farmer`, label: '幫助中心' } },
+    { bounds: { x: 1667, y: 843, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}/demo/line`, label: '幫助中心' } },
   ],
 };
 
@@ -104,12 +104,12 @@ const marketConfig = {
   name: 'Market Menu',
   chatBarText: '市場選單',
   areas: [
-    { bounds: { x: 0, y: 0, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=dashboard&role=market`, label: '儀表板' } },
+    { bounds: { x: 0, y: 0, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}/market`, label: '儀表板' } },
     { bounds: { x: 833, y: 0, width: 834, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=products&role=market`, label: '尋找產品' } },
     { bounds: { x: 1667, y: 0, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=stores&role=market`, label: '我的供應商' } },
-    { bounds: { x: 0, y: 843, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=orders&role=market`, label: '採購單' } },
-    { bounds: { x: 833, y: 843, width: 834, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=analytics&role=market`, label: '數據分析' } },
-    { bounds: { x: 1667, y: 843, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}?tab=help&role=market`, label: '幫助中心' } },
+    { bounds: { x: 0, y: 843, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}/market/schedule`, label: '採購單' } },
+    { bounds: { x: 833, y: 843, width: 834, height: 843 }, action: { type: 'uri', uri: `${baseUrl}/market/ratings`, label: '數據分析' } },
+    { bounds: { x: 1667, y: 843, width: 833, height: 843 }, action: { type: 'uri', uri: `${baseUrl}/demo/line`, label: '幫助中心' } },
   ],
 };
 

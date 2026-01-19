@@ -12,6 +12,7 @@ import { Pagination, PaginationContent, PaginationItem, PaginationNext, Paginati
 import { useToast } from '@/components/ui/use-toast';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 import { DatabaseService, Product } from '@/lib/database';
+import { matchesProductSearch } from '@/lib/search';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   Dialog,
@@ -60,6 +61,10 @@ type CatalogProduct = {
   price?: number;
   stock?: number;
   images?: string[];
+  tags?: string[];
+  aliases?: string[];
+  nameTranslations?: Record<string, string>;
+  searchTokens?: string[];
   createdAtMs?: number;
   updatedAtMs?: number;
   ownerId?: string;
@@ -145,6 +150,10 @@ const MarketProducts: React.FC = () => {
           price: typeof p.price === 'number' ? p.price : 0,
           stock: typeof p.stock === 'number' ? p.stock : 0,
           images: Array.isArray(p.images) ? p.images : (Array.isArray(p.photos) ? p.photos : []),
+          tags: Array.isArray(p.tags) ? p.tags : [],
+          aliases: Array.isArray(p.aliases) ? p.aliases : [],
+          nameTranslations: p.nameTranslations && typeof p.nameTranslations === 'object' ? p.nameTranslations : undefined,
+          searchTokens: Array.isArray(p.searchTokens) ? p.searchTokens : undefined,
           createdAtMs: p.createdAt?.toMillis?.() || Date.now(),
           updatedAtMs: p.updatedAt?.toMillis?.() || p.createdAt?.toMillis?.() || Date.now(),
           ownerId: p.userId || p.farmerId
@@ -302,9 +311,9 @@ const MarketProducts: React.FC = () => {
   }, [products]);
 
   const filtered = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
+    const term = searchTerm.trim();
     return products.filter(p => {
-      const matchesSearch = !term || p.name.toLowerCase().includes(term) || (p.description || '').toLowerCase().includes(term);
+      const matchesSearch = !term || matchesProductSearch(p, term);
       const matchesCategory = selectedCategory === 'all' || p.category === selectedCategory;
       const withinPrice = (p.price || 0) >= priceRange[0] && (p.price || 0) <= priceRange[1];
       const hasStock = !inStockOnly || (p.stock || 0) > 0;

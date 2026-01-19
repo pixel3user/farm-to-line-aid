@@ -1,35 +1,34 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import MarkdownRenderer from '@/components/MarkdownRenderer';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AspectRatio } from '@/components/ui/aspect-ratio';
 import {
   MapPin,
   Users,
   Package,
   TrendingUp,
   Star,
-  Clock,
   Settings,
   Search,
-  Filter,
   Heart,
   MessageCircle,
   Phone,
   Calendar,
-  Award,
   Zap,
   Target,
   BarChart3,
   ShoppingCart,
   Eye,
-  ThumbsUp
+  Image as ImageIcon
 } from 'lucide-react';
 import { DatabaseService, LineUser, Product, Store } from '@/lib/database';
+import { matchesProductSearch } from '@/lib/search';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { FarmerMapPreview, FarmerRelatedSection } from '@/components/FarmerDetailSections';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -90,12 +89,6 @@ const MarketDashboard: React.FC = () => {
   const [farmerProducts, setFarmerProducts] = useState<Product[]>([]);
   const [farmerStores, setFarmerStores] = useState<Store[]>([]);
   const [isFarmerDataLoading, setIsFarmerDataLoading] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
-  const [productFarmer, setProductFarmer] = useState<LineUser | null>(null);
-  const [productFarmerStores, setProductFarmerStores] = useState<Store[]>([]);
-  const [productRelatedProducts, setProductRelatedProducts] = useState<Product[]>([]);
-  const [isProductDataLoading, setIsProductDataLoading] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -140,50 +133,6 @@ const MarketDashboard: React.FC = () => {
       cancelled = true;
     };
   }, [selectedFarmer, isFarmerModalOpen]);
-
-  useEffect(() => {
-    if (!selectedProduct || !isProductModalOpen) {
-      setProductFarmer(null);
-      setProductFarmerStores([]);
-      setProductRelatedProducts([]);
-      return;
-    }
-
-    let cancelled = false;
-    const loadProductDetails = async () => {
-      if (!selectedProduct.userId) return;
-      try {
-        setIsProductDataLoading(true);
-        const [farmerProfile, farmerProductsList, farmerStoresList] = await Promise.all([
-          DatabaseService.getLineUser(selectedProduct.userId),
-          DatabaseService.getProductsByUser(selectedProduct.userId),
-          DatabaseService.getStoresByUser(selectedProduct.userId),
-        ]);
-        if (!cancelled) {
-          setProductFarmer(farmerProfile);
-          setProductRelatedProducts(farmerProductsList);
-          setProductFarmerStores(farmerStoresList);
-        }
-      } catch (error) {
-        console.error('Failed to load product details', error);
-        if (!cancelled) {
-          setProductFarmer(null);
-          setProductRelatedProducts([]);
-          setProductFarmerStores([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsProductDataLoading(false);
-        }
-      }
-    };
-
-    loadProductDetails();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedProduct, isProductModalOpen]);
 
   const getFarmerKey = (farmer: LineUser) => farmer.lineUserId || farmer.id;
 
@@ -239,9 +188,8 @@ const MarketDashboard: React.FC = () => {
 
   // Filter and sort products based on search and filters
   const filteredProducts = useMemo(() => {
-    let filtered = products.filter(product => {
-      const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                           product.description?.toLowerCase().includes(searchQuery.toLowerCase());
+    const filtered = products.filter(product => {
+      const matchesSearch = matchesProductSearch(product, searchQuery);
       const matchesCategory = selectedCategory === 'all' || product.category === selectedCategory;
       return matchesSearch && matchesCategory;
     });
@@ -281,6 +229,16 @@ const MarketDashboard: React.FC = () => {
 
   const featuredFarmers = sortedFarmers.slice(0, 6);
   const featuredProducts = filteredProducts.slice(0, 6);
+  const farmerNameById = useMemo(() => {
+    const mapping: Record<string, string> = {};
+    farmers.forEach((farmer) => {
+      const key = getFarmerKey(farmer);
+      if (key) {
+        mapping[key] = farmer.displayName || t('market.certifiedFarmer');
+      }
+    });
+    return mapping;
+  }, [farmers, t]);
   const topStores = useMemo(() => {
     return [...stores]
       .filter((store) => store.metadata?.totalOrders)
@@ -321,13 +279,13 @@ const MarketDashboard: React.FC = () => {
     }
   };
 
-  const formatDate = (value?: any) => {
+  const formatDate = (value?: unknown) => {
     if (!value) return t('market.detail.notProvided');
     if (typeof value === 'string') {
       return new Date(value).toLocaleDateString();
     }
-    if (typeof value.toDate === 'function') {
-      return value.toDate().toLocaleDateString();
+    if (typeof (value as { toDate?: unknown }).toDate === 'function') {
+      return (value as { toDate: () => Date }).toDate().toLocaleDateString();
     }
     return t('market.detail.notProvided');
   };
@@ -345,16 +303,12 @@ const MarketDashboard: React.FC = () => {
     navigate('/market/farms');
   };
 
-  const openProductModal = (product: Product) => {
-    setSelectedProduct(product);
-    setIsProductModalOpen(true);
+  const handleViewAllProducts = () => {
+    navigate('/market/products');
   };
 
-  const handleProductModalChange = (open: boolean) => {
-    setIsProductModalOpen(open);
-    if (!open) {
-      setSelectedProduct(null);
-    }
+  const navigateToProduct = (productId: string) => {
+    navigate(`/market/products?product=${encodeURIComponent(productId)}`);
   };
 
   const contactEmail = selectedFarmer?.email;
@@ -436,138 +390,271 @@ const MarketDashboard: React.FC = () => {
         })}
       </div>
 
-      {/* Enhanced Farm Discovery Section */}
+      {/* Featured Farms & Products */}
       <Card className="shadow-lg border-0">
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center text-xl">
             <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mr-3">
               <Users className="w-5 h-5 text-green-600" />
             </div>
-            {t('market.featuredFarmersTitle')}
+            {t('market.featuredFarmsAndProductsTitle')}
           </CardTitle>
-          <CardDescription className="text-base">{t('market.featuredFarmersDesc')}</CardDescription>
+          <CardDescription className="text-base">{t('market.featuredFarmsAndProductsDesc')}</CardDescription>
         </CardHeader>
         <CardContent>
-          {featuredFarmers.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Users className="w-8 h-8 text-gray-400" />
-              </div>
-              <p className="text-gray-500 font-medium">{t('market.noFarmers')}</p>
-              <p className="text-sm text-gray-400 mt-2">農家加入平台後會在此顯示</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {featuredFarmers.map((farmer, index) => {
-                const farmerKey = getFarmerKey(farmer);
-                const isFavorite = favoriteSet.has(farmerKey);
+          <Tabs defaultValue="farms" className="w-full">
+            <TabsList className="w-full sm:w-auto">
+              <TabsTrigger value="farms" className="flex-1 sm:flex-none">
+                {t('market.featuredTabFarms')}
+              </TabsTrigger>
+              <TabsTrigger value="products" className="flex-1 sm:flex-none">
+                {t('market.featuredTabProducts')}
+              </TabsTrigger>
+            </TabsList>
 
-                return (
-                  <div
-                    key={farmer.id || farmerKey || `farmer-${index}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => openFarmerModal(farmer, 'details')}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        openFarmerModal(farmer, 'details');
-                      }
-                    }}
-                    className="bg-gradient-to-r from-green-50 to-white border-2 border-green-100 rounded-xl p-4 hover:border-green-200 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400"
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 bg-gradient-to-br from-green-100 to-green-200 rounded-lg flex items-center justify-center">
-                          <span className="text-green-600 font-semibold text-sm">
-                            {farmer.displayName?.charAt(0).toUpperCase() || 'F'}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="text-sm font-semibold text-gray-900">{farmer.displayName}</p>
-                          <p className="text-xs text-gray-500">{t('market.certifiedFarmer')}</p>
-                        </div>
-                      </div>
-                      {isFavorite && (
-                        <Badge variant="outline" className="bg-green-100 text-green-800 border-green-200">
-                          {t('market.favoriteAdded')}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2 text-xs text-gray-600">
-                        <Calendar className="w-3 h-3" />
-                        <span>
-                          {t('market.lastInteraction')}: {formatDate(farmer.metadata?.lastInteraction)}
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Badge variant="secondary" className="text-xs">
-                          {farmer.marketProfile?.businessName || t('market.detail.notProvided')}
-                        </Badge>
-                        {farmer.preferences?.language && (
-                          <Badge variant="outline" className="text-xs">
-                            {farmer.preferences.language.toUpperCase()}
-                          </Badge>
-                        )}
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="w-full h-8"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          openFarmerModal(farmer, 'contact');
-                        }}
-                      >
-                        <Phone className="w-3 h-3 mr-1" />
-                        {t('market.contactButton')}
-                      </Button>
-                      <div className="flex gap-2">
-                        <Button
-                          size="sm"
-                          variant={isFavorite ? 'default' : 'outline'}
-                          className="flex-1 h-8"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            toggleFavoriteFarmer(farmer);
-                          }}
-                        >
-                          <Heart
-                            className="w-3 h-3 mr-1"
-                            fill={isFavorite ? 'currentColor' : 'none'}
-                          />
-                          {isFavorite ? t('market.favoriteAdded') : t('market.favoriteAdd')}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="flex-1 h-8 text-green-700 hover:text-green-800"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openFarmerModal(farmer, 'details');
-                          }}
-                        >
-                          <Eye className="w-3 h-3 mr-1" />
-                          {t('market.detailsButton')}
-                        </Button>
-                      </div>
-                    </div>
+            <TabsContent value="farms" className="mt-4">
+              {featuredFarmers.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Users className="w-8 h-8 text-gray-400" />
                   </div>
-                );
-              })}
-            </div>
-          )}
-          <div className="mt-6 text-center">
-            <Button
-              variant="outline"
-              className="w-full"
-              disabled={farmers.length === 0}
-              onClick={handleViewAllFarmers}
-            >
-              <Users className="w-4 h-4 mr-2" />
-              {t('market.viewAllFarmers')} ({farmers.length})
-            </Button>
-          </div>
+                  <p className="text-gray-500 font-medium">{t('market.noFarmers')}</p>
+                  <p className="text-sm text-gray-400 mt-2">農家加入平台後會在此顯示</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {featuredFarmers.map((farmer, index) => {
+                    const farmerKey = getFarmerKey(farmer);
+                    const isFavorite = favoriteSet.has(farmerKey);
+
+                    return (
+                      <div
+                        key={farmer.id || farmerKey || `farmer-${index}`}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => openFarmerModal(farmer, 'details')}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            openFarmerModal(farmer, 'details');
+                          }
+                        }}
+                        className="bg-gradient-to-r from-green-50 to-white border-2 border-green-100 rounded-xl p-4 hover:border-green-200 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400"
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 bg-gradient-to-br from-green-100 to-green-200 rounded-lg flex items-center justify-center">
+                              <span className="text-green-600 font-semibold text-sm">
+                                {farmer.displayName?.charAt(0).toUpperCase() || 'F'}
+                              </span>
+                            </div>
+                            <div>
+                              <p className="text-sm font-semibold text-gray-900">{farmer.displayName}</p>
+                              <p className="text-xs text-gray-500">{t('market.certifiedFarmer')}</p>
+                            </div>
+                          </div>
+                          {isFavorite && (
+                            <Badge variant="outline" className="bg-green-100 text-green-800 border-green-200">
+                              {t('market.favoriteAdded')}
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-2 text-xs text-gray-600">
+                            <Calendar className="w-3 h-3" />
+                            <span>
+                              {t('market.lastInteraction')}: {formatDate(farmer.metadata?.lastInteraction)}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge variant="secondary" className="text-xs">
+                              {farmer.marketProfile?.businessName || t('market.detail.notProvided')}
+                            </Badge>
+                            {farmer.preferences?.language && (
+                              <Badge variant="outline" className="text-xs">
+                                {farmer.preferences.language.toUpperCase()}
+                              </Badge>
+                            )}
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="w-full h-8"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openFarmerModal(farmer, 'contact');
+                            }}
+                          >
+                            <Phone className="w-3 h-3 mr-1" />
+                            {t('market.contactButton')}
+                          </Button>
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant={isFavorite ? 'default' : 'outline'}
+                              className="flex-1 h-8"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                toggleFavoriteFarmer(farmer);
+                              }}
+                            >
+                              <Heart
+                                className="w-3 h-3 mr-1"
+                                fill={isFavorite ? 'currentColor' : 'none'}
+                              />
+                              {isFavorite ? t('market.favoriteAdded') : t('market.favoriteAdd')}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="flex-1 h-8 text-green-700 hover:text-green-800"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                openFarmerModal(farmer, 'details');
+                              }}
+                            >
+                              <Eye className="w-3 h-3 mr-1" />
+                              {t('market.detailsButton')}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="mt-6 text-center">
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  disabled={farmers.length === 0}
+                  onClick={handleViewAllFarmers}
+                >
+                  <Users className="w-4 h-4 mr-2" />
+                  {t('market.viewAllFarmers')} ({farmers.length})
+                </Button>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="products" className="mt-4">
+              <div className="flex flex-col md:flex-row gap-4 mb-6">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                  <Input
+                    placeholder="搜尋商品..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-10 h-11"
+                  />
+                </div>
+                <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                  <SelectTrigger className="w-full md:w-48 h-11">
+                    <SelectValue placeholder="分類" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">全部分類</SelectItem>
+                    {categories.map((category) => (
+                      <SelectItem key={category} value={category}>
+                        {category}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={sortBy} onValueChange={setSortBy}>
+                  <SelectTrigger className="w-full md:w-48 h-11">
+                    <SelectValue placeholder="排序方式" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="recent">最新</SelectItem>
+                    <SelectItem value="price-low">價格：低到高</SelectItem>
+                    <SelectItem value="price-high">價格：高到低</SelectItem>
+                    <SelectItem value="stock">有庫存</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {featuredProducts.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Package className="w-8 h-8 text-gray-400" />
+                  </div>
+                  <p className="text-gray-500 font-medium">{t('market.noProducts')}</p>
+                  <p className="text-sm text-gray-400 mt-2">
+                    {searchQuery ? '請調整搜尋條件' : '農家新增商品後會在此顯示'}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {featuredProducts.map((product) => {
+                    const imageUrl = product.images?.[0];
+                    const farmerName = farmerNameById[product.userId] || t('market.certifiedFarmer');
+
+                    return (
+                      <div
+                        key={product.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => navigateToProduct(product.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            navigateToProduct(product.id);
+                          }
+                        }}
+                        className="overflow-hidden rounded-xl border-2 border-purple-100 bg-white hover:border-purple-200 hover:shadow-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
+                      >
+                        <AspectRatio ratio={16 / 9}>
+                          {imageUrl ? (
+                            <img
+                              src={imageUrl}
+                              alt={product.name}
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="h-full w-full bg-purple-50 flex items-center justify-center">
+                              <ImageIcon className="w-8 h-8 text-purple-300" />
+                            </div>
+                          )}
+                        </AspectRatio>
+                        <div className="p-4 space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <h4 className="text-sm font-semibold text-gray-900 truncate">{product.name}</h4>
+                              <p className="text-xs text-gray-500 truncate">{farmerName}</p>
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className="bg-purple-50 text-purple-700 border-purple-200 capitalize shrink-0"
+                            >
+                              {product.category || 'general'}
+                            </Badge>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <p className="text-lg font-bold text-green-600">
+                              NT$ {(product.price || 0).toLocaleString()}
+                            </p>
+                            <div className="text-right">
+                              <p className="text-xs text-gray-500">{product.unit || t('market.detail.notProvided')}</p>
+                              <p className="text-xs text-gray-500">
+                                {product.stock ?? 0} {t('market.detail.units')}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              <div className="mt-6 text-center">
+                <Button variant="outline" className="w-full" disabled={filteredProducts.length === 0} onClick={handleViewAllProducts}>
+                  <Package className="w-4 h-4 mr-2" />
+                  {t('market.viewAllProducts')} ({filteredProducts.length})
+                </Button>
+              </div>
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
 
@@ -593,152 +680,6 @@ const MarketDashboard: React.FC = () => {
               </div>
             </div>
           ))}
-        </CardContent>
-      </Card>
-
-      {/* Enhanced Product Comparison & Discovery */}
-      <Card className="shadow-lg border-0">
-        <CardHeader className="pb-4">
-          <CardTitle className="flex items-center text-xl">
-            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mr-3">
-              <Package className="w-5 h-5 text-purple-600" />
-            </div>
-            {t('market.featuredProductsTitle')}
-          </CardTitle>
-          <CardDescription className="text-base">{t('market.featuredProductsDesc')}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {/* Search and Filter Controls */}
-          <div className="flex flex-col md:flex-row gap-4 mb-6">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                placeholder="搜尋商品..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 h-11"
-              />
-            </div>
-            <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-              <SelectTrigger className="w-full md:w-48 h-11">
-                <SelectValue placeholder="分類" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部分類</SelectItem>
-                {categories.map((category) => (
-                  <SelectItem key={category} value={category}>
-                    {category}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={sortBy} onValueChange={setSortBy}>
-              <SelectTrigger className="w-full md:w-48 h-11">
-                <SelectValue placeholder="排序方式" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="recent">最新</SelectItem>
-                <SelectItem value="price-low">價格：低到高</SelectItem>
-                <SelectItem value="price-high">價格：高到低</SelectItem>
-                <SelectItem value="stock">有庫存</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {featuredProducts.length === 0 ? (
-            <div className="text-center py-12">
-              <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Package className="w-8 h-8 text-gray-400" />
-              </div>
-              <p className="text-gray-500 font-medium">{t('market.noProducts')}</p>
-              <p className="text-sm text-gray-400 mt-2">
-                {searchQuery ? '請調整搜尋條件' : '農家新增商品後會在此顯示'}
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {featuredProducts.map((product) => (
-                <div
-                  key={product.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openProductModal(product)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      openProductModal(product);
-                    }
-                  }}
-                  className="bg-gradient-to-r from-purple-50 to-white border-2 border-purple-100 rounded-xl p-4 hover:border-purple-200 transition-colors group cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-400"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 bg-gradient-to-br from-purple-100 to-purple-200 rounded-lg flex items-center justify-center">
-                        <span className="text-purple-600 font-semibold text-sm">
-                          {product.name.charAt(0).toUpperCase()}
-                        </span>
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-semibold text-gray-900">{product.name}</h4>
-                        <p className="text-xs text-gray-500">由 {product.farmerId || '未知農家'}</p>
-                      </div>
-                    </div>
-                    <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-200 capitalize">
-                      {product.category || 'general'}
-                    </Badge>
-                  </div>
-                  
-                  <MarkdownRenderer
-                    content={product.description || '無商品描述'}
-                    compact
-                    className="mb-3 line-clamp-2 text-sm text-gray-600 prose-p:my-0"
-                  />
-                  
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="text-lg font-bold text-green-600">NT$ {product.price || 0}</div>
-                    <Badge 
-                      variant={product.stock && product.stock > 10 ? 'default' : 'destructive'}
-                      className="text-xs"
-                    >
-                      庫存: {product.stock || 0}
-                    </Badge>
-                  </div>
-                  
-                  <div className="flex gap-2">
-                    <Button asChild size="sm" variant="outline" className="flex-1 h-8">
-                      <Link
-                        to={`/market/products?product=${product.id}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                        }}
-                      >
-                        <Eye className="w-3 h-3 mr-1" />
-                        {t('market.productModal.viewDetails')}
-                      </Link>
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="flex-1 h-8"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openProductModal(product);
-                      }}
-                    >
-                      <MessageCircle className="w-3 h-3 mr-1" />
-                      {t('market.contactButton')}
-                    </Button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          
-          <div className="mt-6 text-center">
-            <Button variant="outline" className="w-full" disabled={filteredProducts.length === 0}>
-              <Package className="w-4 h-4 mr-2" />
-              View All Products ({filteredProducts.length})
-            </Button>
-          </div>
         </CardContent>
       </Card>
 
@@ -876,8 +817,8 @@ const MarketDashboard: React.FC = () => {
         </CardContent>
       </Card>
       <Dialog open={isFarmerModalOpen} onOpenChange={handleModalChange}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="w-screen max-w-lg h-screen sm:max-h-[90vh] sm:h-auto sm:w-full p-0">
+          <DialogHeader className="px-6 py-4 border-b bg-background shrink-0">
             <DialogTitle>
               {farmerModalMode === 'details'
                 ? t('market.farmerDetailsTitle')
@@ -888,292 +829,157 @@ const MarketDashboard: React.FC = () => {
             </DialogDescription>
           </DialogHeader>
           {farmerModalMode === 'details' ? (
-            <div className="space-y-4">
-              <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary">{selectedFarmer?.role || 'farmer'}</Badge>
-                {favoriteSet.has(selectedFarmer ? getFarmerKey(selectedFarmer) : '') && (
-                  <Badge variant="outline" className="border-green-200 text-green-700">
-                    {t('market.favoriteAdded')}
-                  </Badge>
-                )}
-              </div>
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-gray-500">{t('market.detail.location')}</dt>
-                  <dd className="text-sm font-semibold text-gray-900 mt-1">{formatLocation(selectedFarmer)}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-gray-500">{t('market.detail.lastInteraction')}</dt>
-                  <dd className="text-sm font-semibold text-gray-900 mt-1">
-                    {formatDate(selectedFarmer?.metadata?.lastInteraction)}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-gray-500">{t('market.detail.messages')}</dt>
-                  <dd className="text-sm font-semibold text-gray-900 mt-1">
-                    {selectedFarmer?.metadata?.totalMessages ?? 0}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-gray-500">{t('market.detail.language')}</dt>
-                  <dd className="text-sm font-semibold text-gray-900 mt-1">
-                    {selectedFarmer?.preferences?.language?.toUpperCase() || t('market.detail.notProvided')}
-                  </dd>
-                </div>
-              </dl>
-              {selectedFarmer?.location &&
-                typeof selectedFarmer.location.lat === 'number' &&
-                typeof selectedFarmer.location.lng === 'number' && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                      {t('market.farmerMapTitle')}
-                    </p>
-                    <div className="h-48 rounded-xl overflow-hidden border border-gray-100">
-                      <FarmerMapPreview
-                        lat={selectedFarmer.location.lat}
-                        lng={selectedFarmer.location.lng}
-                        label={selectedFarmer.displayName || t('market.certifiedFarmer')}
-                      />
-                    </div>
+                <div className="space-y-4">
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="secondary">{selectedFarmer?.role || 'farmer'}</Badge>
+                    {favoriteSet.has(selectedFarmer ? getFarmerKey(selectedFarmer) : '') && (
+                      <Badge variant="outline" className="border-green-200 text-green-700">
+                        {t('market.favoriteAdded')}
+                      </Badge>
+                    )}
                   </div>
-                )}
 
-              <div className="space-y-3">
-                <FarmerRelatedSection
-                  title={t('market.farmerProductsTitle')}
-                  emptyLabel={t('market.farmerProductsEmpty')}
-                  isLoading={isFarmerDataLoading}
-                >
-                  {farmerProducts.length > 0 && (
-                    <ul className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                      {farmerProducts.slice(0, 4).map((product) => (
-                        <li
-                          key={product.id}
-                          className="border border-gray-100 rounded-xl p-3 flex items-center justify-between gap-3"
-                        >
-                          <div>
-                            <p className="text-sm font-semibold text-gray-900">{product.name}</p>
-                            <p className="text-xs text-gray-500">
-                              {product.category || 'general'} · {product.unit}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-sm font-semibold text-green-600">
-                              NT$ {(product.price || 0).toLocaleString()}
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              {product.stock ?? 0} {t('market.detail.units')}
-                            </p>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </FarmerRelatedSection>
+                  <FarmerRelatedSection
+                    title={t('market.farmerProductsTitle')}
+                    emptyLabel={t('market.farmerProductsEmpty')}
+                    isLoading={isFarmerDataLoading}
+                  >
+                    {farmerProducts.length > 0 && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {farmerProducts.slice(0, 6).map((product) => {
+                          const imageUrl = product.images?.[0];
+                          return (
+                            <div
+                              key={product.id}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => {
+                                setIsFarmerModalOpen(false);
+                                navigateToProduct(product.id);
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                  setIsFarmerModalOpen(false);
+                                  navigateToProduct(product.id);
+                                }
+                              }}
+                              className="overflow-hidden rounded-xl border border-gray-100 bg-white hover:shadow-md transition-shadow cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400"
+                            >
+                              <AspectRatio ratio={16 / 9}>
+                                {imageUrl ? (
+                                  <img
+                                    src={imageUrl}
+                                    alt={product.name}
+                                    className="h-full w-full object-cover"
+                                    loading="lazy"
+                                  />
+                                ) : (
+                                  <div className="h-full w-full bg-muted flex items-center justify-center">
+                                    <ImageIcon className="w-7 h-7 text-muted-foreground" />
+                                  </div>
+                                )}
+                              </AspectRatio>
+                              <div className="p-3 space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <p className="text-sm font-semibold text-gray-900 leading-snug line-clamp-2">
+                                    {product.name}
+                                  </p>
+                                  <Badge variant="outline" className="shrink-0 capitalize">
+                                    {product.category || 'general'}
+                                  </Badge>
+                                </div>
+                                <div className="flex items-center justify-between">
+                                  <p className="text-sm font-semibold text-green-700">
+                                    NT$ {(product.price || 0).toLocaleString()}
+                                  </p>
+                                  <p className="text-xs text-gray-500">
+                                    {product.stock ?? 0} {t('market.detail.units')}
+                                  </p>
+                                </div>
+                                <p className="text-xs text-gray-500 truncate">
+                                  {product.unit || t('market.detail.notProvided')}
+                                </p>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </FarmerRelatedSection>
 
-                <FarmerRelatedSection
-                  title={t('market.farmerStoresTitle')}
-                  emptyLabel={t('market.farmerStoresEmpty')}
-                  isLoading={isFarmerDataLoading}
-                >
-                  {farmerStores.length > 0 && (
-                    <ul className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                      {farmerStores.slice(0, 4).map((store) => (
-                        <li
-                          key={store.id}
-                          className="border border-gray-100 rounded-xl p-3 flex items-center justify-between gap-3"
-                        >
-                          <div>
-                            <p className="text-sm font-semibold text-gray-900">{store.name}</p>
-                            <p className="text-xs text-gray-500">
-                              {store.type || 'other'} · {store.location || t('market.detail.notProvided')}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-gray-500">{t('market.totalOrders')}</p>
-                            <p className="text-sm font-semibold text-blue-600">
-                              {(store.metadata?.totalOrders || 0).toLocaleString()}
-                            </p>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </FarmerRelatedSection>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="p-4 bg-muted rounded-xl space-y-2">
-                <p className="text-xs uppercase tracking-wide text-gray-500">{t('market.farmerContactEmail')}</p>
-                <p className="text-sm font-semibold text-gray-900">
-                  {contactEmail || t('market.detail.notProvided')}
-                </p>
-              </div>
-              <div className="p-4 bg-muted rounded-xl space-y-2">
-                <p className="text-xs uppercase tracking-wide text-gray-500">{t('market.farmerContactPhone')}</p>
-                <p className="text-sm font-semibold text-gray-900">
-                  {contactPhone || t('market.detail.notProvided')}
-                </p>
-              </div>
-              {contactBusiness && (
-                <div className="p-4 bg-muted rounded-xl space-y-2">
-                  <p className="text-xs uppercase tracking-wide text-gray-500">{t('market.farmerBusinessName')}</p>
-                  <p className="text-sm font-semibold text-gray-900">{contactBusiness}</p>
-                </div>
-              )}
-              {!hasContactDetails && (
-                <p className="text-sm text-gray-500">{t('market.farmerContactUnavailable')}</p>
-              )}
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-      <Dialog open={isProductModalOpen} onOpenChange={handleProductModalChange}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{selectedProduct?.name || t('market.productModal.title')}</DialogTitle>
-            <DialogDescription>
-              {productFarmer?.displayName || t('market.productModal.farmerUnknown')}
-            </DialogDescription>
-          </DialogHeader>
-          {selectedProduct && (
-            <div className="space-y-6">
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-gray-500">{t('market.productModal.category')}</dt>
-                  <dd className="text-sm font-semibold text-gray-900 mt-1 capitalize">
-                    {selectedProduct.category || t('market.detail.notProvided')}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-gray-500">{t('market.productModal.unit')}</dt>
-                  <dd className="text-sm font-semibold text-gray-900 mt-1">
-                    {selectedProduct.unit || t('market.detail.notProvided')}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-gray-500">{t('market.productModal.price')}</dt>
-                  <dd className="text-sm font-semibold text-green-700 mt-1">
-                    NT$ {(selectedProduct.price || 0).toLocaleString()}
-                  </dd>
-                </div>
-                <div>
-                  <dt className="text-xs uppercase tracking-wide text-gray-500">{t('market.productModal.stock')}</dt>
-                  <dd className="text-sm font-semibold text-gray-900 mt-1">
-                    {selectedProduct.stock ?? 0} {t('market.detail.units')}
-                  </dd>
-                </div>
-              </dl>
-
-              <div>
-                <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">
-                  {t('market.productModal.descriptionLabel')}
-                </p>
-                <MarkdownRenderer
-                  content={selectedProduct.description || t('market.detail.notProvided')}
-                  className="prose-sm text-gray-700"
-                />
-              </div>
-
-              {productFarmer?.location &&
-                typeof productFarmer.location.lat === 'number' &&
-                typeof productFarmer.location.lng === 'number' && (
-                  <section className="space-y-2">
-                    <p className="text-xs uppercase tracking-wide text-gray-500">
-                      {t('market.productModal.map')}
-                    </p>
-                    <div className="h-60 rounded-xl overflow-hidden border border-gray-100">
-                      <FarmerMapPreview
-                        lat={productFarmer.location.lat}
-                        lng={productFarmer.location.lng}
-                        label={productFarmer.displayName || selectedProduct.name}
-                      />
-                    </div>
-                  </section>
-                )}
-
-              <section className="space-y-3">
-                <div className="p-4 rounded-xl border border-gray-100 bg-white shadow-sm">
-                  <p className="text-xs uppercase tracking-wide text-gray-500">{t('market.productFarmerSummary')}</p>
-                  {productFarmer ? (
-                    <div className="mt-2 space-y-1">
-                      <p className="text-sm font-semibold text-gray-900">{productFarmer.displayName}</p>
-                      <p className="text-xs text-gray-500">
-                        {productFarmer.email || t('market.detail.notProvided')}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {productFarmer.marketProfile?.businessName || t('market.farmerBusinessName')}
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-500">{t('market.productModal.farmerUnknown')}</p>
-                  )}
-                </div>
-
-                <FarmerRelatedSection
-                  title={t('market.productModal.otherProducts')}
-                  emptyLabel={t('market.productModal.otherProductsEmpty')}
-                  isLoading={isProductDataLoading}
-                >
-                  {productRelatedProducts.filter((item) => item.id !== selectedProduct.id).length > 0 && (
-                    <ul className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                      {productRelatedProducts
-                        .filter((item) => item.id !== selectedProduct.id)
-                        .slice(0, 4)
-                        .map((item) => (
+                  <FarmerRelatedSection
+                    title={t('market.farmerStoresTitle')}
+                    emptyLabel={t('market.farmerStoresEmpty')}
+                    isLoading={isFarmerDataLoading}
+                  >
+                    {farmerStores.length > 0 && (
+                      <ul className="space-y-2">
+                        {farmerStores.slice(0, 4).map((store) => (
                           <li
-                            key={item.id}
+                            key={store.id}
                             className="border border-gray-100 rounded-xl p-3 flex items-center justify-between gap-3"
                           >
                             <div>
-                              <p className="text-sm font-semibold text-gray-900">{item.name}</p>
-                              <p className="text-xs text-gray-500">{item.category || 'general'}</p>
+                              <p className="text-sm font-semibold text-gray-900">{store.name}</p>
+                              <p className="text-xs text-gray-500">
+                                {store.type || 'other'} · {store.location || t('market.detail.notProvided')}
+                              </p>
                             </div>
                             <div className="text-right">
-                              <p className="text-sm font-semibold text-green-600">
-                                NT$ {(item.price || 0).toLocaleString()}
+                              <p className="text-xs text-gray-500">{t('market.totalOrders')}</p>
+                              <p className="text-sm font-semibold text-blue-600">
+                                {(store.metadata?.totalOrders || 0).toLocaleString()}
                               </p>
-                              <p className="text-xs text-gray-500">{item.stock ?? 0} {t('market.detail.units')}</p>
                             </div>
                           </li>
                         ))}
-                    </ul>
-                  )}
-                </FarmerRelatedSection>
+                      </ul>
+                    )}
+                  </FarmerRelatedSection>
 
-                <FarmerRelatedSection
-                  title={t('market.productModal.stores')}
-                  emptyLabel={t('market.productModal.storesEmpty')}
-                  isLoading={isProductDataLoading}
-                >
-                  {productFarmerStores.length > 0 && (
-                    <ul className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                      {productFarmerStores.slice(0, 4).map((store) => (
-                        <li
-                          key={store.id}
-                          className="border border-gray-100 rounded-xl p-3 flex items-center justify-between gap-3"
-                        >
-                          <div>
-                            <p className="text-sm font-semibold text-gray-900">{store.name}</p>
-                            <p className="text-xs text-gray-500">
-                              {store.location || t('market.detail.notProvided')}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-gray-500">{t('market.totalOrders')}</p>
-                            <p className="text-sm font-semibold text-blue-600">
-                              {(store.metadata?.totalOrders || 0).toLocaleString()}
-                            </p>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
+                  {selectedFarmer?.location &&
+                    typeof selectedFarmer.location.lat === 'number' &&
+                    typeof selectedFarmer.location.lng === 'number' && (
+                      <div className="space-y-2 pt-2">
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                          {t('market.farmerMapTitle')}
+                        </p>
+                        <div className="h-48 rounded-xl overflow-hidden border border-gray-100">
+                          <FarmerMapPreview
+                            lat={selectedFarmer.location.lat}
+                            lng={selectedFarmer.location.lng}
+                            label={selectedFarmer.displayName || t('market.certifiedFarmer')}
+                          />
+                        </div>
+                        <p className="text-sm font-semibold text-gray-900">{formatLocation(selectedFarmer)}</p>
+                      </div>
+                    )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="p-4 bg-muted rounded-xl space-y-2">
+                    <p className="text-xs uppercase tracking-wide text-gray-500">{t('market.farmerContactEmail')}</p>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {contactEmail || t('market.detail.notProvided')}
+                    </p>
+                  </div>
+                  <div className="p-4 bg-muted rounded-xl space-y-2">
+                    <p className="text-xs uppercase tracking-wide text-gray-500">{t('market.farmerContactPhone')}</p>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {contactPhone || t('market.detail.notProvided')}
+                    </p>
+                  </div>
+                  {contactBusiness && (
+                    <div className="p-4 bg-muted rounded-xl space-y-2">
+                      <p className="text-xs uppercase tracking-wide text-gray-500">{t('market.farmerBusinessName')}</p>
+                      <p className="text-sm font-semibold text-gray-900">{contactBusiness}</p>
+                    </div>
                   )}
-                </FarmerRelatedSection>
-              </section>
-            </div>
-          )}
+                  {!hasContactDetails && (
+                    <p className="text-sm text-gray-500">{t('market.farmerContactUnavailable')}</p>
+                  )}
+                </div>
+              )}
         </DialogContent>
       </Dialog>
     </div>

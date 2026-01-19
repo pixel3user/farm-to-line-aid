@@ -56,5 +56,16 @@ export const resolveYamatoZip = async (address: string) => {
   if (!response.ok) {
     throw new Error(payload?.error || 'Unable to verify address.');
   }
-  return payload as { postNumber: string; yamatoZipCode: string; normalizedAddress?: string };
+
+  const toStringOrEmpty = (value: unknown) => (typeof value === 'string' ? value : value == null ? '' : String(value));
+  const normalizedAddress =
+    typeof payload?.normalizedAddress === 'string' && payload.normalizedAddress.trim()
+      ? payload.normalizedAddress
+      : undefined;
+
+  return {
+    postNumber: toStringOrEmpty(payload?.postNumber),
+    yamatoZipCode: toStringOrEmpty(payload?.yamatoZipCode),
+    normalizedAddress
+  };
 };

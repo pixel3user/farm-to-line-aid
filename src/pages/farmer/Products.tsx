@@ -20,9 +20,10 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Camera, Clipboard, Download, Eye, EyeOff, Filter, Loader2, Plus, RefreshCw, Search, Sparkles, Edit, Trash2, Upload, X, Image as ImageIcon, MapPin } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Timestamp, collection, onSnapshot, orderBy, query as fsQuery, where } from 'firebase/firestore';
+import { Timestamp, collection, doc, getDoc, onSnapshot, orderBy, query as fsQuery, where } from 'firebase/firestore';
 import { useAuth } from '@/contexts/AuthContext';
 import { DatabaseService, Product, Store } from '@/lib/database';
+import { matchesProductSearch } from '@/lib/search';
 import { UserDataService } from '@/services/userDataService';
 import resolveApiBaseUrl from '@/lib/api';
 import { AddressCandidate, lookupAddress, reverseLookupAddress, resolveYamatoZip } from '@/lib/address';
@@ -139,7 +140,7 @@ const FarmerProducts: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const isMobile = useIsMobile();
-  const { user, userProducts, userStores, refreshUserData, isLoading, isRefreshingData } = useAuth();
+  const { user, firebaseUser, userProducts, userStores, refreshUserData, isLoading, isRefreshingData } = useAuth();
   const queryClient = useQueryClient();
   const copy = useMemo(() => getMarketingCopy(language), [language]);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -158,6 +159,7 @@ const FarmerProducts: React.FC = () => {
   const [isUploadingImages, setIsUploadingImages] = useState(false);
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
   const previousUserIdRef = useRef<string | null>(null);
+  const deepLinkProductFetchRef = useRef<string | null>(null);
   const createImageInputRef = useRef<HTMLInputElement | null>(null);
   const createCameraInputRef = useRef<HTMLInputElement | null>(null);
   const editImageInputRef = useRef<HTMLInputElement | null>(null);
@@ -234,6 +236,11 @@ const FarmerProducts: React.FC = () => {
   const [isApplyingAssets, setIsApplyingAssets] = useState(false);
   const [showResultScreen, setShowResultScreen] = useState(false);
   const [showPostApplySummary, setShowPostApplySummary] = useState(false);
+  const [enhancementContext, setEnhancementContext] = useState<'create' | 'edit'>('create');
+  const [editEnhancementApplied, setEditEnhancementApplied] = useState(false);
+  const [editEnhancementPreview, setEditEnhancementPreview] = useState<{ imageUrl: string; description: string } | null>(
+    null
+  );
   const [showMobileFilters, setShowMobileFilters] = useState(false);
   const debouncedPickupAddress = useDebouncedValue(formData.pickupAddress, 400);
   const debouncedEditPickupAddress = useDebouncedValue(editFormData.pickupAddress, 400);
@@ -249,10 +256,17 @@ const FarmerProducts: React.FC = () => {
   const selectedProductIsActive = selectedProduct?.isActive ?? true;
   const selectedProductStockVariant = selectedProduct ? getStockVariant(selectedProduct.stock) : 'default';
 
-  const productsKey = useMemo(() => ['farmer-products', user?.id], [user?.id]);
+  const productOwnerIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (user?.id) ids.add(user.id);
+    if (firebaseUser?.uid) ids.add(firebaseUser.uid);
+    return Array.from(ids);
+  }, [firebaseUser?.uid, user?.id]);
+
+  const productsKey = useMemo(() => ['farmer-products', ...productOwnerIds], [productOwnerIds]);
   const { data: products = [] } = useQuery<Product[]>({
     queryKey: productsKey,
-    enabled: Boolean(user?.id),
+    enabled: Boolean(productOwnerIds.length),
     // Use live Firestore subscription for updates; reuse cache instantly on tab revisits.
     queryFn: async () => (queryClient.getQueryData(productsKey) as Product[]) || [],
     staleTime: Infinity,
@@ -288,21 +302,41 @@ const FarmerProducts: React.FC = () => {
 
   // Live Firestore subscription keeps products up to date and cached between tab visits.
   useEffect(() => {
-    if (!user?.id || !db) return;
-    const q = fsQuery(collection(db, 'products'), where('userId', '==', user.id), orderBy('createdAt', 'desc'));
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const docs = snapshot.docs.map((doc) => ({ ...(doc.data() as Product), id: doc.id }));
-        queryClient.setQueryData(productsKey, docs);
-        setLastRefreshTime(new Date());
-      },
-      (error) => {
-        console.error('FarmerProducts: live subscription failed', error);
-      }
-    );
-    return () => unsubscribe();
-  }, [user?.id, queryClient, productsKey]);
+    if (!db || productOwnerIds.length === 0) return;
+    const bucket: Record<string, Product[]> = {};
+    const updateMerged = () => {
+      const merged = Object.values(bucket).flat();
+      const byId = new Map<string, Product>();
+      merged.forEach((product) => {
+        if (product?.id) {
+          byId.set(product.id, product);
+        }
+      });
+      const deduped = Array.from(byId.values()).sort((a, b) => {
+        const aTime = a.createdAt?.toMillis?.() || 0;
+        const bTime = b.createdAt?.toMillis?.() || 0;
+        return bTime - aTime;
+      });
+      queryClient.setQueryData(productsKey, deduped);
+      setLastRefreshTime(new Date());
+    };
+
+    const unsubscribes = productOwnerIds.map((ownerId) => {
+      const q = fsQuery(collection(db, 'products'), where('userId', '==', ownerId), orderBy('createdAt', 'desc'));
+      return onSnapshot(
+        q,
+        (snapshot) => {
+          bucket[ownerId] = snapshot.docs.map((doc) => ({ ...(doc.data() as Product), id: doc.id }));
+          updateMerged();
+        },
+        (error) => {
+          console.error('FarmerProducts: live subscription failed', { ownerId, error });
+        }
+      );
+    });
+
+    return () => unsubscribes.forEach((unsubscribe) => unsubscribe());
+  }, [productOwnerIds, queryClient, productsKey]);
 
   const handleRefresh = async () => {
     if (!user?.id || isRefreshingData) {
@@ -353,10 +387,9 @@ const FarmerProducts: React.FC = () => {
     };
   }, [createImagePreviews]);
 
-  // Prefetch and cache product images so revisits load instantly.
+  // Prefetch product images so revisits load instantly (avoid CORS fetch).
   useEffect(() => {
-    if (!products?.length || typeof window === 'undefined' || !('caches' in window)) return;
-    const cacheName = 'f2m-product-images-v1';
+    if (!products?.length || typeof window === 'undefined') return;
     const urls: string[] = [];
     products.forEach((product) => {
       product.images?.forEach((img) => {
@@ -367,22 +400,10 @@ const FarmerProducts: React.FC = () => {
       });
     });
     if (!urls.length) return;
-    caches
-      .open(cacheName)
-      .then((cache) => {
-        urls.forEach((url) => {
-          cache.match(url).then((res) => {
-            if (res) return;
-            fetch(url, { mode: 'cors' })
-              .then((response) => {
-                if (!response.ok) return;
-                cache.put(url, response.clone()).catch(() => {});
-              })
-              .catch(() => {});
-          });
-        });
-      })
-      .catch(() => {});
+    urls.forEach((url) => {
+      const img = new Image();
+      img.src = url;
+    });
   }, [products]);
 
   React.useEffect(() => {
@@ -442,7 +463,7 @@ const FarmerProducts: React.FC = () => {
   }, [isDialogOpen, isMobile, mobileCreateStep, formData.pickupAddress, pickupSuggestions.length, isPickupSearching]);
 
   const createStepTotal = 4;
-  const editStepTotal = 5;
+  const editStepTotal = 6;
 
   React.useEffect(() => {
     if (isEditDialogOpen) {
@@ -461,7 +482,7 @@ const FarmerProducts: React.FC = () => {
     if (!isEditDialogOpen) return;
     const media = autoImagePickerRef.current;
     if (!media) return;
-    if (isMobile && mobileEditStep !== 4) return;
+    if (isMobile && mobileEditStep !== 2) return;
     const input = media === 'camera' ? editCameraInputRef.current : editImageInputRef.current;
     if (!input || input.disabled) return;
     autoImagePickerRef.current = null;
@@ -608,7 +629,7 @@ const FarmerProducts: React.FC = () => {
       showStepError();
       return;
     }
-    if (mobileEditStep === 2) {
+    if (mobileEditStep === 4) {
       if (!pickupAddressValue) {
         setPickupVerifyError(t('farmer.products.pickupAddressRequired'));
         showStepError();
@@ -620,17 +641,6 @@ const FarmerProducts: React.FC = () => {
           showStepError();
           return;
         }
-      }
-    }
-    if (mobileEditStep === 3) {
-      const contactError = resolvePickupContactError(
-        editFormData.pickupContactTel,
-        editFormData.pickupContactMobile
-      );
-      if (contactError) {
-        setEditPickupContactError(contactError);
-        showStepError();
-        return;
       }
     }
     setPickupVerifyError(null);
@@ -689,11 +699,11 @@ const FarmerProducts: React.FC = () => {
     const pickupZipValue = editFormData.pickupYamatoZipCode?.trim() ?? '';
     if (!pickupAddressValue) {
       setPickupVerifyError(t('farmer.products.pickupAddressRequired'));
-      return 2;
+      return 4;
     }
     if (!pickupZipValue) {
       setPickupVerifyError(t('farmer.products.pickupVerifyRequired'));
-      return 2;
+      return 4;
     }
     const contactError = resolvePickupContactError(
       editFormData.pickupContactTel,
@@ -701,7 +711,7 @@ const FarmerProducts: React.FC = () => {
     );
     if (contactError) {
       setEditPickupContactError(contactError);
-      return 3;
+      return 5;
     }
     return null;
   };
@@ -710,7 +720,7 @@ const FarmerProducts: React.FC = () => {
 
   const filteredProducts = useMemo(() => {
     return products.filter((product) => {
-      const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesSearch = matchesProductSearch(product, searchTerm);
       const matchesCategory = categoryFilter === 'all' || product.category === categoryFilter;
       const matchesStatus =
         statusFilter === 'all' ||
@@ -742,8 +752,6 @@ const FarmerProducts: React.FC = () => {
     if (action === 'edit') {
       const productId = searchParams.get('product');
       if (!productId) return;
-    const target = (products || []).find((product) => product.id === productId);
-      if (!target) return;
       const stepParam = searchParams.get('step');
       let overrideStep: number | null = null;
       if (stepParam === 'images') {
@@ -760,8 +768,28 @@ const FarmerProducts: React.FC = () => {
       const media = searchParams.get('media');
       autoImagePickerRef.current = media === 'camera' || media === 'upload' ? media : null;
       enhanceAfterImageRef.current = searchParams.get('enhance') === '1';
-      handleModifyClick(target);
-      setSearchParams({});
+      const target = (products || []).find((product) => product.id === productId);
+      if (target) {
+        handleModifyClick(target);
+        setSearchParams({});
+        return;
+      }
+      if (!db) return;
+      if (deepLinkProductFetchRef.current === productId) return;
+      deepLinkProductFetchRef.current = productId;
+      void (async () => {
+        try {
+          const snap = await getDoc(doc(db, 'products', productId));
+          if (!snap.exists()) {
+            return;
+          }
+          const fetched = { ...(snap.data() as Product), id: snap.id };
+          handleModifyClick(fetched);
+          setSearchParams({});
+        } catch (error) {
+          console.error('Failed to resolve product deep link', error);
+        }
+      })();
     }
   }, [searchParams, setSearchParams, products, handleModifyClick]);
 
@@ -1305,6 +1333,7 @@ const FarmerProducts: React.FC = () => {
         stock: Number(formData.stock),
         images: uploadedImageUrls
       });
+      setEnhancementContext('create');
       resetEnhancementState();
       setIsEnhancementDialogOpen(true);
     } catch (error) {
@@ -1336,6 +1365,8 @@ const FarmerProducts: React.FC = () => {
     setSelectedEditPickupStoreId('');
     setEditPickupLookupError(null);
     setEditPickupSuggestions([]);
+    setEditEnhancementApplied(false);
+    setEditEnhancementPreview(null);
     setEditFormData({
       name: product.name,
       category: product.category || 'general',
@@ -1489,6 +1520,7 @@ const FarmerProducts: React.FC = () => {
       setEditPickupContactError(null);
       if (shouldOpenEnhancement) {
         resetEnhancementState();
+        setEnhancementContext('edit');
         setCreatedProductForMarketing(marketingTarget);
         setIsEnhancementDialogOpen(true);
         enhanceAfterImageRef.current = false;
@@ -1706,6 +1738,36 @@ const FarmerProducts: React.FC = () => {
     setShowPostApplySummary(false);
   };
 
+  const openEditEnhancement = React.useCallback(() => {
+    if (!selectedProduct) return;
+    setEditEnhancementApplied(false);
+    setEditEnhancementPreview(null);
+    const marketingTarget: MarketingProduct = {
+      id: selectedProduct.id,
+      name: editFormData.name || selectedProduct.name,
+      category: editFormData.category || selectedProduct.category,
+      description: editFormData.description || selectedProduct.description,
+      unit: editFormData.unit || selectedProduct.unit,
+      price: Number.isFinite(Number(editFormData.price)) ? Number(editFormData.price) : selectedProduct.price,
+      stock: Number.isFinite(Number(editFormData.stock)) ? Number(editFormData.stock) : selectedProduct.stock,
+      images: editFormData.images || selectedProduct.images || [],
+      photos: editFormData.images || selectedProduct.images || []
+    };
+    setEnhancementContext('edit');
+    resetEnhancementState();
+    setCreatedProductForMarketing(marketingTarget);
+    setIsEnhancementDialogOpen(true);
+  }, [editFormData, resetEnhancementState, selectedProduct]);
+
+  React.useEffect(() => {
+    if (!isEditDialogOpen) return;
+    if (!isMobile) return;
+    if (mobileEditStep !== 3) return;
+    if (!enhanceAfterImageRef.current) return;
+    enhanceAfterImageRef.current = false;
+    openEditEnhancement();
+  }, [isEditDialogOpen, isMobile, mobileEditStep, openEditEnhancement]);
+
   const handleApplyEnhancementAssets = async () => {
     if (!createdProductForMarketing) {
       toast({
@@ -1789,12 +1851,33 @@ const FarmerProducts: React.FC = () => {
       }
       await DatabaseService.updateProduct(createdProductForMarketing.id, updateData as any);
       setCreatedProductForMarketing((prev) => (prev ? { ...prev, ...updateData } : prev));
+      if (enhancementContext === 'edit' && isEditDialogOpen && selectedProduct?.id === createdProductForMarketing.id) {
+        setEditFormData((prev) => ({
+          ...prev,
+          description: typeof updateData.description === 'string' ? updateData.description : prev.description,
+          images: Array.isArray(updateData.images) ? updateData.images : prev.images
+        }));
+      }
       toast({
         title: copy.applyAssetsSuccess,
         description: createdProductForMarketing.name
       });
-      setShowResultScreen(false);
-      setShowPostApplySummary(true);
+      if (enhancementContext === 'create') {
+        setShowResultScreen(false);
+        setShowPostApplySummary(true);
+      } else {
+        const nextImageUrl =
+          (Array.isArray(updateData.images) && typeof updateData.images[0] === 'string' ? updateData.images[0] : '') ||
+          storedProductImageUrl ||
+          '';
+        const nextDescription =
+          (typeof updateData.description === 'string' ? updateData.description : '') ||
+          createdProductForMarketing.description ||
+          '';
+        setEditEnhancementApplied(true);
+        setEditEnhancementPreview({ imageUrl: nextImageUrl, description: nextDescription });
+        closeEnhancementDialog();
+      }
       if (typeof refreshUserData === 'function') {
         await refreshUserData();
       }
@@ -2790,6 +2873,161 @@ const FarmerProducts: React.FC = () => {
                     </div>
                   )}
                   {mobileEditStep === 2 && (
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <label className="block text-sm font-semibold text-gray-700">{t('farmer.products.description')}</label>
+                        <textarea
+                          value={editFormData.description}
+                          onChange={(event) => setEditFormData((prev) => ({ ...prev, description: event.target.value }))}
+                          placeholder={t('farmer.products.descriptionPlaceholder')}
+                          className="w-full min-h-[100px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
+                        />
+                      </div>
+                      <div className="space-y-4">
+                        <label className="block text-sm font-semibold text-gray-700">{t('farmer.products.photos')}</label>
+                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-green-500 transition-colors">
+                          <input
+                            ref={editImageInputRef}
+                            type="file"
+                            multiple
+                            accept="image/*"
+                            onChange={(e) => handleImageUpload(e.target.files)}
+                            className="hidden"
+                            id="image-upload-mobile"
+                            disabled={isUploadingImages || editFormData.images.length >= 10}
+                          />
+                          <input
+                            ref={editCameraInputRef}
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            onChange={(e) => handleImageUpload(e.target.files)}
+                            className="hidden"
+                            disabled={isUploadingImages || editFormData.images.length >= 10}
+                          />
+                          <label htmlFor="image-upload-mobile" className="cursor-pointer">
+                            {isUploadingImages ? (
+                              <div className="flex flex-col items-center">
+                                <div className="w-8 h-8 border-4 border-green-200 border-t-green-600 rounded-full animate-spin mb-2"></div>
+                                <p className="text-sm text-gray-600">{t('farmer.products.uploadingImages')}</p>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center">
+                                <Upload className="w-8 h-8 text-gray-400 mb-2" />
+                                <p className="text-sm text-gray-600">{t('farmer.products.uploadPrompt')}</p>
+                                <p className="text-xs text-gray-400 mt-1">{t('farmer.products.uploadHint')}</p>
+                              </div>
+                            )}
+                          </label>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => editImageInputRef.current?.click()}
+                            disabled={isUploadingImages || editFormData.images.length >= 10}
+                            className="gap-2"
+                          >
+                            <Upload className="w-4 h-4" />
+                            {t('farmer.products.uploadPhotos')}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => editCameraInputRef.current?.click()}
+                            disabled={isUploadingImages || editFormData.images.length >= 10}
+                            className="gap-2"
+                          >
+                            <Camera className="w-4 h-4" />
+                            {t('farmer.products.useCamera')}
+                          </Button>
+                        </div>
+                        {editFormData.images.length > 0 && (
+                          <div className="grid grid-cols-2 gap-3">
+                            {editFormData.images.map((imageUrl, index) => (
+                              <div key={index} className="relative group">
+                                <img
+                                  src={imageUrl}
+                                  alt={`Product ${index + 1}`}
+                                  className="w-full h-24 object-cover rounded-lg border border-gray-200"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveImage(index)}
+                                  className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {editFormData.images.length === 0 && (
+                          <div className="text-center py-6 text-gray-400">
+                            <ImageIcon className="w-10 h-10 mx-auto mb-2 opacity-50" />
+                            <p className="text-sm">{t('farmer.products.noImagesUploaded')}</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {mobileEditStep === 3 && (
+                    editEnhancementApplied ? (
+                      <div className="space-y-4 rounded-lg border border-gray-200 p-4">
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-semibold text-gray-800">{t('farmer.products.aiEnhanceStepTitle')}</h3>
+                        </div>
+                        <div className="rounded-lg border bg-muted/30 p-3">
+                          <div className="flex items-start gap-3">
+                            {editEnhancementPreview?.imageUrl ? (
+                              <img
+                                src={editEnhancementPreview.imageUrl}
+                                alt={editFormData.name || selectedProduct?.name || 'Product'}
+                                className="h-12 w-12 rounded-md border object-cover"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="flex h-12 w-12 items-center justify-center rounded-md border bg-background text-muted-foreground">
+                                <ImageIcon className="h-5 w-5" />
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-medium text-foreground line-clamp-1">
+                                {editFormData.name || selectedProduct?.name || t('farmer.products.modifyProduct')}
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground line-clamp-2 whitespace-pre-line">
+                                {editEnhancementPreview?.description || editFormData.description || copy.productSummaryNoDesc}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <Button type="button" onClick={() => setMobileEditStep(4)} className="w-full">
+                          {t('common.next')}
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-4 rounded-lg border border-gray-200 p-4">
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-semibold text-gray-800">{t('farmer.products.aiEnhanceStepTitle')}</h3>
+                          <p className="text-xs text-gray-500">{t('farmer.products.aiEnhanceStepHint')}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button type="button" onClick={openEditEnhancement} className="gap-2">
+                            <Sparkles className="w-4 h-4" />
+                            {t('farmer.products.aiEnhanceStepCta')}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            onClick={() => setMobileEditStep((prev) => Math.min(prev + 1, editStepTotal - 1))}
+                          >
+                            {t('farmer.products.aiEnhanceSkip')}
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  )}
+                  {mobileEditStep === 4 && (
                     <div className="space-y-4 rounded-lg border border-gray-200 p-4">
                       <div className="flex flex-col gap-3">
                         <div>
@@ -2910,7 +3148,7 @@ const FarmerProducts: React.FC = () => {
                       )}
                     </div>
                   )}
-                  {mobileEditStep === 3 && (
+                  {mobileEditStep === 5 && (
                     <div className="space-y-4 rounded-lg border border-gray-200 p-4">
                       <div>
                         <h3 className="text-sm font-semibold text-gray-800">{t('farmer.products.pickupSectionTitle')}</h3>
@@ -2967,105 +3205,6 @@ const FarmerProducts: React.FC = () => {
                       {pickupVerifyError && (
                         <div className="text-sm text-red-600">{pickupVerifyError}</div>
                       )}
-                    </div>
-                  )}
-                  {mobileEditStep === 4 && (
-                    <div className="space-y-4">
-                      <div className="space-y-2">
-                        <label className="block text-sm font-semibold text-gray-700">{t('farmer.products.description')}</label>
-                        <textarea
-                          value={editFormData.description}
-                          onChange={(event) => setEditFormData((prev) => ({ ...prev, description: event.target.value }))}
-                          placeholder={t('farmer.products.descriptionPlaceholder')}
-                          className="w-full min-h-[100px] px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none"
-                        />
-                      </div>
-                      <div className="space-y-4">
-                        <label className="block text-sm font-semibold text-gray-700">{t('farmer.products.photos')}</label>
-                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-green-500 transition-colors">
-                          <input
-                            ref={editImageInputRef}
-                            type="file"
-                            multiple
-                            accept="image/*"
-                            onChange={(e) => handleImageUpload(e.target.files)}
-                            className="hidden"
-                            id="image-upload-mobile"
-                            disabled={isUploadingImages || editFormData.images.length >= 10}
-                          />
-                          <input
-                            ref={editCameraInputRef}
-                            type="file"
-                            accept="image/*"
-                            capture="environment"
-                            onChange={(e) => handleImageUpload(e.target.files)}
-                            className="hidden"
-                            disabled={isUploadingImages || editFormData.images.length >= 10}
-                          />
-                          <label htmlFor="image-upload-mobile" className="cursor-pointer">
-                            {isUploadingImages ? (
-                              <div className="flex flex-col items-center">
-                                <div className="w-8 h-8 border-4 border-green-200 border-t-green-600 rounded-full animate-spin mb-2"></div>
-                                <p className="text-sm text-gray-600">{t('farmer.products.uploadingImages')}</p>
-                              </div>
-                            ) : (
-                              <div className="flex flex-col items-center">
-                                <Upload className="w-8 h-8 text-gray-400 mb-2" />
-                                <p className="text-sm text-gray-600">{t('farmer.products.uploadPrompt')}</p>
-                                <p className="text-xs text-gray-400 mt-1">{t('farmer.products.uploadHint')}</p>
-                              </div>
-                            )}
-                          </label>
-                        </div>
-                        <div className="flex flex-wrap items-center justify-center gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => editImageInputRef.current?.click()}
-                            disabled={isUploadingImages || editFormData.images.length >= 10}
-                            className="gap-2"
-                          >
-                            <Upload className="w-4 h-4" />
-                            {t('farmer.products.uploadPhotos')}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => editCameraInputRef.current?.click()}
-                            disabled={isUploadingImages || editFormData.images.length >= 10}
-                            className="gap-2"
-                          >
-                            <Camera className="w-4 h-4" />
-                            {t('farmer.products.useCamera')}
-                          </Button>
-                        </div>
-                        {editFormData.images.length > 0 && (
-                          <div className="grid grid-cols-2 gap-3">
-                            {editFormData.images.map((imageUrl, index) => (
-                              <div key={index} className="relative group">
-                                <img
-                                  src={imageUrl}
-                                  alt={`Product ${index + 1}`}
-                                  className="w-full h-24 object-cover rounded-lg border border-gray-200"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveImage(index)}
-                                  className="absolute top-2 right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {editFormData.images.length === 0 && (
-                          <div className="text-center py-6 text-gray-400">
-                            <ImageIcon className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                            <p className="text-sm">{t('farmer.products.noImagesUploaded')}</p>
-                          </div>
-                        )}
-                      </div>
                       <Button
                         type="button"
                         variant="destructive"
@@ -3561,7 +3700,7 @@ const FarmerProducts: React.FC = () => {
           }
         }}
       >
-        <DialogContent className="max-w-5xl">
+      <DialogContent className="max-w-5xl">
           <DialogHeader>
             <DialogTitle>{t('farmer.products.aiEnhanceTitle')}</DialogTitle>
             <DialogDescription>{t('farmer.products.aiEnhanceDescription')}</DialogDescription>
@@ -3573,7 +3712,7 @@ const FarmerProducts: React.FC = () => {
             </div>
           ) : (
             <div className="space-y-6">
-              {showPostApplySummary ? (
+              {showPostApplySummary && enhancementContext === 'create' ? (
                 <div className="space-y-4">
                   <div
                     role="button"
@@ -3858,19 +3997,29 @@ const FarmerProducts: React.FC = () => {
                 </div>
               )}
               <div className="flex flex-col-reverse gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
-                  <Button variant="outline" onClick={handleEnhancementViewProducts}>
-                    {t('farmer.products.postCreateView')}
-                  </Button>
-                  <Button variant="outline" onClick={handleEnhancementAddAnother}>
-                    {t('farmer.products.postCreateAddAnother')}
-                  </Button>
-                </div>
-                {!showPostApplySummary ? (
-                  <Button variant="ghost" onClick={handleEnhancementSkip}>
-                    {t('farmer.products.aiEnhanceSkip')}
-                  </Button>
-                ) : null}
+                {enhancementContext === 'create' ? (
+                  <>
+                    <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+                      <Button variant="outline" onClick={handleEnhancementViewProducts}>
+                        {t('farmer.products.postCreateView')}
+                      </Button>
+                      <Button variant="outline" onClick={handleEnhancementAddAnother}>
+                        {t('farmer.products.postCreateAddAnother')}
+                      </Button>
+                    </div>
+                    {!showPostApplySummary ? (
+                      <Button variant="ghost" onClick={handleEnhancementSkip}>
+                        {t('farmer.products.aiEnhanceSkip')}
+                      </Button>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className="flex w-full justify-end">
+                    <Button variant="outline" onClick={closeEnhancementDialog}>
+                      {t('farmer.products.aiEnhanceBackToEdit')}
+                    </Button>
+                  </div>
+                )}
               </div>
             </div>
           )}

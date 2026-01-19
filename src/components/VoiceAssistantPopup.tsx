@@ -24,6 +24,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
+import { ToastAction } from '@/components/ui/toast';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import resolveApiBaseUrl from '@/lib/api';
@@ -50,6 +51,7 @@ type ToolUiAction = {
   label: string;
   prompt?: string;
   href?: string;
+  auto?: boolean;
 };
 
 type ToolUiProduct = {
@@ -778,6 +780,12 @@ export default function VoiceAssistantPopup() {
   const { user, firebaseUser, lineIdToken, isLoading, isLiffReady, isInLineApp, refreshUserData } = useAuth();
   const langKey = language === 'zh-TW' ? 'zh-TW' : 'en';
   const copy = COPY[langKey];
+  const isIosDevice =
+    typeof navigator !== 'undefined' &&
+    (() => {
+      const ua = navigator.userAgent;
+      return /iPad|iPhone|iPod/i.test(ua) || (ua.includes('Mac') && navigator.maxTouchPoints > 1);
+    })();
 
   const [isOpen, setIsOpen] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
@@ -794,6 +802,7 @@ export default function VoiceAssistantPopup() {
   const micLevelRef = useRef(0);
   const micLevelRafRef = useRef<number | null>(null);
   const isOpenRef = useRef(false);
+  const isOpeningRef = useRef(false);
   const lastScrollYRef = useRef(0);
   const scrollRafRef = useRef<number | null>(null);
   const lastScrollTargetRef = useRef<EventTarget | null>(null);
@@ -810,8 +819,10 @@ export default function VoiceAssistantPopup() {
   const processorNodeRef = useRef<ScriptProcessorNode | null>(null);
   const muteGainRef = useRef<GainNode | null>(null);
   const isRecordingRef = useRef(false);
+  const isStartingRecordingRef = useRef(false);
 
   const liveSessionIdRef = useRef<string | null>(null);
+  const ensureLiveSessionPromiseRef = useRef<Promise<void> | null>(null);
   const pageContextRef = useRef<{ routeKey: string; context: string } | null>(null);
   const liveContextRef = useRef<{ routeKey: string; context: string } | null>(null);
   const liveStreamAbortRef = useRef<AbortController | null>(null);
@@ -829,8 +840,17 @@ export default function VoiceAssistantPopup() {
   const liveSocketRef = useRef<WebSocket | null>(null);
   const liveSocketReadyRef = useRef(false);
   const lastAudioAtRef = useRef(0);
+  const suppressMicUntilRef = useRef(0);
   const openDialogIdsRef = useRef(new Set<string>());
   const dialogPauseStateRef = useRef<{ shouldAutoResume: boolean; audioMuted: boolean } | null>(null);
+  const autoActionQueueRef = useRef<ToolUiAction[]>([]);
+  const autoActionInFlightRef = useRef(false);
+  const autoActionSawDialogRef = useRef(false);
+  const autoActionTimeoutRef = useRef<number | null>(null);
+  const lastAutoToolCardIdRef = useRef<number | null>(null);
+  const autoActionPromptIdRef = useRef<string | null>(null);
+  const autoActionPromptAcceptedRef = useRef(false);
+  const autoStartHandledRef = useRef(false);
 
   useEffect(() => {
     lineIdTokenRef.current = lineIdToken || '';
@@ -888,6 +908,10 @@ export default function VoiceAssistantPopup() {
 
   const playInlineAudio = async (data: string, mimeType?: string) => {
     if (audioMutedRef.current) return;
+    if (useLiveStreamingRef.current && isRecordingRef.current) {
+      suppressMicUntilRef.current = Date.now() + 1200;
+      liveChunkQueueRef.current = [];
+    }
     const ctx = ensurePlaybackContext();
     if (ctx.state === 'suspended') {
       await ctx.resume();
@@ -1723,61 +1747,72 @@ export default function VoiceAssistantPopup() {
   };
 
   const ensureLiveSession = async () => {
-    log('Ensuring live session');
-    const relayUrl = getLiveRelayUrl();
-    if (relayUrl) {
-      const connected = await connectLiveWebSocket();
-      if (connected) return;
-    }
-    const desiredContext = pageContextRef.current;
-    if (liveSessionIdRef.current && !isSamePageContext(liveContextRef.current, desiredContext)) {
-      await stopLiveSession();
-    }
-    if (liveSessionIdRef.current) {
-      useLiveStreamingRef.current = true;
-      return;
-    }
-    setStatus('connecting');
+    if (ensureLiveSessionPromiseRef.current) return ensureLiveSessionPromiseRef.current;
+    const task = (async () => {
+      log('Ensuring live session');
+      const relayUrl = getLiveRelayUrl();
+      if (relayUrl) {
+        const connected = await connectLiveWebSocket();
+        if (connected) return;
+      }
+      const desiredContext = pageContextRef.current;
+      if (liveSessionIdRef.current && !isSamePageContext(liveContextRef.current, desiredContext)) {
+        await stopLiveSession();
+      }
+      if (liveSessionIdRef.current) {
+        useLiveStreamingRef.current = true;
+        return;
+      }
+      setStatus('connecting');
+      try {
+        const auth = await requireAuth();
+        if (!auth) return;
+        preferRelayRef.current = Boolean(getLiveRelayHttpBase());
+        log('Ensuring live session auth', { type: auth.type, isLoading });
+        const { base, prefix } = getLiveHttpEndpoints();
+        const response = await fetch(`${base}${prefix}/session`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...auth.headers,
+          },
+          body: JSON.stringify({
+            locale: langKey,
+            userId: (user as any)?.lineUserId || user?.id,
+            pageRoute: desiredContext?.routeKey,
+            pageContext: desiredContext?.context,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Live session failed: ${response.status}`);
+        }
+
+        const payload = (await response.json()) as { sessionId?: string };
+        if (!payload.sessionId) {
+          throw new Error('Live session missing sessionId');
+        }
+
+        liveSessionIdRef.current = payload.sessionId;
+        liveContextRef.current = desiredContext ? { ...desiredContext } : null;
+        useLiveStreamingRef.current = true;
+        useServerTranscriptionRef.current = false;
+        log('Live session ready', { sessionId: payload.sessionId });
+        void startLiveStream(payload.sessionId);
+        setStatus('ready');
+      } catch (error) {
+        console.error('Live session error', error);
+        useLiveStreamingRef.current = false;
+        setStatus('ready');
+      }
+    })();
+    ensureLiveSessionPromiseRef.current = task;
     try {
-      const auth = await requireAuth();
-      if (!auth) return;
-      preferRelayRef.current = Boolean(getLiveRelayHttpBase());
-      log('Ensuring live session auth', { type: auth.type, isLoading });
-      const { base, prefix } = getLiveHttpEndpoints();
-      const response = await fetch(`${base}${prefix}/session`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...auth.headers,
-        },
-        body: JSON.stringify({
-          locale: langKey,
-          userId: (user as any)?.lineUserId || user?.id,
-          pageRoute: desiredContext?.routeKey,
-          pageContext: desiredContext?.context,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Live session failed: ${response.status}`);
+      await task;
+    } finally {
+      if (ensureLiveSessionPromiseRef.current === task) {
+        ensureLiveSessionPromiseRef.current = null;
       }
-
-      const payload = (await response.json()) as { sessionId?: string };
-      if (!payload.sessionId) {
-        throw new Error('Live session missing sessionId');
-      }
-
-      liveSessionIdRef.current = payload.sessionId;
-      liveContextRef.current = desiredContext ? { ...desiredContext } : null;
-      useLiveStreamingRef.current = true;
-      useServerTranscriptionRef.current = false;
-      log('Live session ready', { sessionId: payload.sessionId });
-      void startLiveStream(payload.sessionId);
-      setStatus('ready');
-    } catch (error) {
-      console.error('Live session error', error);
-      useLiveStreamingRef.current = false;
-      setStatus('ready');
     }
   };
 
@@ -1839,160 +1874,196 @@ export default function VoiceAssistantPopup() {
 
   const startRecording = async () => {
     if (isRecordingRef.current) return;
-    const AudioCtx = getAudioContextCtor();
-    const SpeechRecognitionCtor = getSpeechRecognitionCtor();
-    useServerTranscriptionRef.current = !useLiveStreamingRef.current && !SpeechRecognitionCtor;
-
-    if (!AudioCtx || !navigator.mediaDevices?.getUserMedia) {
-      toast({
-        title: copy.micUnsupportedTitle,
-        description: copy.micUnsupportedDesc,
-        variant: 'destructive',
-      });
-      return;
-    }
-    if (typeof window !== 'undefined' && !window.isSecureContext) {
-      toast({
-        title: copy.insecureContextTitle,
-        description: copy.insecureContextDesc,
-        variant: 'destructive',
-      });
-      return;
-    }
+    if (isStartingRecordingRef.current) return;
+    isStartingRecordingRef.current = true;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: { ideal: 1 },
-          sampleRate: { ideal: TARGET_SAMPLE_RATE },
-          sampleSize: { ideal: 16 },
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      const AudioCtx = getAudioContextCtor();
+      const SpeechRecognitionCtor = getSpeechRecognitionCtor();
+      useServerTranscriptionRef.current = !useLiveStreamingRef.current && !SpeechRecognitionCtor;
 
-      resetMicLevel();
-      recordedChunksRef.current = [];
-      liveChunkQueueRef.current = [];
-      const captureContext = new AudioCtx({ latencyHint: 'interactive' });
-      if (captureContext.state === 'suspended') {
-        await captureContext.resume();
+      if (!AudioCtx || !navigator.mediaDevices?.getUserMedia) {
+        toast({
+          title: copy.micUnsupportedTitle,
+          description: copy.micUnsupportedDesc,
+          variant: 'destructive',
+        });
+        return;
       }
-      captureContextRef.current = captureContext;
-      inputSampleRateRef.current = captureContext.sampleRate;
-      const source = captureContext.createMediaStreamSource(stream);
-      const processor = captureContext.createScriptProcessor(2048, 1, 1);
-      const muteGain = captureContext.createGain();
-      muteGain.gain.value = 0;
-      source.connect(processor);
-      processor.connect(muteGain);
-      muteGain.connect(captureContext.destination);
+      if (typeof window !== 'undefined' && !window.isSecureContext) {
+        toast({
+          title: copy.insecureContextTitle,
+          description: copy.insecureContextDesc,
+          variant: 'destructive',
+        });
+        return;
+      }
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            channelCount: { ideal: 1 },
+            sampleRate: { ideal: TARGET_SAMPLE_RATE },
+            sampleSize: { ideal: 16 },
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
 
-      mediaStreamRef.current = stream;
-      sourceNodeRef.current = source;
-      processorNodeRef.current = processor;
-      muteGainRef.current = muteGain;
-      isRecordingRef.current = true;
-      setIsRecording(true);
-      setStatus('listening');
-      log('Audio capture ready', { inputRate: captureContext.sampleRate, targetRate: TARGET_SAMPLE_RATE });
-
-      liveChunkTimerRef.current = window.setInterval(() => {
-        if (useLiveStreamingRef.current) {
-          void flushLiveAudioQueue();
+        resetMicLevel();
+        recordedChunksRef.current = [];
+        liveChunkQueueRef.current = [];
+        const captureContext = new AudioCtx({ latencyHint: 'interactive' });
+        if (captureContext.state === 'suspended') {
+          await captureContext.resume();
         }
-      }, LIVE_CHUNK_INTERVAL_MS);
+        captureContextRef.current = captureContext;
+        inputSampleRateRef.current = captureContext.sampleRate;
+        const source = captureContext.createMediaStreamSource(stream);
+        const processor = captureContext.createScriptProcessor(2048, 1, 1);
+        const muteGain = captureContext.createGain();
+        muteGain.gain.value = 0;
+        source.connect(processor);
+        processor.connect(muteGain);
+        muteGain.connect(captureContext.destination);
 
-      processor.onaudioprocess = (event) => {
-        if (!isRecordingRef.current) return;
-        const input = event.inputBuffer.getChannelData(0);
-        let sum = 0;
-        for (let i = 0; i < input.length; i += 1) {
-          sum += input[i] * input[i];
-        }
-        const rms = Math.sqrt(sum / input.length);
-        const normalized = Math.min(1, rms * MIC_LEVEL_GAIN);
-        const smoothed = micLevelRef.current * MIC_LEVEL_SMOOTHING + normalized * (1 - MIC_LEVEL_SMOOTHING);
-        updateMicLevel(smoothed);
+        mediaStreamRef.current = stream;
+        sourceNodeRef.current = source;
+        processorNodeRef.current = processor;
+        muteGainRef.current = muteGain;
+        isRecordingRef.current = true;
+        setIsRecording(true);
+        setStatus('listening');
+        log('Audio capture ready', { inputRate: captureContext.sampleRate, targetRate: TARGET_SAMPLE_RATE });
 
-        if (useLiveStreamingRef.current) {
-          const downsampled = downsampleBuffer(input, inputSampleRateRef.current, TARGET_SAMPLE_RATE);
-          liveChunkQueueRef.current.push(floatToInt16(downsampled));
-        } else if (useServerTranscriptionRef.current) {
-          recordedChunksRef.current.push(new Float32Array(input));
-        }
-      };
+        liveChunkTimerRef.current = window.setInterval(() => {
+          if (useLiveStreamingRef.current) {
+            void flushLiveAudioQueue();
+          }
+        }, LIVE_CHUNK_INTERVAL_MS);
 
-      if (!useLiveStreamingRef.current && SpeechRecognitionCtor) {
-        const recognition: SpeechRecognitionInstance = new SpeechRecognitionCtor();
-        recognition.lang = langKey === 'zh-TW' ? 'zh-TW' : 'en-US';
-        recognition.interimResults = false;
-        recognition.maxAlternatives = 1;
-        recognition.onresult = (event: any) => {
-          const transcript = event?.results?.[0]?.[0]?.transcript;
-          if (transcript) {
-            void stopRecording('processing').then(() => sendMessage(transcript));
-          } else {
-            void stopRecording('idle');
+        processor.onaudioprocess = (event) => {
+          if (!isRecordingRef.current) return;
+          const input = event.inputBuffer.getChannelData(0);
+          let sum = 0;
+          for (let i = 0; i < input.length; i += 1) {
+            sum += input[i] * input[i];
+          }
+          const rms = Math.sqrt(sum / input.length);
+          const normalized = Math.min(1, rms * MIC_LEVEL_GAIN);
+          const smoothed = micLevelRef.current * MIC_LEVEL_SMOOTHING + normalized * (1 - MIC_LEVEL_SMOOTHING);
+          updateMicLevel(smoothed);
+
+          if (useLiveStreamingRef.current) {
+            if (isIosDevice) {
+              const playbackActive = playbackContextRef.current
+                ? playbackContextRef.current.currentTime < nextPlaybackTimeRef.current - 0.05
+                : false;
+              if (playbackActive) return;
+            }
+            if (Date.now() < suppressMicUntilRef.current) return;
+            const downsampled = downsampleBuffer(input, inputSampleRateRef.current, TARGET_SAMPLE_RATE);
+            liveChunkQueueRef.current.push(floatToInt16(downsampled));
+          } else if (useServerTranscriptionRef.current) {
+            recordedChunksRef.current.push(new Float32Array(input));
           }
         };
-        recognition.onerror = (event: any) => {
-          console.warn('Speech recognition error', event);
-          void stopRecording('error');
-          toast({
-            title: copy.micUnavailableTitle,
-            description: copy.micUnavailableDesc,
-            variant: 'destructive',
-          });
-        };
-        recognition.onend = () => {
-          if (isRecordingRef.current) {
-            void stopRecording('idle');
-          }
-        };
 
-        recognitionRef.current = recognition;
-        recognition.start();
+        if (!useLiveStreamingRef.current && SpeechRecognitionCtor) {
+          const recognition: SpeechRecognitionInstance = new SpeechRecognitionCtor();
+          recognition.lang = langKey === 'zh-TW' ? 'zh-TW' : 'en-US';
+          recognition.interimResults = false;
+          recognition.maxAlternatives = 1;
+          recognition.onresult = (event: any) => {
+            const transcript = event?.results?.[0]?.[0]?.transcript;
+            if (transcript) {
+              void stopRecording('processing').then(() => sendMessage(transcript));
+            } else {
+              void stopRecording('idle');
+            }
+          };
+          recognition.onerror = (event: any) => {
+            console.warn('Speech recognition error', event);
+            void stopRecording('error');
+            toast({
+              title: copy.micUnavailableTitle,
+              description: copy.micUnavailableDesc,
+              variant: 'destructive',
+            });
+          };
+          recognition.onend = () => {
+            if (isRecordingRef.current) {
+              void stopRecording('idle');
+            }
+          };
+
+          recognitionRef.current = recognition;
+          recognition.start();
+        }
+      } catch (error: any) {
+        const isPermissionError =
+          error?.name === 'NotAllowedError' ||
+          error?.name === 'PermissionDeniedError' ||
+          error?.name === 'SecurityError';
+        toast({
+          title: isPermissionError ? copy.micPermissionDeniedTitle : copy.micUnavailableTitle,
+          description: error?.message || (isPermissionError ? copy.micPermissionDeniedDesc : copy.micUnavailableDesc),
+          variant: 'destructive',
+        });
+        void cleanupCapture();
+        isRecordingRef.current = false;
+        setIsRecording(false);
+        resetMicLevel();
+        setStatus(isPermissionError ? 'idle' : 'error');
       }
-    } catch (error: any) {
-      const isPermissionError =
-        error?.name === 'NotAllowedError' ||
-        error?.name === 'PermissionDeniedError' ||
-        error?.name === 'SecurityError';
-      toast({
-        title: isPermissionError ? copy.micPermissionDeniedTitle : copy.micUnavailableTitle,
-        description: error?.message || (isPermissionError ? copy.micPermissionDeniedDesc : copy.micUnavailableDesc),
-        variant: 'destructive',
-      });
-      void cleanupCapture();
-      isRecordingRef.current = false;
-      setIsRecording(false);
-      resetMicLevel();
-      setStatus(isPermissionError ? 'idle' : 'error');
+    } finally {
+      isStartingRecordingRef.current = false;
     }
   };
 
   const openAssistant = async (options: OpenAssistantOptions = {}) => {
-    if (isOpenRef.current) return;
-    const auth = await requireAuth();
-    if (!auth) return;
-    const { autoPrompt, startListening = true } = options;
-    isOpenRef.current = true;
-    if (startListening) {
-      shouldAutoResumeRef.current = true;
-      void startRecording();
+    if (isOpenRef.current || isOpeningRef.current) return;
+    isOpeningRef.current = true;
+    try {
+      void unlockPlayback();
+      const auth = await requireAuth();
+      if (!auth) return;
+      if (isOpenRef.current) return;
+      const { autoPrompt, startListening = true } = options;
+      isOpenRef.current = true;
+      if (startListening) {
+        shouldAutoResumeRef.current = true;
+        void startRecording();
+      }
+      log('Opening assistant');
+      audioMutedRef.current = false;
+      setIsOpen(true);
+      setStatus('ready');
+      appendMessage('system', copy.readyMessage);
+      if (autoPrompt) {
+        appendMessage('assistant', autoPrompt);
+      }
+      void ensureLiveSession();
+    } finally {
+      isOpeningRef.current = false;
     }
-    log('Opening assistant');
-    audioMutedRef.current = false;
-    setIsOpen(true);
-    setStatus('ready');
-    appendMessage('system', copy.readyMessage);
-    if (autoPrompt) {
-      appendMessage('assistant', autoPrompt);
-    }
-    void unlockPlayback();
-    void ensureLiveSession();
   };
+
+  useEffect(() => {
+    if (autoStartHandledRef.current) return;
+    if (isLoading) return;
+    if (isInLineApp && !isLiffReady) return;
+    const params = new URLSearchParams(location.search);
+    if (params.get('assistant') !== 'voice') return;
+    if (params.get('action') !== 'start') return;
+
+    autoStartHandledRef.current = true;
+    void openAssistant({ startListening: true });
+
+    params.delete('assistant');
+    if (params.get('action') === 'start') params.delete('action');
+    const query = params.toString();
+    navigate(query ? `${location.pathname}?${query}` : location.pathname, { replace: true });
+  }, [isInLineApp, isLiffReady, isLoading, location.pathname, location.search, navigate, openAssistant]);
 
   const closeAssistant = () => {
     log('Closing assistant');
@@ -2044,6 +2115,9 @@ export default function VoiceAssistantPopup() {
       if (!detail || typeof detail.open !== 'boolean' || !detail.id) return;
       if (detail.open) {
         openDialogIdsRef.current.add(detail.id);
+        if (autoActionInFlightRef.current) {
+          autoActionSawDialogRef.current = true;
+        }
         if (openDialogIdsRef.current.size === 1) {
           pauseForDialog();
         }
@@ -2051,6 +2125,18 @@ export default function VoiceAssistantPopup() {
       }
       openDialogIdsRef.current.delete(detail.id);
       if (openDialogIdsRef.current.size === 0) {
+        if (autoActionInFlightRef.current && autoActionSawDialogRef.current) {
+          autoActionInFlightRef.current = false;
+          autoActionSawDialogRef.current = false;
+          if (autoActionTimeoutRef.current !== null) {
+            window.clearTimeout(autoActionTimeoutRef.current);
+            autoActionTimeoutRef.current = null;
+          }
+        }
+        if (autoActionQueueRef.current.length > 0) {
+          promptNextAutoAction();
+          return;
+        }
         resumeFromDialog();
       }
     };
@@ -2140,6 +2226,91 @@ export default function VoiceAssistantPopup() {
       handleNavigate(action.href);
     }
   };
+
+  const promptNextAutoAction = () => {
+    if (autoActionInFlightRef.current) return;
+    if (openDialogIdsRef.current.size > 0) return;
+    const next = autoActionQueueRef.current[0];
+    if (!next) {
+      if (dialogPauseStateRef.current) {
+        resumeFromDialog();
+      }
+      return;
+    }
+    if (!next.href) {
+      autoActionQueueRef.current.shift();
+      promptNextAutoAction();
+      return;
+    }
+    if (autoActionPromptIdRef.current) return;
+
+    autoActionPromptAcceptedRef.current = false;
+    const title = langKey === 'zh-TW' ? '要開啟編輯視窗嗎？' : 'Open the edit dialog?';
+    const description =
+      langKey === 'zh-TW'
+        ? `我可以幫你自動開啟「${next.label}」。按下 Open 以繼續，或關閉以略過。`
+        : `I can open “${next.label}” for you. Click Open to continue, or close to skip.`;
+
+    const toastHandle = toast({
+      title,
+      description,
+      action: (
+        <ToastAction
+          altText={langKey === 'zh-TW' ? '開啟' : 'Open'}
+          onClick={() => {
+            autoActionPromptAcceptedRef.current = true;
+            autoActionPromptIdRef.current = null;
+            autoActionQueueRef.current.shift();
+            autoActionInFlightRef.current = true;
+            autoActionSawDialogRef.current = false;
+            handleNavigate(next.href!);
+
+            if (autoActionTimeoutRef.current !== null) {
+              window.clearTimeout(autoActionTimeoutRef.current);
+              autoActionTimeoutRef.current = null;
+            }
+            autoActionTimeoutRef.current = window.setTimeout(() => {
+              if (!autoActionInFlightRef.current) return;
+              if (autoActionSawDialogRef.current) return;
+              autoActionInFlightRef.current = false;
+              autoActionSawDialogRef.current = false;
+              autoActionTimeoutRef.current = null;
+              promptNextAutoAction();
+            }, 2500);
+          }}
+        >
+          {langKey === 'zh-TW' ? '開啟' : 'Open'}
+        </ToastAction>
+      ),
+      onOpenChange: (open) => {
+        if (open) return;
+        const wasAccepted = autoActionPromptAcceptedRef.current;
+        autoActionPromptIdRef.current = null;
+        autoActionPromptAcceptedRef.current = false;
+        if (!wasAccepted) {
+          autoActionQueueRef.current = [];
+          if (dialogPauseStateRef.current) {
+            resumeFromDialog();
+          }
+        }
+      },
+    });
+
+    autoActionPromptIdRef.current = toastHandle.id;
+  };
+
+  useEffect(() => {
+    const latest = [...messages].reverse().find((entry) => entry.kind === 'tool-card') as ToolCardEntry | undefined;
+    if (!latest) return;
+    if (lastAutoToolCardIdRef.current === latest.id) return;
+    lastAutoToolCardIdRef.current = latest.id;
+
+    const actions = (latest.card as { actions?: ToolUiAction[] }).actions;
+    const autoActions = actions?.filter((action) => action.auto && action.href) ?? [];
+    if (!autoActions.length) return;
+    autoActionQueueRef.current.push(...autoActions.map((action) => ({ ...action, auto: false })));
+    promptNextAutoAction();
+  }, [messages]);
 
   const handleStartTutorial = async () => {
     const page = getVoicePageContext(location.pathname, t);
@@ -2986,7 +3157,6 @@ export default function VoiceAssistantPopup() {
       >
         <button
           type="button"
-          onPointerDown={() => void openAssistant()}
           onClick={() => void openAssistant()}
           tabIndex={isLauncherHidden ? -1 : 0}
           className={`group flex items-center rounded-full border border-emerald-400/80 bg-emerald-50/95 py-3 shadow-[0_20px_40px_-16px_rgba(16,185,129,0.9)] backdrop-blur transition hover:-translate-y-0.5 hover:bg-emerald-100 hover:shadow-[0_28px_50px_-18px_rgba(16,185,129,1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 ${

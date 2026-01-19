@@ -6,11 +6,13 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
+import { ToastAction } from '@/components/ui/toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { resolveApiBaseUrl } from '@/lib/api';
-import { ShoppingCart, ArrowLeft, Loader2, Minus, Plus, X, AlertTriangle, Info, CheckCircle2, Sparkles, HandCoins, CreditCard, MapPin } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, Loader2, Minus, Plus, X, AlertTriangle, CheckCircle2, Sparkles, HandCoins, CreditCard, MapPin } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +34,8 @@ type CartItem = {
   quantity: number;
 };
 
+type ShippingMethod = 'home' | 'b2s' | 'pickup_station';
+
 type ShippingForm = {
   fullName: string;
   phone: string;
@@ -41,20 +45,13 @@ type ShippingForm = {
   city: string;
   postalCode: string;
   instructions: string;
+  storeId: string;
+  storeName: string;
+  pickupOfficeNo: string;
+  pickupOfficeName: string;
 };
 
 type SavedAddress = ShippingForm & { id: string; label: string };
-
-type LinePayStatus = {
-  configured: boolean;
-  hasChannelId: boolean;
-  hasChannelSecret: boolean;
-  sandbox?: boolean;
-  frontendBaseUrl?: string;
-  sampleConfirmUrl?: string;
-  apiBaseUrl?: string;
-  issues?: string[];
-};
 
 const defaultForm: ShippingForm = {
   fullName: '',
@@ -65,6 +62,10 @@ const defaultForm: ShippingForm = {
   city: '',
   postalCode: '',
   instructions: '',
+  storeId: '',
+  storeName: '',
+  pickupOfficeNo: '',
+  pickupOfficeName: '',
 };
 
 const normalizeTaiwanPhoneDigits = (value: string) => {
@@ -116,6 +117,7 @@ const CheckoutPage: React.FC = () => {
   const [cart, setCart] = useState<Record<string, CartItem>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState<ShippingForm>(defaultForm);
+  const [deliveryMethod, setDeliveryMethod] = useState<ShippingMethod>('home');
   const [addressStreet, setAddressStreet] = useState('');
   const [addressNumber, setAddressNumber] = useState('');
   const [buyerSuggestions, setBuyerSuggestions] = useState<AddressCandidate[]>([]);
@@ -128,8 +130,6 @@ const CheckoutPage: React.FC = () => {
   const buyerLookupIdRef = useRef(0);
   const buyerAutoFillRef = useRef<string | null>(null);
   const buyerQueryRef = useRef('');
-  const [linePayStatus, setLinePayStatus] = useState<LinePayStatus | null>(null);
-  const [statusError, setStatusError] = useState<string | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<'cod' | 'line_pay'>('cod');
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
@@ -138,11 +138,22 @@ const CheckoutPage: React.FC = () => {
   const [savedAddresses, setSavedAddresses] = useState<SavedAddress[]>([]);
   const [selectedSavedAddressId, setSelectedSavedAddressId] = useState('');
   const [mobileStep, setMobileStep] = useState(0);
+  const [mapLinks, setMapLinks] = useState<{ pickup: string; b2s: string }>({ pickup: '', b2s: '' });
+  const [pickupStationEnabled, setPickupStationEnabled] = useState(false);
+  const [mapSelections, setMapSelections] = useState<{
+    b2s?: { storeId?: string; storeName?: string; storeAddress?: string };
+    pickup?: { officeNo?: string; officeName?: string; officeAddress?: string; postCode?: string };
+  }>({});
   const { toast } = useToast();
   const { user } = useAuth();
   const { t } = useLanguage();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const isHomeDelivery = deliveryMethod === 'home';
+  const isB2s = deliveryMethod === 'b2s';
+  const isPickupStation = deliveryMethod === 'pickup_station';
+  const hasB2sSelection = Boolean(mapSelections.b2s?.storeId || mapSelections.b2s?.storeName);
+  const hasPickupSelection = Boolean(mapSelections.pickup?.officeNo || mapSelections.pickup?.officeName);
   const paymentOptions = [
     {
       id: 'cod' as const,
@@ -161,6 +172,80 @@ const CheckoutPage: React.FC = () => {
       badge: t('checkout.payment.lineBadge'),
     },
   ];
+
+  const deliveryOptions = [
+    {
+      value: 'home' as const,
+      title: t('checkout.deliveryOptions.home'),
+      description: t('checkout.deliveryOptions.homeDesc'),
+    },
+    {
+      value: 'b2s' as const,
+      title: t('checkout.deliveryOptions.b2s'),
+      description: t('checkout.deliveryOptions.b2sDesc'),
+    },
+    {
+      value: 'pickup_station' as const,
+      title: t('checkout.deliveryOptions.pickupStation'),
+      description: t('checkout.deliveryOptions.pickupStationDesc'),
+      disabled: !pickupStationEnabled,
+      badge: t('common.comingSoon'),
+    },
+  ];
+
+  const handleDeliveryMethodChange = (value: string) => {
+    if (value === 'pickup_station' && !pickupStationEnabled) return;
+    const nextMethod = value as ShippingMethod;
+    setDeliveryMethod(nextMethod);
+    if (nextMethod !== 'home') {
+      setSelectedSavedAddressId('');
+    }
+  };
+
+  const renderDeliveryMethodSelector = (idPrefix: string) => (
+    <div className="space-y-2">
+      <p className="text-sm font-semibold text-gray-700">{t('checkout.deliveryOptions.title')}</p>
+      <RadioGroup
+        value={deliveryMethod}
+        onValueChange={handleDeliveryMethodChange}
+        className="grid gap-2"
+      >
+        {deliveryOptions.map((option) => {
+          const selected = deliveryMethod === option.value;
+          const disabled = Boolean((option as { disabled?: boolean }).disabled);
+          return (
+            <Label
+              key={option.value}
+              htmlFor={`${idPrefix}-${option.value}`}
+              className={cn(
+                'flex items-start gap-3 rounded-lg border p-3 text-left',
+                selected ? 'border-emerald-300 bg-emerald-50' : 'border-gray-200',
+                disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+              )}
+            >
+              <RadioGroupItem
+                id={`${idPrefix}-${option.value}`}
+                value={option.value}
+                className="mt-1"
+                disabled={disabled}
+              />
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold text-gray-800">{option.title}</p>
+                  {disabled && (option as { badge?: string }).badge ? (
+                    <Badge className="bg-amber-100 text-amber-700 border-amber-200">
+                      {(option as { badge?: string }).badge}
+                    </Badge>
+                  ) : null}
+                </div>
+                <p className="text-xs text-gray-500">{option.description}</p>
+              </div>
+            </Label>
+          );
+        })}
+      </RadioGroup>
+    </div>
+  );
 
   useEffect(() => {
     try {
@@ -218,24 +303,38 @@ const CheckoutPage: React.FC = () => {
   }, [user]);
 
   useEffect(() => {
-    const fetchStatus = async () => {
+    const loadMapLinks = async () => {
       try {
-        setStatusError(null);
         const apiBaseUrl = resolveApiBaseUrl();
-        const response = await fetch(`${apiBaseUrl}/api/payments/line-pay/status`);
-        if (!response.ok) {
-          throw new Error('Unable to read LINE Pay configuration.');
-        }
-        const payload = await response.json();
-        setLinePayStatus(payload);
-      } catch (error: any) {
-        console.warn('LINE Pay status check failed', error);
-        setStatusError(error?.message || 'Unable to verify LINE Pay configuration.');
+        const response = await fetch(`${apiBaseUrl}/api/logistics/yamato/config`);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) return;
+        const hasPickup = typeof payload?.map?.pickup === 'string' && payload.map.pickup.trim();
+        const hasB2s = typeof payload?.map?.b2s === 'string' && payload.map.b2s.trim();
+        const pickupAuth = payload?.pickupAuth || {};
+        const pickupAuthReady =
+          Boolean(String(pickupAuth?.uid || '').trim()) &&
+          Boolean(String(pickupAuth?.custNo || '').trim()) &&
+          Boolean(String(pickupAuth?.pkey || '').trim());
+        setPickupStationEnabled(hasPickup && pickupAuthReady);
+        setMapLinks({
+          pickup: hasPickup && pickupAuthReady ? `${apiBaseUrl}/api/logistics/yamato/map/pickup` : '',
+          b2s: hasB2s
+            ? `${apiBaseUrl}/api/logistics/yamato/map/b2s${isMobile ? '?mobile=1' : ''}`
+            : '',
+        });
+      } catch (error) {
+        console.warn('Failed to load Yamato map config', error);
       }
     };
-    fetchStatus();
-  }, []);
+    loadMapLinks();
+  }, [isMobile]);
 
+  useEffect(() => {
+    if (!pickupStationEnabled && deliveryMethod === 'pickup_station') {
+      setDeliveryMethod('home');
+    }
+  }, [pickupStationEnabled, deliveryMethod]);
 
   const cartItems = useMemo(() => Object.values(cart), [cart]);
   const cartTotal = useMemo(
@@ -297,6 +396,122 @@ const CheckoutPage: React.FC = () => {
     return normalizeAddressKey([formData.city.trim(), line1].filter(Boolean).join(' '));
   };
 
+  const buildAddressSummary = (city: string, line1: string, line2: string) =>
+    [city, line1, line2].filter((value) => value && value.trim()).join(' ').trim();
+
+  const clearBuyerLookupState = useCallback(() => {
+    setBuyerSuggestions([]);
+    setBuyerLookupError(null);
+  }, []);
+
+  const clearBuyerVerification = useCallback(() => {
+    setBuyerPostNumber('');
+    setBuyerYamatoZipCode('');
+    setBuyerVerifyError(null);
+  }, []);
+
+  const applyMapAddress = useCallback((address: string, postalCode?: string) => {
+    const normalized = address.trim();
+    if (!normalized) return;
+    const { city, rest } = splitCityAndRest(normalized);
+    const line1Source = rest || normalized;
+    const { street, number } = splitStreetAndNumber(line1Source);
+    const composedLine1 = buildAddressLine1(street, number) || line1Source;
+    setAddressStreet(street);
+    setAddressNumber(number);
+    setFormData((prev) => ({
+      ...prev,
+      city: city || prev.city,
+      addressLine1: composedLine1,
+      addressLine2: '',
+      postalCode: postalCode || prev.postalCode,
+    }));
+    clearBuyerLookupState();
+    clearBuyerVerification();
+  }, [clearBuyerLookupState, clearBuyerVerification]);
+
+  const handleYamatoMapPayload = useCallback((data: any) => {
+    if (!data || data.source !== 'yamato-map') return;
+    const payload = data.payload || {};
+    if (data.type === 'b2s') {
+      const storeId = String(payload.storeId || '').trim();
+      const storeName = String(payload.storeName || '').trim();
+      const storeAddress = String(payload.storeAddress || '').trim();
+      setDeliveryMethod('b2s');
+      setSelectedSavedAddressId('');
+      if (storeId || storeName || storeAddress) {
+        setFormData((prev) => ({
+          ...prev,
+          storeId: storeId || prev.storeId,
+          storeName: storeName || prev.storeName,
+        }));
+      }
+      if (storeAddress) {
+        applyMapAddress(storeAddress);
+      }
+      setMapSelections((prev) => ({
+        ...prev,
+        b2s: { storeId, storeName, storeAddress },
+      }));
+      toast({
+        title: t('checkout.deliveryOptions.b2sMapSelected'),
+        description: storeName || storeId || t('checkout.deliveryOptions.b2sMapSelectedDesc'),
+      });
+      return;
+    }
+    if (data.type === 'pickup') {
+      const officeNo = String(payload.officeNo || payload.OFFICE_NO || '').trim();
+      const officeName = String(payload.officeName || payload.OFFICE_NAME || '').trim();
+      const officeAddress = String(payload.officeAddress || payload.OFFICE_ADDRESS || '').trim();
+      const postCode = String(payload.postCode || payload.POSTCODE_NO || '').trim();
+      setDeliveryMethod('pickup_station');
+      setSelectedSavedAddressId('');
+      if (officeNo || officeName || officeAddress || postCode) {
+        setFormData((prev) => ({
+          ...prev,
+          pickupOfficeNo: officeNo || prev.pickupOfficeNo,
+          pickupOfficeName: officeName || prev.pickupOfficeName,
+          postalCode: postCode || prev.postalCode,
+        }));
+      }
+      if (officeAddress) {
+        applyMapAddress(officeAddress, postCode || undefined);
+      }
+      setMapSelections((prev) => ({
+        ...prev,
+        pickup: { officeNo, officeName, officeAddress, postCode },
+      }));
+      toast({
+        title: t('checkout.deliveryOptions.pickupMapSelected'),
+        description: officeName || officeNo || t('checkout.deliveryOptions.pickupMapSelectedDesc'),
+      });
+    }
+  }, [applyMapAddress, t, toast]);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      handleYamatoMapPayload(event.data);
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== 'yamato-map-selection' || !event.newValue) return;
+      try {
+        handleYamatoMapPayload(JSON.parse(event.newValue));
+      } catch {}
+    };
+    window.addEventListener('message', handleMessage);
+    window.addEventListener('storage', handleStorage);
+    let channel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      channel = new BroadcastChannel('yamato-map');
+      channel.onmessage = (event) => handleYamatoMapPayload(event.data);
+    }
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      window.removeEventListener('storage', handleStorage);
+      if (channel) channel.close();
+    };
+  }, [handleYamatoMapPayload]);
+
   const buyerLookupQuery = buildBuyerAddressQuery();
   const debouncedBuyerQuery = useDebouncedValue(buyerLookupQuery, 400);
 
@@ -305,6 +520,12 @@ const CheckoutPage: React.FC = () => {
   }, [buyerLookupQuery]);
 
   useEffect(() => {
+    if (!isHomeDelivery) {
+      buyerLookupIdRef.current += 1;
+      setBuyerSuggestions([]);
+      setBuyerLookupError(null);
+      return;
+    }
     const query = debouncedBuyerQuery.trim();
     const normalizedQuery = normalizeAddressKey(query);
     if (normalizedQuery.length < 3) {
@@ -339,7 +560,7 @@ const CheckoutPage: React.FC = () => {
         if (normalizeAddressKey(buyerQueryRef.current) !== normalizedQuery) return;
         setBuyerLookupError(error?.message || t('checkout.address.lookupFailed'));
       });
-  }, [debouncedBuyerQuery, t]);
+  }, [debouncedBuyerQuery, isHomeDelivery, t]);
 
   const updateCartQty = useCallback((productId: string, quantity: number) => {
     setCart((prev) => {
@@ -367,16 +588,12 @@ const CheckoutPage: React.FC = () => {
     setFormData((prev) => ({ ...prev, [field]: nextValue }));
   };
 
-  const clearBuyerLookupState = () => {
-    setBuyerSuggestions([]);
-    setBuyerLookupError(null);
-  };
-
-  const clearBuyerVerification = () => {
-    setBuyerPostNumber('');
-    setBuyerYamatoZipCode('');
-    setBuyerVerifyError(null);
-  };
+  useEffect(() => {
+    if (!isHomeDelivery) {
+      clearBuyerLookupState();
+      clearBuyerVerification();
+    }
+  }, [isHomeDelivery, clearBuyerLookupState, clearBuyerVerification]);
 
   const handleBuyerStreetChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const nextStreet = event.target.value;
@@ -448,6 +665,12 @@ const CheckoutPage: React.FC = () => {
       'city',
       'postalCode',
     ];
+    if (isB2s) {
+      requiredFields.push('storeId');
+    }
+    if (isPickupStation) {
+      requiredFields.push('pickupOfficeNo');
+    }
 
     for (const field of requiredFields) {
       if (!formData[field] || !formData[field].trim()) {
@@ -461,6 +684,107 @@ const CheckoutPage: React.FC = () => {
     }
     return true;
   };
+
+  const buildShippingPayload = () => {
+    const addressLine1 = formData.addressLine1.trim();
+    const addressLine2 = formData.addressLine2.trim();
+    const city = formData.city.trim();
+    const postalCode = formData.postalCode.trim();
+    const base = {
+      fullName: formData.fullName.trim(),
+      phone: normalizeTaiwanPhoneDigits(formData.phone),
+      email: formData.email.trim(),
+      instructions: formData.instructions.trim(),
+      method: deliveryMethod,
+      addressLine1,
+      addressLine2,
+      city,
+      postalCode,
+    };
+    if (isB2s) {
+      return {
+        ...base,
+        storeId: formData.storeId.trim(),
+        storeName: formData.storeName.trim(),
+        storeAddress: buildAddressSummary(city, addressLine1, addressLine2),
+      };
+    }
+    if (isPickupStation) {
+      return {
+        ...base,
+        pickupOfficeNo: formData.pickupOfficeNo.trim(),
+        pickupOfficeName: formData.pickupOfficeName.trim(),
+        pickupOfficeAddress: buildAddressSummary(city, addressLine1, addressLine2),
+      };
+    }
+    return base;
+  };
+
+  const openMapPopup = (url: string, name: string) => {
+    if (!url || typeof window === 'undefined') return;
+    const popup = window.open(url, name, 'width=1100,height=760');
+    if (popup) {
+      popup.focus();
+      return;
+    }
+    toast({
+      title: t('common.popupBlockedTitle'),
+      description: t('common.popupBlockedDesc'),
+      action: (
+        <ToastAction altText={t('common.popupBlockedAction')} onClick={() => window.location.assign(url)}>
+          {t('common.popupBlockedAction')}
+        </ToastAction>
+      ),
+    });
+  };
+
+  const renderMapCard = (options: {
+    url: string;
+    title: string;
+    hint: string;
+    cta: string;
+    unavailable: string;
+    name: string;
+  }) =>
+    options.url ? (
+      <button
+        type="button"
+        onClick={() => openMapPopup(options.url, options.name)}
+        className="group relative flex min-h-24 w-full flex-col items-start justify-between gap-2 rounded-lg border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-amber-50 px-4 py-3 text-left transition hover:border-emerald-300 sm:flex-row sm:items-center"
+        aria-label={options.cta}
+      >
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-gray-800">{options.title}</p>
+          <p className="text-xs text-gray-500">{options.hint}</p>
+        </div>
+        <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
+          <MapPin className="h-4 w-4" />
+          <span>{options.cta}</span>
+        </div>
+      </button>
+    ) : (
+      <div className="flex min-h-24 w-full flex-col items-start justify-between gap-2 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-left sm:flex-row sm:items-center">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-gray-700">{options.title}</p>
+          <p className="text-xs text-gray-400">{options.unavailable}</p>
+        </div>
+        <MapPin className="h-4 w-4 text-gray-400" />
+      </div>
+    );
+
+  const renderSelectionCard = (title: string, details: string[]) => (
+    <div className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-xs text-gray-600 space-y-1">
+      <div className="flex items-center gap-2">
+        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">
+          {t('checkout.deliveryOptions.selectedBadge')}
+        </Badge>
+        <span className="font-semibold text-emerald-700">{title}</span>
+      </div>
+      {details.filter(Boolean).map((line, index) => (
+        <p key={`${line}-${index}`}>{line}</p>
+      ))}
+    </div>
+  );
 
   const requestBuyerLocation = () =>
     new Promise<{ lat: number; lng: number }>((resolve, reject) => {
@@ -554,7 +878,9 @@ const CheckoutPage: React.FC = () => {
     const { street, number } = splitStreetAndNumber(addr.addressLine1 || '');
     setAddressStreet(street);
     setAddressNumber(number);
-    setFormData({
+    setDeliveryMethod('home');
+    setFormData((prev) => ({
+      ...prev,
       fullName: addr.fullName,
       phone: formatTaiwanPhoneInput(addr.phone),
       email: addr.email,
@@ -563,7 +889,7 @@ const CheckoutPage: React.FC = () => {
       city: addr.city,
       postalCode: addr.postalCode,
       instructions: addr.instructions,
-    });
+    }));
     clearBuyerLookupState();
     clearBuyerVerification();
     toast({
@@ -592,6 +918,22 @@ const CheckoutPage: React.FC = () => {
       }
     }
     if (mobileStep === 1) {
+      if (isB2s && !formData.storeId.trim()) {
+        toast({
+          title: t('checkout.errors.missingInfoTitle'),
+          description: t('checkout.errors.missingInfoDescription'),
+          variant: 'destructive',
+        });
+        return;
+      }
+      if (isPickupStation && !formData.pickupOfficeNo.trim()) {
+        toast({
+          title: t('checkout.errors.missingInfoTitle'),
+          description: t('checkout.errors.missingInfoDescription'),
+          variant: 'destructive',
+        });
+        return;
+      }
       if (!formData.addressLine1.trim() || !formData.city.trim() || !formData.postalCode.trim()) {
         toast({
           title: t('checkout.errors.missingInfoTitle'),
@@ -600,7 +942,7 @@ const CheckoutPage: React.FC = () => {
         });
         return;
       }
-      if (!buyerYamatoZipCode) {
+      if (isHomeDelivery && !buyerYamatoZipCode) {
         if (isBuyerVerifying) return;
         const verified = await handleVerifyBuyerAddress();
         if (!verified) {
@@ -629,12 +971,17 @@ const CheckoutPage: React.FC = () => {
   };
 
   const handleSaveAddress = () => {
+    if (!isHomeDelivery) return;
     if (!validateForm()) return;
     const label =
       prompt(t('checkout.addresses.promptLabel'))?.trim() ||
       t('checkout.addresses.defaultLabel');
     const newAddress: SavedAddress = {
       ...formData,
+      storeId: '',
+      storeName: '',
+      pickupOfficeNo: '',
+      pickupOfficeName: '',
       phone: normalizeTaiwanPhoneDigits(formData.phone),
       id: `${Date.now()}`,
       label,
@@ -668,7 +1015,7 @@ const CheckoutPage: React.FC = () => {
       return;
     }
 
-    if (!buyerYamatoZipCode) {
+    if (isHomeDelivery && !buyerYamatoZipCode) {
       if (isBuyerVerifying) return;
       const verified = await handleVerifyBuyerAddress();
       if (!verified) {
@@ -721,10 +1068,7 @@ const CheckoutPage: React.FC = () => {
             role: user?.role || 'market',
             source: 'web',
           },
-          shipping: {
-            ...formData,
-            phone: normalizeTaiwanPhoneDigits(formData.phone),
-          },
+          shipping: buildShippingPayload(),
           metadata: {
             totalAmount: cartTotal,
             items: cartItems.length,
@@ -816,7 +1160,8 @@ const CheckoutPage: React.FC = () => {
                 <div key={`checkout-step-${mobileStep}`} className="space-y-4 animate-in fade-in-0 slide-in-from-right-2 duration-300">
                   {mobileStep === 0 && (
                     <div className="space-y-4">
-                      {savedAddresses.length > 0 && (
+                      {renderDeliveryMethodSelector('mobile')}
+                      {isHomeDelivery && savedAddresses.length > 0 && (
                         <div className="space-y-2">
                           <p className="text-sm font-semibold">{t('checkout.addresses.title')}</p>
                           <Select value={selectedSavedAddressId} onValueChange={handleSavedAddressSelect}>
@@ -868,154 +1213,307 @@ const CheckoutPage: React.FC = () => {
                   )}
                   {mobileStep === 1 && (
                     <div className="space-y-4">
-                      <div className="space-y-2">
-                        <p className="text-sm font-semibold text-gray-700">{t('checkout.address.verifyTitle')}</p>
-                        <p className="text-xs text-gray-500">{t('checkout.address.verifyHint')}</p>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={handleUseLocationForBuyer}
-                            disabled={isBuyerSearching}
-                            className="gap-2"
-                          >
-                            {isBuyerSearching ? (
-                              <>
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                                {t('checkout.address.searching')}
-                              </>
-                            ) : (
-                              <>
-                                <MapPin className="w-4 h-4" />
-                                {t('checkout.address.useLocation')}
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={handleLookupBuyerAddress}
-                            disabled={isBuyerSearching || !buyerLookupQuery.trim()}
-                          >
-                            {t('checkout.address.search')}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={handleVerifyBuyerAddress}
-                            disabled={isBuyerVerifying || !buyerLookupQuery.trim()}
-                            className="gap-2"
-                          >
-                            {isBuyerVerifying ? (
-                              <>
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                                {t('checkout.address.verifying')}
-                              </>
-                            ) : (
-                              t('checkout.address.verify')
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div className="space-y-4 rounded-lg border border-gray-200 p-3">
-                        <div className="grid grid-cols-1 gap-3">
+                      {isHomeDelivery ? (
+                        <>
                           <div className="space-y-2">
-                            <Label htmlFor="postalCode-mobile">{`${t('checkout.postalCode')} *`}</Label>
-                            <Input
-                              id="postalCode-mobile"
-                              value={formData.postalCode}
-                              onChange={handleBuyerPostalCodeChange}
-                              required
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="city-mobile">{`${t('checkout.city')} *`}</Label>
-                            <Input
-                              id="city-mobile"
-                              value={formData.city}
-                              onChange={handleBuyerCityChange}
-                              required
-                            />
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 gap-3">
-                          <div className="space-y-2">
-                            <Label htmlFor="addressStreet-mobile">{`${t('checkout.address.street')} *`}</Label>
-                            <Input
-                              id="addressStreet-mobile"
-                              value={addressStreet}
-                              onChange={handleBuyerStreetChange}
-                              placeholder={t('checkout.address.streetPlaceholder')}
-                              required
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="addressNumber-mobile">{t('checkout.address.number')}</Label>
-                            <Input
-                              id="addressNumber-mobile"
-                              value={addressNumber}
-                              onChange={handleBuyerNumberChange}
-                              placeholder={t('checkout.address.numberPlaceholder')}
-                            />
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="addressLine2-mobile">{t('checkout.addressLine2')}</Label>
-                          <Input
-                            id="addressLine2-mobile"
-                            value={formData.addressLine2}
-                            onChange={handleBuyerAddressLine2Change}
-                            placeholder={t('checkout.addressLine2Placeholder')}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-1 gap-3">
-                        <div className="space-y-2">
-                          <Label htmlFor="buyer-post-number-mobile">{t('checkout.address.postNumber')}</Label>
-                          <Input
-                            id="buyer-post-number-mobile"
-                            value={buyerPostNumber}
-                            readOnly
-                            placeholder={t('checkout.address.postNumberPlaceholder')}
-                            className="bg-gray-50"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="buyer-yamato-zip-mobile">{t('checkout.address.yamatoZip')}</Label>
-                          <Input
-                            id="buyer-yamato-zip-mobile"
-                            value={buyerYamatoZipCode}
-                            readOnly
-                            placeholder={t('checkout.address.yamatoZipPlaceholder')}
-                            className="bg-gray-50"
-                          />
-                        </div>
-                      </div>
-
-                      {buyerSuggestions.length > 0 && (
-                        <div className="rounded-md border border-gray-200 bg-white p-2">
-                          <p className="text-xs text-gray-500">{t('checkout.address.suggestions')}</p>
-                          <div className="flex flex-col gap-2 mt-2">
-                            {buyerSuggestions.map((candidate, index) => (
-                              <button
-                                key={`${candidate.address}-${index}`}
+                            <p className="text-sm font-semibold text-gray-700">{t('checkout.address.verifyTitle')}</p>
+                            <p className="text-xs text-gray-500">{t('checkout.address.verifyHint')}</p>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
                                 type="button"
-                                onClick={() => applyBuyerCandidate(candidate)}
-                                className="rounded-md border border-gray-200 px-3 py-2 text-left text-sm text-gray-700 hover:border-green-400 hover:bg-green-50"
+                                variant="outline"
+                                onClick={handleUseLocationForBuyer}
+                                disabled={isBuyerSearching}
+                                className="gap-2"
                               >
-                                {candidate.address}
-                              </button>
-                            ))}
+                                {isBuyerSearching ? (
+                                  <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    {t('checkout.address.searching')}
+                                  </>
+                                ) : (
+                                  <>
+                                    <MapPin className="w-4 h-4" />
+                                    {t('checkout.address.useLocation')}
+                                  </>
+                                )}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleLookupBuyerAddress}
+                                disabled={isBuyerSearching || !buyerLookupQuery.trim()}
+                              >
+                                {t('checkout.address.search')}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={handleVerifyBuyerAddress}
+                                disabled={isBuyerVerifying || !buyerLookupQuery.trim()}
+                                className="gap-2"
+                              >
+                                {isBuyerVerifying ? (
+                                  <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    {t('checkout.address.verifying')}
+                                  </>
+                                ) : (
+                                  t('checkout.address.verify')
+                                )}
+                              </Button>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                      {buyerLookupError && (
-                        <div className="text-sm text-red-600">{buyerLookupError}</div>
-                      )}
-                      {buyerVerifyError && (
-                        <div className="text-sm text-red-600">{buyerVerifyError}</div>
+
+                          <div className="space-y-4 rounded-lg border border-gray-200 p-3">
+                            <div className="grid grid-cols-1 gap-3">
+                              <div className="space-y-2">
+                                <Label htmlFor="postalCode-mobile">{`${t('checkout.postalCode')} *`}</Label>
+                                <Input
+                                  id="postalCode-mobile"
+                                  value={formData.postalCode}
+                                  onChange={handleBuyerPostalCodeChange}
+                                  required
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor="city-mobile">{`${t('checkout.city')} *`}</Label>
+                                <Input
+                                  id="city-mobile"
+                                  value={formData.city}
+                                  onChange={handleBuyerCityChange}
+                                  required
+                                />
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-1 gap-3">
+                              <div className="space-y-2">
+                                <Label htmlFor="addressStreet-mobile">{`${t('checkout.address.street')} *`}</Label>
+                                <Input
+                                  id="addressStreet-mobile"
+                                  value={addressStreet}
+                                  onChange={handleBuyerStreetChange}
+                                  placeholder={t('checkout.address.streetPlaceholder')}
+                                  required
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor="addressNumber-mobile">{t('checkout.address.number')}</Label>
+                                <Input
+                                  id="addressNumber-mobile"
+                                  value={addressNumber}
+                                  onChange={handleBuyerNumberChange}
+                                  placeholder={t('checkout.address.numberPlaceholder')}
+                                />
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="addressLine2-mobile">{t('checkout.addressLine2')}</Label>
+                              <Input
+                                id="addressLine2-mobile"
+                                value={formData.addressLine2}
+                                onChange={handleBuyerAddressLine2Change}
+                                placeholder={t('checkout.addressLine2Placeholder')}
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 gap-3">
+                            <div className="space-y-2">
+                              <Label htmlFor="buyer-post-number-mobile">{t('checkout.address.postNumber')}</Label>
+                              <Input
+                                id="buyer-post-number-mobile"
+                                value={buyerPostNumber}
+                                readOnly
+                                placeholder={t('checkout.address.postNumberPlaceholder')}
+                                className="bg-gray-50"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="buyer-yamato-zip-mobile">{t('checkout.address.yamatoZip')}</Label>
+                              <Input
+                                id="buyer-yamato-zip-mobile"
+                                value={buyerYamatoZipCode}
+                                readOnly
+                                placeholder={t('checkout.address.yamatoZipPlaceholder')}
+                                className="bg-gray-50"
+                              />
+                            </div>
+                          </div>
+
+                          {buyerSuggestions.length > 0 && (
+                            <div className="rounded-md border border-gray-200 bg-white p-2">
+                              <p className="text-xs text-gray-500">{t('checkout.address.suggestions')}</p>
+                              <div className="flex flex-col gap-2 mt-2">
+                                {buyerSuggestions.map((candidate, index) => (
+                                  <button
+                                    key={`${candidate.address}-${index}`}
+                                    type="button"
+                                    onClick={() => applyBuyerCandidate(candidate)}
+                                    className="rounded-md border border-gray-200 px-3 py-2 text-left text-sm text-gray-700 hover:border-green-400 hover:bg-green-50"
+                                  >
+                                    {candidate.address}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {buyerLookupError && (
+                            <div className="text-sm text-red-600">{buyerLookupError}</div>
+                          )}
+                          {buyerVerifyError && (
+                            <div className="text-sm text-red-600">{buyerVerifyError}</div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {isB2s ? (
+                            <>
+                              {renderMapCard({
+                                url: mapLinks.b2s,
+                                title: t('checkout.deliveryOptions.b2sMapTitle'),
+                                hint: t('checkout.deliveryOptions.b2sMapHint'),
+                                cta: t('checkout.deliveryOptions.b2sMapCta'),
+                                unavailable: t('checkout.deliveryOptions.b2sMapUnavailable'),
+                                name: 'yamato-b2s-map',
+                              })}
+                              {hasB2sSelection ? (
+                                renderSelectionCard(
+                                  mapSelections.b2s?.storeName || mapSelections.b2s?.storeId || t('checkout.deliveryOptions.b2sMapTitle'),
+                                  [
+                                    mapSelections.b2s?.storeId
+                                      ? t('checkout.deliveryOptions.storeIdLabel', { id: mapSelections.b2s.storeId })
+                                      : '',
+                                    mapSelections.b2s?.storeAddress || '',
+                                  ]
+                                )
+                              ) : (
+                                <>
+                                  <div className="space-y-2">
+                                    <Label htmlFor="storeId-mobile">{`${t('checkout.deliveryOptions.storeId')} *`}</Label>
+                                    <Input
+                                      id="storeId-mobile"
+                                      value={formData.storeId}
+                                      onChange={handleInputChange('storeId')}
+                                      placeholder={t('checkout.deliveryOptions.storeIdPlaceholder')}
+                                      required
+                                    />
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label htmlFor="storeName-mobile">{t('checkout.deliveryOptions.storeName')}</Label>
+                                    <Input
+                                      id="storeName-mobile"
+                                      value={formData.storeName}
+                                      onChange={handleInputChange('storeName')}
+                                      placeholder={t('checkout.deliveryOptions.storeNamePlaceholder')}
+                                    />
+                                  </div>
+                                  <p className="text-xs text-gray-500">{t('checkout.deliveryOptions.storeAddressHint')}</p>
+                                </>
+                              )}
+                            </>
+                          ) : (
+                            <>
+                              {renderMapCard({
+                                url: mapLinks.pickup,
+                                title: t('checkout.deliveryOptions.pickupMapTitle'),
+                                hint: t('checkout.deliveryOptions.pickupMapHint'),
+                                cta: t('checkout.deliveryOptions.pickupMapCta'),
+                                unavailable: t('checkout.deliveryOptions.pickupMapUnavailable'),
+                                name: 'yamato-pickup-map',
+                              })}
+                              {hasPickupSelection ? (
+                                renderSelectionCard(
+                                  mapSelections.pickup?.officeName || mapSelections.pickup?.officeNo || t('checkout.deliveryOptions.pickupMapTitle'),
+                                  [
+                                    mapSelections.pickup?.officeNo
+                                      ? t('checkout.deliveryOptions.stationCodeLabel', { code: mapSelections.pickup.officeNo })
+                                      : '',
+                                    mapSelections.pickup?.officeAddress || '',
+                                  ]
+                                )
+                              ) : (
+                                <>
+                                  <div className="space-y-2">
+                                    <Label htmlFor="pickupOfficeNo-mobile">{`${t('checkout.deliveryOptions.stationNo')} *`}</Label>
+                                    <Input
+                                      id="pickupOfficeNo-mobile"
+                                      value={formData.pickupOfficeNo}
+                                      onChange={handleInputChange('pickupOfficeNo')}
+                                      placeholder={t('checkout.deliveryOptions.stationNoPlaceholder')}
+                                      required
+                                    />
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label htmlFor="pickupOfficeName-mobile">{t('checkout.deliveryOptions.stationName')}</Label>
+                                    <Input
+                                      id="pickupOfficeName-mobile"
+                                      value={formData.pickupOfficeName}
+                                      onChange={handleInputChange('pickupOfficeName')}
+                                      placeholder={t('checkout.deliveryOptions.stationNamePlaceholder')}
+                                    />
+                                  </div>
+                                  <p className="text-xs text-gray-500">{t('checkout.deliveryOptions.stationAddressHint')}</p>
+                                </>
+                              )}
+                            </>
+                          )}
+
+                          {((isB2s && !hasB2sSelection) || (isPickupStation && !hasPickupSelection)) ? (
+                            <div className="space-y-4 rounded-lg border border-gray-200 p-3">
+                              <div className="grid grid-cols-1 gap-3">
+                                <div className="space-y-2">
+                                  <Label htmlFor="postalCode-mobile">{`${t('checkout.postalCode')} *`}</Label>
+                                  <Input
+                                    id="postalCode-mobile"
+                                    value={formData.postalCode}
+                                    onChange={handleBuyerPostalCodeChange}
+                                    required
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label htmlFor="city-mobile">{`${t('checkout.city')} *`}</Label>
+                                  <Input
+                                    id="city-mobile"
+                                    value={formData.city}
+                                    onChange={handleBuyerCityChange}
+                                    required
+                                  />
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 gap-3">
+                                <div className="space-y-2">
+                                  <Label htmlFor="addressStreet-mobile">{`${t('checkout.address.street')} *`}</Label>
+                                  <Input
+                                    id="addressStreet-mobile"
+                                    value={addressStreet}
+                                    onChange={handleBuyerStreetChange}
+                                    placeholder={t('checkout.address.streetPlaceholder')}
+                                    required
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label htmlFor="addressNumber-mobile">{t('checkout.address.number')}</Label>
+                                  <Input
+                                    id="addressNumber-mobile"
+                                    value={addressNumber}
+                                    onChange={handleBuyerNumberChange}
+                                    placeholder={t('checkout.address.numberPlaceholder')}
+                                  />
+                                </div>
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor="addressLine2-mobile">{t('checkout.addressLine2')}</Label>
+                                <Input
+                                  id="addressLine2-mobile"
+                                  value={formData.addressLine2}
+                                  onChange={handleBuyerAddressLine2Change}
+                                  placeholder={t('checkout.addressLine2Placeholder')}
+                                />
+                              </div>
+                            </div>
+                          ) : null}
+                        </>
                       )}
                     </div>
                   )}
@@ -1031,9 +1529,11 @@ const CheckoutPage: React.FC = () => {
                           rows={4}
                         />
                       </div>
-                      <Button type="button" variant="outline" onClick={handleSaveAddress}>
-                        {t('checkout.addresses.save')}
-                      </Button>
+                      {isHomeDelivery ? (
+                        <Button type="button" variant="outline" onClick={handleSaveAddress}>
+                          {t('checkout.addresses.save')}
+                        </Button>
+                      ) : null}
                     </div>
                   )}
                   {mobileStep === 3 && (
@@ -1100,7 +1600,7 @@ const CheckoutPage: React.FC = () => {
                 <CardDescription>{t('checkout.deliveryDescription')}</CardDescription>
               </CardHeader>
               <CardContent>
-                {savedAddresses.length > 0 && (
+                {isHomeDelivery && savedAddresses.length > 0 && (
                   <div className="mb-4 border rounded-lg p-3 bg-gray-50 space-y-2">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-semibold">{t('checkout.addresses.title')}</p>
@@ -1135,6 +1635,7 @@ const CheckoutPage: React.FC = () => {
                   </div>
                 )}
                 <form className="space-y-4" onSubmit={handleSubmit}>
+                  {renderDeliveryMethodSelector('desktop')}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <Label htmlFor="fullName">{`${t('checkout.fullName')} *`}</Label>
@@ -1158,149 +1659,295 @@ const CheckoutPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="rounded-lg border border-gray-200 p-4 space-y-4">
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold text-gray-700">{t('checkout.address.verifyTitle')}</p>
-                      <p className="text-xs text-gray-500">{t('checkout.address.verifyHint')}</p>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={handleUseLocationForBuyer}
-                          disabled={isBuyerSearching}
-                          className="gap-2"
-                        >
-                          {isBuyerSearching ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              {t('checkout.address.searching')}
-                            </>
-                          ) : (
-                            <>
-                              <MapPin className="w-4 h-4" />
-                              {t('checkout.address.useLocation')}
-                            </>
-                          )}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={handleLookupBuyerAddress}
-                          disabled={isBuyerSearching || !buyerLookupQuery.trim()}
-                        >
-                          {t('checkout.address.search')}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={handleVerifyBuyerAddress}
-                          disabled={isBuyerVerifying || !buyerLookupQuery.trim()}
-                          className="gap-2"
-                        >
-                          {isBuyerVerifying ? (
-                            <>
-                              <Loader2 className="w-4 h-4 animate-spin" />
-                              {t('checkout.address.verifying')}
-                            </>
-                          ) : (
-                            t('checkout.address.verify')
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="postalCode">{`${t('checkout.postalCode')} *`}</Label>
-                        <Input
-                          id="postalCode"
-                          value={formData.postalCode}
-                          onChange={handleBuyerPostalCodeChange}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="city">{`${t('checkout.city')} *`}</Label>
-                        <Input id="city" value={formData.city} onChange={handleBuyerCityChange} required />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="addressStreet">{`${t('checkout.address.street')} *`}</Label>
-                        <Input
-                          id="addressStreet"
-                          value={addressStreet}
-                          onChange={handleBuyerStreetChange}
-                          placeholder={t('checkout.address.streetPlaceholder')}
-                          required
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="addressNumber">{t('checkout.address.number')}</Label>
-                        <Input
-                          id="addressNumber"
-                          value={addressNumber}
-                          onChange={handleBuyerNumberChange}
-                          placeholder={t('checkout.address.numberPlaceholder')}
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <Label htmlFor="addressLine2">{t('checkout.addressLine2')}</Label>
-                      <Input
-                        id="addressLine2"
-                        value={formData.addressLine2}
-                        onChange={handleBuyerAddressLine2Change}
-                        placeholder={t('checkout.addressLine2Placeholder')}
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="buyer-post-number">{t('checkout.address.postNumber')}</Label>
-                        <Input
-                          id="buyer-post-number"
-                          value={buyerPostNumber}
-                          readOnly
-                          placeholder={t('checkout.address.postNumberPlaceholder')}
-                          className="bg-gray-50"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="buyer-yamato-zip">{t('checkout.address.yamatoZip')}</Label>
-                        <Input
-                          id="buyer-yamato-zip"
-                          value={buyerYamatoZipCode}
-                          readOnly
-                          placeholder={t('checkout.address.yamatoZipPlaceholder')}
-                          className="bg-gray-50"
-                        />
-                      </div>
-                    </div>
-
-                    {buyerSuggestions.length > 0 && (
-                      <div className="rounded-md border border-gray-200 bg-white p-2">
-                        <p className="text-xs text-gray-500">{t('checkout.address.suggestions')}</p>
-                        <div className="flex flex-col gap-2 mt-2">
-                          {buyerSuggestions.map((candidate, index) => (
-                            <button
-                              key={`${candidate.address}-${index}`}
-                              type="button"
-                              onClick={() => applyBuyerCandidate(candidate)}
-                              className="rounded-md border border-gray-200 px-3 py-2 text-left text-sm text-gray-700 hover:border-green-400 hover:bg-green-50"
-                            >
-                              {candidate.address}
-                            </button>
-                          ))}
+                  {isHomeDelivery ? (
+                    <div className="rounded-lg border border-gray-200 p-4 space-y-4">
+                      <div className="space-y-1">
+                        <p className="text-sm font-semibold text-gray-700">{t('checkout.address.verifyTitle')}</p>
+                        <p className="text-xs text-gray-500">{t('checkout.address.verifyHint')}</p>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleUseLocationForBuyer}
+                            disabled={isBuyerSearching}
+                            className="gap-2"
+                          >
+                            {isBuyerSearching ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                {t('checkout.address.searching')}
+                              </>
+                            ) : (
+                              <>
+                                <MapPin className="w-4 h-4" />
+                                {t('checkout.address.useLocation')}
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleLookupBuyerAddress}
+                            disabled={isBuyerSearching || !buyerLookupQuery.trim()}
+                          >
+                            {t('checkout.address.search')}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={handleVerifyBuyerAddress}
+                            disabled={isBuyerVerifying || !buyerLookupQuery.trim()}
+                            className="gap-2"
+                          >
+                            {isBuyerVerifying ? (
+                              <>
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                                {t('checkout.address.verifying')}
+                              </>
+                            ) : (
+                              t('checkout.address.verify')
+                            )}
+                          </Button>
                         </div>
                       </div>
-                    )}
-                    {buyerLookupError && (
-                      <div className="text-sm text-red-600">{buyerLookupError}</div>
-                    )}
-                    {buyerVerifyError && (
-                      <div className="text-sm text-red-600">{buyerVerifyError}</div>
-                    )}
-                  </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor="postalCode">{`${t('checkout.postalCode')} *`}</Label>
+                          <Input
+                            id="postalCode"
+                            value={formData.postalCode}
+                            onChange={handleBuyerPostalCodeChange}
+                            required
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="city">{`${t('checkout.city')} *`}</Label>
+                          <Input id="city" value={formData.city} onChange={handleBuyerCityChange} required />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor="addressStreet">{`${t('checkout.address.street')} *`}</Label>
+                          <Input
+                            id="addressStreet"
+                            value={addressStreet}
+                            onChange={handleBuyerStreetChange}
+                            placeholder={t('checkout.address.streetPlaceholder')}
+                            required
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="addressNumber">{t('checkout.address.number')}</Label>
+                          <Input
+                            id="addressNumber"
+                            value={addressNumber}
+                            onChange={handleBuyerNumberChange}
+                            placeholder={t('checkout.address.numberPlaceholder')}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <Label htmlFor="addressLine2">{t('checkout.addressLine2')}</Label>
+                        <Input
+                          id="addressLine2"
+                          value={formData.addressLine2}
+                          onChange={handleBuyerAddressLine2Change}
+                          placeholder={t('checkout.addressLine2Placeholder')}
+                        />
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor="buyer-post-number">{t('checkout.address.postNumber')}</Label>
+                          <Input
+                            id="buyer-post-number"
+                            value={buyerPostNumber}
+                            readOnly
+                            placeholder={t('checkout.address.postNumberPlaceholder')}
+                            className="bg-gray-50"
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="buyer-yamato-zip">{t('checkout.address.yamatoZip')}</Label>
+                          <Input
+                            id="buyer-yamato-zip"
+                            value={buyerYamatoZipCode}
+                            readOnly
+                            placeholder={t('checkout.address.yamatoZipPlaceholder')}
+                            className="bg-gray-50"
+                          />
+                        </div>
+                      </div>
+
+                      {buyerSuggestions.length > 0 && (
+                        <div className="rounded-md border border-gray-200 bg-white p-2">
+                          <p className="text-xs text-gray-500">{t('checkout.address.suggestions')}</p>
+                          <div className="flex flex-col gap-2 mt-2">
+                            {buyerSuggestions.map((candidate, index) => (
+                              <button
+                                key={`${candidate.address}-${index}`}
+                                type="button"
+                                onClick={() => applyBuyerCandidate(candidate)}
+                                className="rounded-md border border-gray-200 px-3 py-2 text-left text-sm text-gray-700 hover:border-green-400 hover:bg-green-50"
+                              >
+                                {candidate.address}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {buyerLookupError && (
+                        <div className="text-sm text-red-600">{buyerLookupError}</div>
+                      )}
+                      {buyerVerifyError && (
+                        <div className="text-sm text-red-600">{buyerVerifyError}</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-gray-200 p-4 space-y-4">
+                      {isB2s ? (
+                        <>
+                          {renderMapCard({
+                            url: mapLinks.b2s,
+                            title: t('checkout.deliveryOptions.b2sMapTitle'),
+                            hint: t('checkout.deliveryOptions.b2sMapHint'),
+                            cta: t('checkout.deliveryOptions.b2sMapCta'),
+                            unavailable: t('checkout.deliveryOptions.b2sMapUnavailable'),
+                            name: 'yamato-b2s-map',
+                          })}
+                          {hasB2sSelection ? (
+                            renderSelectionCard(
+                              mapSelections.b2s?.storeName || mapSelections.b2s?.storeId || t('checkout.deliveryOptions.b2sMapTitle'),
+                              [
+                                mapSelections.b2s?.storeId
+                                  ? t('checkout.deliveryOptions.storeIdLabel', { id: mapSelections.b2s.storeId })
+                                  : '',
+                                mapSelections.b2s?.storeAddress || '',
+                              ]
+                            )
+                          ) : (
+                            <>
+                              <div>
+                                <Label htmlFor="storeId">{`${t('checkout.deliveryOptions.storeId')} *`}</Label>
+                                <Input
+                                  id="storeId"
+                                  value={formData.storeId}
+                                  onChange={handleInputChange('storeId')}
+                                  placeholder={t('checkout.deliveryOptions.storeIdPlaceholder')}
+                                  required
+                                />
+                              </div>
+                              <div>
+                                <Label htmlFor="storeName">{t('checkout.deliveryOptions.storeName')}</Label>
+                                <Input
+                                  id="storeName"
+                                  value={formData.storeName}
+                                  onChange={handleInputChange('storeName')}
+                                  placeholder={t('checkout.deliveryOptions.storeNamePlaceholder')}
+                                />
+                              </div>
+                              <p className="text-xs text-gray-500">{t('checkout.deliveryOptions.storeAddressHint')}</p>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {renderMapCard({
+                            url: mapLinks.pickup,
+                            title: t('checkout.deliveryOptions.pickupMapTitle'),
+                            hint: t('checkout.deliveryOptions.pickupMapHint'),
+                            cta: t('checkout.deliveryOptions.pickupMapCta'),
+                            unavailable: t('checkout.deliveryOptions.pickupMapUnavailable'),
+                            name: 'yamato-pickup-map',
+                          })}
+                          {hasPickupSelection ? (
+                            renderSelectionCard(
+                              mapSelections.pickup?.officeName || mapSelections.pickup?.officeNo || t('checkout.deliveryOptions.pickupMapTitle'),
+                              [
+                                mapSelections.pickup?.officeNo
+                                  ? t('checkout.deliveryOptions.stationCodeLabel', { code: mapSelections.pickup.officeNo })
+                                  : '',
+                                mapSelections.pickup?.officeAddress || '',
+                              ]
+                            )
+                          ) : (
+                            <>
+                              <div>
+                                <Label htmlFor="pickupOfficeNo">{`${t('checkout.deliveryOptions.stationNo')} *`}</Label>
+                                <Input
+                                  id="pickupOfficeNo"
+                                  value={formData.pickupOfficeNo}
+                                  onChange={handleInputChange('pickupOfficeNo')}
+                                  placeholder={t('checkout.deliveryOptions.stationNoPlaceholder')}
+                                  required
+                                />
+                              </div>
+                              <div>
+                                <Label htmlFor="pickupOfficeName">{t('checkout.deliveryOptions.stationName')}</Label>
+                                <Input
+                                  id="pickupOfficeName"
+                                  value={formData.pickupOfficeName}
+                                  onChange={handleInputChange('pickupOfficeName')}
+                                  placeholder={t('checkout.deliveryOptions.stationNamePlaceholder')}
+                                />
+                              </div>
+                              <p className="text-xs text-gray-500">{t('checkout.deliveryOptions.stationAddressHint')}</p>
+                            </>
+                          )}
+                        </>
+                      )}
+
+                      {((isB2s && !hasB2sSelection) || (isPickupStation && !hasPickupSelection)) ? (
+                        <>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="postalCode">{`${t('checkout.postalCode')} *`}</Label>
+                              <Input
+                                id="postalCode"
+                                value={formData.postalCode}
+                                onChange={handleBuyerPostalCodeChange}
+                                required
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="city">{`${t('checkout.city')} *`}</Label>
+                              <Input id="city" value={formData.city} onChange={handleBuyerCityChange} required />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="addressStreet">{`${t('checkout.address.street')} *`}</Label>
+                              <Input
+                                id="addressStreet"
+                                value={addressStreet}
+                                onChange={handleBuyerStreetChange}
+                                placeholder={t('checkout.address.streetPlaceholder')}
+                                required
+                              />
+                            </div>
+                            <div>
+                              <Label htmlFor="addressNumber">{t('checkout.address.number')}</Label>
+                              <Input
+                                id="addressNumber"
+                                value={addressNumber}
+                                onChange={handleBuyerNumberChange}
+                                placeholder={t('checkout.address.numberPlaceholder')}
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <Label htmlFor="addressLine2">{t('checkout.addressLine2')}</Label>
+                            <Input
+                              id="addressLine2"
+                              value={formData.addressLine2}
+                              onChange={handleBuyerAddressLine2Change}
+                              placeholder={t('checkout.addressLine2Placeholder')}
+                            />
+                          </div>
+                        </>
+                      ) : null}
+                    </div>
+                  )}
 
                   <div>
                     <Label htmlFor="instructions">{t('checkout.deliveryNotes')}</Label>
@@ -1314,14 +1961,16 @@ const CheckoutPage: React.FC = () => {
                   </div>
 
                   <div className="flex flex-col sm:flex-row gap-3 pt-4">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="sm:flex-none"
-                      onClick={handleSaveAddress}
-                    >
-                      {t('checkout.addresses.save')}
-                    </Button>
+                    {isHomeDelivery ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="sm:flex-none"
+                        onClick={handleSaveAddress}
+                      >
+                        {t('checkout.addresses.save')}
+                      </Button>
+                    ) : null}
                     <Button
                       type="button"
                       variant="outline"
@@ -1407,68 +2056,6 @@ const CheckoutPage: React.FC = () => {
                     </div>
                   </>
                 )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Payments & LINE Pay (optional)</CardTitle>
-                <CardDescription>
-                  Cash on delivery is ready now. Keep these notes handy if you want to re-enable LINE Pay.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm text-gray-600">
-                {linePayStatus && !linePayStatus.configured && (
-                  <Alert variant="destructive">
-                    <AlertTriangle className="h-4 w-4" />
-                    <AlertTitle className="text-sm">Missing configuration detected</AlertTitle>
-                    <AlertDescription className="text-xs text-gray-700">
-                      {linePayStatus.issues?.join(' ') || 'Add your LINE Pay channel credentials to the environment.'}
-                    </AlertDescription>
-                  </Alert>
-                )}
-                {statusError && (
-                  <Alert variant="destructive">
-                    <AlertTriangle className="h-4 w-4" />
-                    <AlertTitle className="text-sm">Status check failed</AlertTitle>
-                    <AlertDescription className="text-xs text-gray-700">{statusError}</AlertDescription>
-                  </Alert>
-                )}
-                <div className="flex items-start gap-2">
-                  <Info className="h-4 w-4 mt-1 text-green-700" />
-                  <p>
-                    Store your LINE Pay Channel ID and Channel Secret in
-                    <code className="mx-1 text-xs bg-gray-100 px-1 rounded">LINE_PAY_CHANNEL_ID</code>
-                    and
-                    <code className="mx-1 text-xs bg-gray-100 px-1 rounded">LINE_PAY_CHANNEL_SECRET</code>
-                    (or via <code className="text-xs bg-gray-100 px-1 rounded">firebase functions:config:set linepay.*</code>).
-                  </p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <Info className="h-4 w-4 mt-1 text-green-700" />
-                  <p>
-                    Confirm URL must point to
-                    <code className="mx-1 text-xs bg-gray-100 px-1 rounded">{linePayStatus?.sampleConfirmUrl || 'https://{your-domain}/payments/line-pay/result'}</code>
-                    . Use the same path with <code className="text-xs bg-gray-100 px-1 rounded">?status=cancelled</code> for cancellations.
-                  </p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <Info className="h-4 w-4 mt-1 text-green-700" />
-                  <p>
-                    Register the domain hosting this site inside your LINE Pay console and LIFF app allowed domains list.
-                  </p>
-                </div>
-                <div className="flex items-start gap-2">
-                  <Info className="h-4 w-4 mt-1 text-green-700" />
-                  <p>
-                    Sandbox mode is currently
-                    <span className="font-semibold ml-1">{linePayStatus?.sandbox === false ? 'disabled (production)' : 'enabled'}</span>.
-                    Toggle with <code className="text-xs bg-gray-100 px-1 rounded">LINE_PAY_SANDBOX</code> when promoting to live.
-                  </p>
-                </div>
-                <p className="text-xs text-gray-500">
-                  Need every step? Open <span className="font-medium">LINE_PAY_SETUP_GUIDE.md</span> in the repo for the full checklist.
-                </p>
               </CardContent>
             </Card>
 

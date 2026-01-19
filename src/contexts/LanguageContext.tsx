@@ -8,7 +8,7 @@ interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
   changeLanguage: (lang: Language) => void;
-  t: (key: TranslationKey | string) => string;
+  t: (key: TranslationKey | string, params?: Record<string, string | number>) => string;
 }
 
 const STORAGE_KEY = "farm2market_language";
@@ -147,9 +147,15 @@ export const LanguageProvider: React.FC<LanguageProviderProps> = ({ children }) 
   }, [setLanguage]);
 
   const t = useCallback(
-    (key: TranslationKey | string): string => {
+    (key: TranslationKey | string, params?: Record<string, string | number>): string => {
       const dict = translations[language] as Record<string, string>;
-      return dict[key] ?? key;
+      let text = dict[key] ?? key;
+      if (!params) return text;
+      Object.entries(params).forEach(([paramKey, paramValue]) => {
+        const safeKey = paramKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        text = text.replace(new RegExp(`\\{${safeKey}\\}`, 'g'), String(paramValue));
+      });
+      return text;
     },
     [language]
   );

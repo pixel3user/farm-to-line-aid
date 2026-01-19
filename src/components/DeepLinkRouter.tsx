@@ -14,6 +14,7 @@ export default function DeepLinkRouter() {
     // Support LIFF redirect style: ?liff.state=%3Ftab%3Dproducts%26role%3Dmarket%26product%3Dabc
     let tab: string | null = params.get('tab');
     let action: string | null = params.get('action');
+    let assistant: string | null = params.get('assistant');
     let roleParam = params.get('role') as 'farmer' | 'market' | null;
     let product = params.get('product');
 
@@ -24,9 +25,14 @@ export default function DeepLinkRouter() {
         const stateParams = new URLSearchParams(decoded.startsWith('?') ? decoded.slice(1) : decoded);
         tab = stateParams.get('tab') || tab;
         action = stateParams.get('action') || action;
+        assistant = stateParams.get('assistant') || assistant;
         roleParam = (stateParams.get('role') as 'farmer' | 'market' | null) || roleParam;
         product = stateParams.get('product') || product;
       } catch {}
+    }
+    if (tab === 'voice') {
+      assistant = assistant || 'voice';
+      action = action || 'start';
     }
     const isEditAction = action === 'edit';
     // Allow product-only deep links to resolve to the catalog
@@ -55,6 +61,8 @@ export default function DeepLinkRouter() {
           return role === 'market' ? '/market' : '/farmer/marketing';
         case 'analytics':
           return role === 'market' ? '/market/ratings' : '/farmer/analytics';
+        case 'voice':
+          return role === 'market' ? '/market' : '/farmer';
         case 'settings':
           return '/settings';
         default:
@@ -66,6 +74,7 @@ export default function DeepLinkRouter() {
     if (target && location.pathname !== target) {
       const nextParams = new URLSearchParams();
       if (action) nextParams.set('action', action);
+      if (assistant) nextParams.set('assistant', assistant);
       // Preserve role if provided in query and user role is not known
       if (!user?.role && role) nextParams.set('role', role);
       if (product) nextParams.set('product', product);

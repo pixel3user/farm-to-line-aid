@@ -4,13 +4,17 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { useToast } from '@/components/ui/use-toast';
+import { ToastAction } from '@/components/ui/toast';
 import { useAuth } from '@/contexts/AuthContext';
 import { DatabaseService, Order, YamatoShipment } from '@/lib/database';
 import { Loader2, MapPin, PackageCheck, Truck, Clock3, Check, Download } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import resolveApiBaseUrl from '@/lib/api';
+import { cn } from '@/lib/utils';
 
 type DeliveryView = {
   id: string;
@@ -33,6 +37,8 @@ type PickupForm = {
   coldQuantity: string;
   freezeQuantity: string;
 };
+
+type PickupMethod = 'courier' | 'dropoff';
 
 type LabelInfo = {
   fileNo: string;
@@ -182,6 +188,17 @@ const FarmerDeliverySchedule: React.FC = () => {
   const [declining, setDeclining] = useState<string | null>(null);
   const [logisticsActions, setLogisticsActions] = useState<Record<string, { printing?: boolean; pickup?: boolean; status?: boolean; downloading?: boolean }>>({});
   const [pickupForms, setPickupForms] = useState<Record<string, PickupForm>>({});
+  const [pickupMethods, setPickupMethods] = useState<Record<string, PickupMethod>>({});
+  const [pickupMapUrl, setPickupMapUrl] = useState('');
+  const [pickupDropoffEnabled, setPickupDropoffEnabled] = useState(false);
+  const [pickupSelections, setPickupSelections] = useState<Record<string, {
+    officeNo?: string;
+    officeName?: string;
+    officeAddress?: string;
+    postCode?: string;
+    status?: string;
+    message?: string;
+  }>>({});
   const [labelDialogOpen, setLabelDialogOpen] = useState(false);
   const [labelDialogOrder, setLabelDialogOrder] = useState<Order | null>(null);
   const [labelPickupDate, setLabelPickupDate] = useState('');
@@ -195,7 +212,7 @@ const FarmerDeliverySchedule: React.FC = () => {
   const { toast } = useToast();
 
   const sellerId = (user as any)?.lineUserId || user?.id;
-  const sellerName = user?.displayName || 'Seller';
+  const sellerName = user?.displayName || t('schedule.sellerFallback');
 
   const getSellerShipments = (order: Order) => {
     const shipments = order.logistics?.shipments || [];
@@ -295,6 +312,88 @@ const FarmerDeliverySchedule: React.FC = () => {
   useEffect(() => {
     loadOrders();
   }, [loadOrders]);
+
+  useEffect(() => {
+    const loadPickupMapConfig = async () => {
+      try {
+        const apiBaseUrl = resolveApiBaseUrl();
+        const res = await fetch(`${apiBaseUrl}/api/logistics/yamato/config`);
+        const payload = await res.json().catch(() => ({}));
+        const hasMap = typeof payload?.map?.pickup === 'string' && payload.map.pickup.trim();
+        const pickupAuth = payload?.pickupAuth || {};
+        const pickupAuthReady =
+          Boolean(String(pickupAuth?.uid || '').trim()) &&
+          Boolean(String(pickupAuth?.custNo || '').trim()) &&
+          Boolean(String(pickupAuth?.pkey || '').trim());
+        const enabled = Boolean(hasMap && pickupAuthReady);
+        setPickupDropoffEnabled(enabled);
+        setPickupMapUrl(enabled ? `${apiBaseUrl}/api/logistics/yamato/map/pickup` : '');
+      } catch (error) {
+        console.warn('Failed to load Yamato pickup map config', error);
+      }
+    };
+    loadPickupMapConfig();
+  }, []);
+
+  const handlePickupMapPayload = useCallback((data: any) => {
+    if (!data || data.source !== 'yamato-map' || data.type !== 'pickup') return;
+    const tradeId = typeof data.tradeId === 'string' ? data.tradeId : '';
+    if (!tradeId) return;
+    const payload = data.payload || {};
+    setPickupSelections((prev) => ({
+      ...prev,
+      [tradeId]: {
+        officeNo: payload.officeNo || payload.OFFICE_NO,
+        officeName: payload.officeName || payload.OFFICE_NAME,
+        officeAddress: payload.officeAddress || payload.OFFICE_ADDRESS,
+        postCode: payload.postCode || payload.POSTCODE_NO,
+        status: payload.status || payload.STATUS,
+        message: payload.message || payload.MESSAGE,
+      },
+    }));
+  }, []);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      handlePickupMapPayload(event.data);
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== 'yamato-map-selection' || !event.newValue) return;
+      try {
+        handlePickupMapPayload(JSON.parse(event.newValue));
+      } catch {}
+    };
+    window.addEventListener('message', handleMessage);
+    window.addEventListener('storage', handleStorage);
+    let channel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      channel = new BroadcastChannel('yamato-map');
+      channel.onmessage = (event) => handlePickupMapPayload(event.data);
+    }
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      window.removeEventListener('storage', handleStorage);
+      if (channel) channel.close();
+    };
+  }, [handlePickupMapPayload]);
+
+  const openMapPopup = (url: string, name: string) => {
+    if (!url || typeof window === 'undefined') return;
+    const popup = window.open(url, name, 'width=1100,height=760');
+    if (popup) {
+      popup.focus();
+      return;
+    }
+    toast({
+      title: t('common.popupBlockedTitle'),
+      description: t('common.popupBlockedDesc'),
+      action: (
+        <ToastAction altText={t('common.popupBlockedAction')} onClick={() => window.location.assign(url)}>
+          {t('common.popupBlockedAction')}
+        </ToastAction>
+      ),
+    });
+  };
 
   const deliveries = useMemo<DeliveryView[]>(() => {
     return orders.map((order) => {
@@ -560,25 +659,30 @@ const FarmerDeliverySchedule: React.FC = () => {
     updateActionState(orderId, { downloading: true });
     try {
       const apiBaseUrl = resolveApiBaseUrl();
-      if (isInLineApp) {
-        const authHeaders = await resolveLineAuthHeaders();
+      const authHeaders = await resolveLineAuthHeaders();
+      const canSendLineMessage = Object.keys(authHeaders).length > 0 || Boolean(liffUser?.userId);
+      if (canSendLineMessage) {
         const payload: Record<string, string> = { FileNo: fileNo };
         if (liffUser?.userId) payload.lineUserId = liffUser.userId;
         if (orderId && orderId !== fileNo) payload.orderId = orderId;
-        const res = await fetch(`${apiBaseUrl}/api/logistics/yamato/download-obt-line`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders },
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data?.ok !== true) {
-          throw new Error(data?.error || t('schedule.logistics.downloadFailed'));
+        try {
+          const res = await fetch(`${apiBaseUrl}/api/logistics/yamato/download-obt-line`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok || data?.ok !== true) {
+            throw new Error(data?.error || t('schedule.logistics.downloadFailed'));
+          }
+          toast({
+            title: t('schedule.logistics.downloadSentTitle'),
+            description: t('schedule.logistics.downloadSentDesc'),
+          });
+          if (isInLineApp) return;
+        } catch (error) {
+          console.warn('Failed to send label link via LINE; falling back to direct download', error);
         }
-        toast({
-          title: t('schedule.logistics.downloadSentTitle'),
-          description: t('schedule.logistics.downloadSentDesc'),
-        });
-        return;
       }
       const res = await fetch(`${apiBaseUrl}/api/logistics/yamato/download-obt`, {
         method: 'POST',
@@ -854,24 +958,65 @@ const FarmerDeliverySchedule: React.FC = () => {
 
   const statusBadge = (status: string, deliveryStatus?: string) => {
     const displayStatus = deliveryStatus || status;
+    const statusLabelKeyByStatus: Record<string, string> = {
+      confirmed: 'schedule.status.confirmed',
+      paid: 'schedule.status.readyToDrop',
+      delivered: 'schedule.status.readyToDrop',
+      awaiting_pickup: 'schedule.status.scheduled',
+      reserved: 'schedule.status.awaitingConfirmation',
+      pending: 'schedule.status.awaitingConfirmation',
+      authorized: 'schedule.status.awaitingConfirmation',
+      cancelled: 'schedule.status.cancelled',
+      enroute: 'schedule.status.onTheWay',
+    };
+    const statusLabelKey = statusLabelKeyByStatus[displayStatus];
+    const label = statusLabelKey ? t(statusLabelKey) : displayStatus ? displayStatus : t('schedule.status.pending');
     switch (displayStatus) {
       case 'confirmed':
-        return <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">Confirmed</Badge>;
+        return (
+          <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200" title={label}>
+            {label}
+          </Badge>
+        );
       case 'paid':
       case 'delivered':
-        return <Badge className="bg-green-100 text-green-700 border-green-200">Ready to drop</Badge>;
+        return (
+          <Badge className="bg-green-100 text-green-700 border-green-200" title={label}>
+            {label}
+          </Badge>
+        );
       case 'awaiting_pickup':
-        return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100">Scheduled</Badge>;
+        return (
+          <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100" title={label}>
+            {label}
+          </Badge>
+        );
       case 'reserved':
       case 'pending':
       case 'authorized':
-        return <Badge variant="secondary">Awaiting confirmation</Badge>;
+        return (
+          <Badge variant="secondary" title={label}>
+            {label}
+          </Badge>
+        );
       case 'cancelled':
-        return <Badge className="bg-red-100 text-red-700 border-red-200">Cancelled</Badge>;
+        return (
+          <Badge className="bg-red-100 text-red-700 border-red-200" title={label}>
+            {label}
+          </Badge>
+        );
       case 'enroute':
-        return <Badge className="bg-blue-100 text-blue-700 border-blue-200">On the way</Badge>;
+        return (
+          <Badge className="bg-blue-100 text-blue-700 border-blue-200" title={label}>
+            {label}
+          </Badge>
+        );
       default:
-        return <Badge variant="outline" className="text-gray-600 capitalize">{displayStatus || 'pending'}</Badge>;
+        return (
+          <Badge variant="outline" className="max-w-full text-gray-600" title={label}>
+            <span className="block max-w-[220px] truncate sm:max-w-none">{label}</span>
+          </Badge>
+        );
     }
   };
 
@@ -887,6 +1032,42 @@ const FarmerDeliverySchedule: React.FC = () => {
     const sellerPickups = pickups.filter((pickup) => !pickup.sellerId || pickup.sellerId === sellerId);
     const latestPickup = sellerPickups[sellerPickups.length - 1];
     const tracking = order.logistics?.tracking?.latest;
+    const storedPickupMethod = pickupMethods[orderId] || 'courier';
+    const pickupMethod = pickupDropoffEnabled ? storedPickupMethod : 'courier';
+    const pickupSelection = pickupSelections[orderId];
+    const pickupMapCard = pickupMapUrl ? (
+      <button
+        type="button"
+        onClick={() => {
+          try {
+            const url = new URL(pickupMapUrl);
+            url.searchParams.set('tradeId', orderId);
+            openMapPopup(url.toString(), 'yamato-pickup-map');
+          } catch {
+            openMapPopup(pickupMapUrl, 'yamato-pickup-map');
+          }
+        }}
+        className="group relative flex min-h-28 w-full flex-col items-start justify-between gap-2 rounded-lg border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-amber-50 px-4 py-3 text-left transition hover:border-emerald-300 sm:flex-row sm:items-center"
+        aria-label={t('schedule.logistics.pickupMapCta')}
+      >
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-gray-800">{t('schedule.logistics.pickupMapTitle')}</p>
+          <p className="text-xs text-gray-500">{t('schedule.logistics.pickupMapHint')}</p>
+        </div>
+        <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
+          <MapPin className="h-4 w-4" />
+          <span>{t('schedule.logistics.pickupMapCta')}</span>
+        </div>
+      </button>
+    ) : (
+      <div className="flex min-h-28 w-full flex-col items-start justify-between gap-2 rounded-lg border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-left sm:flex-row sm:items-center">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-gray-700">{t('schedule.logistics.pickupMapTitle')}</p>
+          <p className="text-xs text-gray-400">{t('schedule.logistics.pickupMapUnavailable')}</p>
+        </div>
+        <MapPin className="h-4 w-4 text-gray-400" />
+      </div>
+    );
     const form = pickupForms[orderId] || {
       customerName: sellerName,
       contactName: sellerName,
@@ -902,18 +1083,18 @@ const FarmerDeliverySchedule: React.FC = () => {
     const hasLabel = Boolean(fileNo || obtNumbers.length);
 
     return (
-      <div className="space-y-4">
+      <div className="space-y-4 overflow-x-hidden">
         <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-2">
-          <div className="flex items-start justify-between gap-3">
-            <div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div className="min-w-0">
               <p className="text-sm font-semibold text-gray-900">#{orderId}</p>
-              <p className="text-xs text-gray-500">{delivery.items.join(' • ')}</p>
+              <p className="text-xs text-gray-500 break-words">{delivery.items.join(' • ')}</p>
             </div>
-            {statusBadge(delivery.status, delivery.deliveryStatus)}
+            <div className="shrink-0">{statusBadge(delivery.status, delivery.deliveryStatus)}</div>
           </div>
           <div className="flex items-center gap-2 text-xs text-gray-500">
             <MapPin className="w-3 h-3" />
-            <span>{delivery.destination || t('checkout.addresses.defaultLabel')}</span>
+            <span className="min-w-0 break-words">{delivery.destination || t('checkout.addresses.defaultLabel')}</span>
           </div>
           {delivery.createdAt ? (
             <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -924,7 +1105,7 @@ const FarmerDeliverySchedule: React.FC = () => {
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
             <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
               <span className="flex h-6 w-6 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-700">
                 1
@@ -962,7 +1143,7 @@ const FarmerDeliverySchedule: React.FC = () => {
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
             <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
               <span className="flex h-6 w-6 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-700">
                 2
@@ -975,7 +1156,7 @@ const FarmerDeliverySchedule: React.FC = () => {
           </div>
           <p className="text-xs text-gray-500">{t('schedule.stepLabelDesc')}</p>
           {hasLabel ? (
-            <div className="space-y-1 text-xs text-gray-600">
+            <div className="space-y-1 text-xs text-gray-600 break-words">
               {fileNo && (
                 <p>
                   <span className="font-semibold text-gray-700">{t('schedule.logistics.fileNo')}:</span> {fileNo}
@@ -1018,7 +1199,7 @@ const FarmerDeliverySchedule: React.FC = () => {
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
             <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
               <span className="flex h-6 w-6 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-700">
                 3
@@ -1044,124 +1225,194 @@ const FarmerDeliverySchedule: React.FC = () => {
           ) : (
             <p className="text-xs text-gray-500">{t('schedule.logistics.noPickup')}</p>
           )}
-          <div className="grid gap-2 md:grid-cols-2">
-            <div className="space-y-1">
-              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupCustomerName')}</p>
-              <Input
-                value={form.customerName}
-                onChange={(event) =>
-                  setPickupForms((prev) => ({
-                    ...prev,
-                    [orderId]: { ...form, customerName: event.target.value },
-                  }))
-                }
-                placeholder={t('schedule.logistics.pickupCustomerName')}
-                className="h-9"
-              />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupContactName')}</p>
-              <Input
-                value={form.contactName}
-                onChange={(event) =>
-                  setPickupForms((prev) => ({
-                    ...prev,
-                    [orderId]: { ...form, contactName: event.target.value },
-                  }))
-                }
-                placeholder={t('schedule.logistics.pickupContactName')}
-                className="h-9"
-              />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupTel')}</p>
-              <Input
-                value={form.contactTel}
-                onChange={(event) =>
-                  setPickupForms((prev) => ({
-                    ...prev,
-                    [orderId]: { ...form, contactTel: normalizeTaiwanTelInput(event.target.value) },
-                  }))
-                }
-                placeholder="02-12345678"
-                className="h-9"
-              />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupMobile')}</p>
-              <Input
-                value={form.contactMobile}
-                onChange={(event) =>
-                  setPickupForms((prev) => ({
-                    ...prev,
-                    [orderId]: { ...form, contactMobile: formatTaiwanMobileInput(event.target.value) },
-                  }))
-                }
-                placeholder="0912-345-678"
-                className="h-9"
-              />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupNormalQuantity')}</p>
-              <Input
-                value={form.normalQuantity}
-                onChange={(event) =>
-                  setPickupForms((prev) => ({
-                    ...prev,
-                    [orderId]: { ...form, normalQuantity: event.target.value.replace(/[^0-9]/g, '') },
-                  }))
-                }
-                placeholder="0"
-                className="h-9"
-                inputMode="numeric"
-              />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupColdQuantity')}</p>
-              <Input
-                value={form.coldQuantity}
-                onChange={(event) =>
-                  setPickupForms((prev) => ({
-                    ...prev,
-                    [orderId]: { ...form, coldQuantity: event.target.value.replace(/[^0-9]/g, '') },
-                  }))
-                }
-                placeholder="0"
-                className="h-9"
-                inputMode="numeric"
-              />
-            </div>
-            <div className="space-y-1">
-              <p className="text-xs text-gray-500">{t('schedule.logistics.pickupFreezeQuantity')}</p>
-              <Input
-                value={form.freezeQuantity}
-                onChange={(event) =>
-                  setPickupForms((prev) => ({
-                    ...prev,
-                    [orderId]: { ...form, freezeQuantity: event.target.value.replace(/[^0-9]/g, '') },
-                  }))
-                }
-                placeholder="0"
-                className="h-9"
-                inputMode="numeric"
-              />
-            </div>
-            <div className="md:col-span-2 text-xs text-amber-600">
-              {t('schedule.logistics.pickupQuantityHint')}
-            </div>
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-gray-600">{t('schedule.logistics.pickupMethodTitle')}</p>
+            <RadioGroup
+              value={pickupMethod}
+              onValueChange={(value) => {
+                if (value === 'dropoff' && !pickupDropoffEnabled) return;
+                setPickupMethods((prev) => ({ ...prev, [orderId]: value as PickupMethod }));
+              }}
+              className="grid gap-2 md:grid-cols-2"
+            >
+              <Label
+                htmlFor={`pickup-method-${orderId}-courier`}
+                className={cn(
+                  'flex cursor-pointer items-start gap-3 rounded-md border p-3 text-left',
+                  pickupMethod === 'courier' ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200'
+                )}
+              >
+                <RadioGroupItem id={`pickup-method-${orderId}-courier`} value="courier" className="mt-1" />
+                <div>
+                  <p className="text-xs font-semibold text-gray-800">{t('schedule.logistics.pickupMethodCourier')}</p>
+                  <p className="text-xs text-gray-500">{t('schedule.logistics.pickupMethodCourierDesc')}</p>
+                </div>
+              </Label>
+              <Label
+                htmlFor={`pickup-method-${orderId}-dropoff`}
+                className={cn(
+                  'flex cursor-pointer items-start gap-3 rounded-md border p-3 text-left',
+                  pickupMethod === 'dropoff' ? 'border-emerald-200 bg-emerald-50' : 'border-gray-200',
+                  !pickupDropoffEnabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                )}
+              >
+                <RadioGroupItem
+                  id={`pickup-method-${orderId}-dropoff`}
+                  value="dropoff"
+                  className="mt-1"
+                  disabled={!pickupDropoffEnabled}
+                />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-semibold text-gray-800">{t('schedule.logistics.pickupMethodDropoff')}</p>
+                    {!pickupDropoffEnabled ? (
+                      <Badge className="bg-amber-100 text-amber-700 border-amber-200">
+                        {t('common.comingSoon')}
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <p className="text-xs text-gray-500">{t('schedule.logistics.pickupMethodDropoffDesc')}</p>
+                </div>
+              </Label>
+            </RadioGroup>
           </div>
-          <Button
-            size="sm"
-            onClick={() => handlePickupRequest(order)}
-            disabled={!canRunLogistics || actions.pickup}
-          >
-            {actions.pickup ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
-            {t('schedule.logistics.requestPickup')}
-          </Button>
+
+          {pickupMethod === 'courier' ? (
+            <>
+              <div className="grid gap-2 md:grid-cols-2">
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500">{t('schedule.logistics.pickupCustomerName')}</p>
+                  <Input
+                    value={form.customerName}
+                    onChange={(event) =>
+                      setPickupForms((prev) => ({
+                        ...prev,
+                        [orderId]: { ...form, customerName: event.target.value },
+                      }))
+                    }
+                    placeholder={t('schedule.logistics.pickupCustomerName')}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500">{t('schedule.logistics.pickupContactName')}</p>
+                  <Input
+                    value={form.contactName}
+                    onChange={(event) =>
+                      setPickupForms((prev) => ({
+                        ...prev,
+                        [orderId]: { ...form, contactName: event.target.value },
+                      }))
+                    }
+                    placeholder={t('schedule.logistics.pickupContactName')}
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500">{t('schedule.logistics.pickupTel')}</p>
+                  <Input
+                    value={form.contactTel}
+                    onChange={(event) =>
+                      setPickupForms((prev) => ({
+                        ...prev,
+                        [orderId]: { ...form, contactTel: normalizeTaiwanTelInput(event.target.value) },
+                      }))
+                    }
+                    placeholder="02-12345678"
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500">{t('schedule.logistics.pickupMobile')}</p>
+                  <Input
+                    value={form.contactMobile}
+                    onChange={(event) =>
+                      setPickupForms((prev) => ({
+                        ...prev,
+                        [orderId]: { ...form, contactMobile: formatTaiwanMobileInput(event.target.value) },
+                      }))
+                    }
+                    placeholder="0912-345-678"
+                    className="h-9"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500">{t('schedule.logistics.pickupNormalQuantity')}</p>
+                  <Input
+                    value={form.normalQuantity}
+                    onChange={(event) =>
+                      setPickupForms((prev) => ({
+                        ...prev,
+                        [orderId]: { ...form, normalQuantity: event.target.value.replace(/[^0-9]/g, '') },
+                      }))
+                    }
+                    placeholder="0"
+                    className="h-9"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500">{t('schedule.logistics.pickupColdQuantity')}</p>
+                  <Input
+                    value={form.coldQuantity}
+                    onChange={(event) =>
+                      setPickupForms((prev) => ({
+                        ...prev,
+                        [orderId]: { ...form, coldQuantity: event.target.value.replace(/[^0-9]/g, '') },
+                      }))
+                    }
+                    placeholder="0"
+                    className="h-9"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-gray-500">{t('schedule.logistics.pickupFreezeQuantity')}</p>
+                  <Input
+                    value={form.freezeQuantity}
+                    onChange={(event) =>
+                      setPickupForms((prev) => ({
+                        ...prev,
+                        [orderId]: { ...form, freezeQuantity: event.target.value.replace(/[^0-9]/g, '') },
+                      }))
+                    }
+                    placeholder="0"
+                    className="h-9"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="md:col-span-2 text-xs text-amber-600">
+                  {t('schedule.logistics.pickupQuantityHint')}
+                </div>
+              </div>
+              <Button
+                size="sm"
+                onClick={() => handlePickupRequest(order)}
+                disabled={!canRunLogistics || actions.pickup}
+              >
+                {actions.pickup ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+                {t('schedule.logistics.requestPickup')}
+              </Button>
+            </>
+          ) : (
+            <div className="space-y-3">
+              {pickupMapCard}
+              {pickupSelection ? (
+                <div className="rounded-md border border-emerald-200 bg-white px-3 py-2 text-xs text-gray-600">
+                  <p className="font-semibold text-emerald-700">{pickupSelection.officeName || t('schedule.logistics.pickupMapTitle')}</p>
+                  {pickupSelection.officeNo ? <p>{t('schedule.logistics.pickupSelectionCode', { code: pickupSelection.officeNo })}</p> : null}
+                  {pickupSelection.officeAddress ? <p>{pickupSelection.officeAddress}</p> : null}
+                </div>
+              ) : null}
+              <div className="rounded-md border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+                {t('schedule.logistics.pickupMethodDropoffNote')}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
             <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
               <span className="flex h-6 w-6 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-xs font-semibold text-emerald-700">
                 4
@@ -1171,7 +1422,7 @@ const FarmerDeliverySchedule: React.FC = () => {
           </div>
           <p className="text-xs text-gray-500">{t('schedule.stepStatusDesc')}</p>
           {tracking ? (
-            <div className="text-xs text-gray-600 space-y-1">
+            <div className="text-xs text-gray-600 space-y-1 break-words">
               <p>
                 <span className="font-semibold text-gray-700">{t('schedule.logistics.latestStatus')}:</span> {tracking.statusName || t('schedule.logistics.statusUnknown')}
               </p>
@@ -1229,7 +1480,7 @@ const FarmerDeliverySchedule: React.FC = () => {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-full overflow-x-hidden">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">{t('schedule.title')}</h1>
@@ -1299,16 +1550,16 @@ const FarmerDeliverySchedule: React.FC = () => {
                       onClick={() => selectOrderId(isSelected ? null : delivery.orderId)}
                     >
                       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                        <div className="flex items-start gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
                           <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
                             <PackageCheck className="w-5 h-5 text-green-700" />
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <p className="font-semibold text-gray-900">#{delivery.orderId}</p>
-                            <p className="text-sm text-gray-600">{delivery.items.join(' • ')}</p>
+                            <p className="text-sm text-gray-600 break-words">{delivery.items.join(' • ')}</p>
                             <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
                               <MapPin className="w-3 h-3" />
-                              <span>{delivery.destination || t('checkout.addresses.defaultLabel')}</span>
+                              <span className="min-w-0 break-words">{delivery.destination || t('checkout.addresses.defaultLabel')}</span>
                             </div>
                           </div>
                         </div>
@@ -1316,7 +1567,9 @@ const FarmerDeliverySchedule: React.FC = () => {
                           <div className="flex flex-wrap items-center gap-2">
                             {statusBadge(delivery.status, delivery.deliveryStatus)}
                             {delivery.paymentMethod && (
-                              <Badge variant="outline" className="text-xs uppercase">{delivery.paymentMethod}</Badge>
+                              <Badge variant="outline" className="max-w-full text-xs uppercase">
+                                <span className="block max-w-[180px] truncate">{delivery.paymentMethod}</span>
+                              </Badge>
                             )}
                           </div>
                         </div>
@@ -1357,16 +1610,16 @@ const FarmerDeliverySchedule: React.FC = () => {
                       onClick={() => selectOrderId(isSelected ? null : delivery.orderId)}
                     >
                       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                        <div className="flex items-start gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
                           <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center">
                             <PackageCheck className="w-5 h-5 text-green-700" />
                           </div>
-                          <div>
+                          <div className="min-w-0">
                             <p className="font-semibold text-gray-900">#{delivery.orderId}</p>
-                            <p className="text-sm text-gray-600">{delivery.items.join(' • ')}</p>
+                            <p className="text-sm text-gray-600 break-words">{delivery.items.join(' • ')}</p>
                             <div className="flex items-center gap-2 text-xs text-gray-500 mt-1">
                               <MapPin className="w-3 h-3" />
-                              <span>{delivery.destination || t('checkout.addresses.defaultLabel')}</span>
+                              <span className="min-w-0 break-words">{delivery.destination || t('checkout.addresses.defaultLabel')}</span>
                             </div>
                           </div>
                         </div>
@@ -1374,7 +1627,9 @@ const FarmerDeliverySchedule: React.FC = () => {
                           <div className="flex flex-wrap items-center gap-2">
                             {statusBadge(delivery.status, delivery.deliveryStatus)}
                             {delivery.paymentMethod && (
-                              <Badge variant="outline" className="text-xs uppercase">{delivery.paymentMethod}</Badge>
+                              <Badge variant="outline" className="max-w-full text-xs uppercase">
+                                <span className="block max-w-[180px] truncate">{delivery.paymentMethod}</span>
+                              </Badge>
                             )}
                           </div>
                         </div>
@@ -1468,7 +1723,7 @@ const FarmerDeliverySchedule: React.FC = () => {
             <div className="rounded-md border border-gray-200 p-3 space-y-2">
               <p className="text-xs font-semibold text-gray-700">{t('schedule.logistics.labelDialogStep2')}</p>
               {labelDialogHasLabel ? (
-                <div className="space-y-1 text-xs text-gray-600">
+                <div className="space-y-1 text-xs text-gray-600 break-words">
                   <p className="text-xs text-gray-500">{t('schedule.logistics.labelDialogDownloadHint')}</p>
                   {labelDialogFileNo ? (
                     <p>

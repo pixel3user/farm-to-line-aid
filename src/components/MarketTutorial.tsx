@@ -7,6 +7,7 @@ import { Progress } from '@/components/ui/progress';
 import { Info } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import MarketSpotlightTour from '@/components/MarketSpotlightTour';
+import { useAuth } from '@/contexts/AuthContext';
 
 const LOCAL_STORAGE_KEY = 'farm2market_market_tutorial';
 const DEMO_LOCK_KEY = 'farm2market_market_demo_active';
@@ -16,6 +17,7 @@ const DEMO_SUBSTEP_KEY = 'farm2market_market_demo_substep';
 
 const MarketTutorial: React.FC = () => {
   const { t } = useLanguage();
+  const { user } = useAuth();
 
   const steps = useMemo(
     () => [
@@ -49,6 +51,23 @@ const MarketTutorial: React.FC = () => {
 
   const [isOpen, setIsOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
+  const [shouldShowPrompt, setShouldShowPrompt] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!user || user.role !== 'market') {
+      setShouldShowPrompt(false);
+      return;
+    }
+    const storageKey = user.id ? `${LOCAL_STORAGE_KEY}:${user.id}` : LOCAL_STORAGE_KEY;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      const parsed = raw ? JSON.parse(raw) : {};
+      setShouldShowPrompt(parsed.dismissed !== true);
+    } catch {
+      setShouldShowPrompt(true);
+    }
+  }, [user?.id, user?.role]);
 
   const startTutorial = () => {
     setCurrentStep(0);
@@ -70,22 +89,15 @@ const MarketTutorial: React.FC = () => {
   };
 
   const dismiss = () => {
+    const storageKey = user?.id ? `${LOCAL_STORAGE_KEY}:${user.id}` : LOCAL_STORAGE_KEY;
     try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify({ dismissed: true }));
+      localStorage.setItem(storageKey, JSON.stringify({ dismissed: true }));
     } catch {
       // ignore
     }
+    setShouldShowPrompt(false);
+    setIsOpen(false);
   };
-
-  const shouldShowPrompt = (() => {
-    try {
-      const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : {};
-      return parsed.dismissed !== true;
-    } catch {
-      return true;
-    }
-  })();
 
   return (
     <>
@@ -177,7 +189,7 @@ const MarketTutorial: React.FC = () => {
             </div>
 
             <div className="flex items-center justify-between">
-              <Button variant="ghost" onClick={() => setIsOpen(false)}>
+              <Button variant="ghost" onClick={dismiss}>
                 {t('tutorial.market.prompt.later')}
               </Button>
               <div className="space-x-0 sm:space-x-2 flex flex-col sm:flex-row gap-2 sm:gap-0">

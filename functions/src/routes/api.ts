@@ -460,7 +460,7 @@ const getArrayTimestamp = async () => {
   return admin.firestore.Timestamp.now();
 };
 
-const getAuthorizedUserId = async (req: Request): Promise<string | null> => {
+export const getAuthorizedUserId = async (req: Request): Promise<string | null> => {
   const authHeader = req.headers.authorization || "";
   const match = authHeader.match(/^Bearer (.+)$/i);
   if (match) {
@@ -1210,21 +1210,55 @@ const getFrontendBaseUrl = () =>
   (runtimeConfig.liffUrl && !/liff\.line\.me/i.test(runtimeConfig.liffUrl) ? runtimeConfig.liffUrl : undefined) ||
   'https://farm2market.tw';
 
+const getLineDeepLinkBaseUrl = () =>
+  runtimeConfig.liffUrl ||
+  runtimeConfig.frontendBaseUrl ||
+  process.env.FRONTEND_BASE_URL ||
+  'https://farm2market.tw';
+
+const buildLineDeepLinkUrl = (pathWithQuery: string) => {
+  const base = String(getLineDeepLinkBaseUrl() || '').trim();
+  const normalizedState = pathWithQuery.startsWith('/') ? pathWithQuery : `/${pathWithQuery}`;
+  if (!base) return normalizedState;
+  try {
+    const url = new URL(base);
+    if (/liff\.line\.me$/i.test(url.host)) {
+      url.searchParams.set('liff.state', normalizedState);
+      return url.toString();
+    }
+  } catch {}
+  return `${base.replace(/\/$/, '')}${normalizedState}`;
+};
+
 const LINE_FILE_MESSAGE_LIMIT_BYTES = 10 * 1024 * 1024;
+const LINE_RECIPIENT_ID_RE = /^[UCR][0-9a-f]{32}$/i;
+
+const isValidLineRecipientId = (value: unknown) => {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  return Boolean(trimmed) && LINE_RECIPIENT_ID_RE.test(trimmed);
+};
+
+const resolveLineRecipientId = (...candidates: Array<unknown>) => {
+  for (const candidate of candidates) {
+    if (isValidLineRecipientId(candidate)) {
+      return (candidate as string).trim();
+    }
+  }
+  return null;
+};
 
 const buildSellerScheduleUrl = (orderId: string, fileNo?: string) => {
-  const base = (getFrontendBaseUrl() || '').replace(/\/$/, '');
   const params = new URLSearchParams({ order: orderId });
   if (fileNo) {
     params.set('label', fileNo);
     params.set('dialog', 'label');
   }
-  return `${base}/farmer/delivery?${params.toString()}`;
+  return buildLineDeepLinkUrl(`/farmer/delivery?${params.toString()}`);
 };
 
 const buildBuyerScheduleUrl = (orderId: string) => {
-  const base = (getFrontendBaseUrl() || '').replace(/\/$/, '');
-  return `${base}/market/schedule?order=${encodeURIComponent(orderId)}`;
+  return buildLineDeepLinkUrl(`/market/schedule?order=${encodeURIComponent(orderId)}`);
 };
 
 const prepareLineLabelFileMessage = async (params: { orderId: string; fileNo: string }) => {
@@ -1245,13 +1279,17 @@ const prepareLineLabelFileMessage = async (params: { orderId: string; fileNo: st
   const bucket = admin.storage().bucket();
   const fileId = crypto.randomUUID();
   const fileName = `yamato-label-${params.fileNo || fileId}.pdf`;
+  const contentDisposition = `attachment; filename="${fileName.replace(/"/g, '')}"`;
   const filePath = `yamato_labels/${params.orderId}/${fileId}.pdf`;
   const file = bucket.file(filePath);
 
   await file.save(fileBuffer, {
     contentType: result.contentType || 'application/pdf',
     resumable: false,
-    metadata: { cacheControl: 'public,max-age=3600' },
+    metadata: {
+      cacheControl: 'public,max-age=3600',
+      contentDisposition,
+    },
   });
 
   let signedUrl: string;
@@ -1259,13 +1297,14 @@ const prepareLineLabelFileMessage = async (params: { orderId: string; fileNo: st
     const [url] = await file.getSignedUrl({
       action: 'read',
       expires: Date.now() + 60 * 60 * 1000,
+      responseDisposition: contentDisposition,
     });
     signedUrl = url;
   } catch (signError: any) {
     const message = String(signError?.message || '');
     if (message.includes('iam.serviceAccounts.signBlob') || message.includes('SigningError')) {
       await file.makePublic();
-      signedUrl = `https://storage.googleapis.com/${bucket.name}/${encodeURIComponent(filePath)}`;
+      signedUrl = `https://storage.googleapis.com/${bucket.name}/${encodeURI(filePath)}`;
     } else {
       throw signError;
     }
@@ -1275,12 +1314,6 @@ const prepareLineLabelFileMessage = async (params: { orderId: string; fileNo: st
     url: signedUrl,
     fileName,
     fileSize,
-    message: {
-      type: 'file',
-      originalContentUrl: signedUrl,
-      fileName,
-      fileSize,
-    } as LineMessage,
   };
 };
 
@@ -1384,37 +1417,69 @@ const notifySellersLabelReady = async (
   );
   const recipients = resolved.filter(Boolean);
   if (!recipients.length) return;
-  const scheduleUrl = buildSellerScheduleUrl(params.orderId, params.fileNo);
-  const message = buildYamatoLabelMessage({
-    orderId: params.orderId,
-    fileNo: params.fileNo,
-    obtNumbers: params.obtNumbers,
-    scheduleUrl,
-  });
-  let fileMessage: LineMessage | null = null;
+  const fallbackScheduleUrl = buildSellerScheduleUrl(params.orderId, params.fileNo);
+  let scheduleUrl = fallbackScheduleUrl;
   if (params.fileNo) {
     try {
       const filePayload = await prepareLineLabelFileMessage({
         orderId: params.orderId,
         fileNo: params.fileNo,
       });
-      fileMessage = filePayload.message;
+      scheduleUrl = filePayload.url || fallbackScheduleUrl;
     } catch (error) {
-      console.warn('Failed to prepare LINE label file message', error);
+      console.warn('Failed to prepare LINE label download URL', error);
     }
   }
+  const message = buildYamatoLabelMessage({
+    orderId: params.orderId,
+    fileNo: params.fileNo,
+    obtNumbers: params.obtNumbers,
+    scheduleUrl,
+  });
   const bot = new LineBotAPI();
-  const messages = fileMessage ? [message, fileMessage] : [message];
-  await Promise.all(recipients.map((id) => bot.pushMessage(id, messages)));
+  await Promise.all(
+    recipients.map((id) => {
+      if (!isValidLineRecipientId(id)) {
+        console.warn('Skipped seller LINE notification due to invalid recipient ID', {
+          sellerIdSuffix: String(id).slice(-6),
+          orderId: params.orderId,
+        });
+        return Promise.resolve();
+      }
+      return bot.pushMessage(id, [message]);
+    })
+  );
 };
 
 const notifyBuyerLabelReady = async (
   order: OrderRecord,
-  params: { orderId: string; scheduleUrl: string }
+  params: { orderId: string; scheduleUrl: string; fileNo?: string }
 ) => {
-  const buyerId = order.buyer?.userId;
-  if (!buyerId) return;
+  const buyerRecipientId = resolveLineRecipientId(
+    (order as any)?.buyer?.lineUserId,
+    (order as any)?.buyer?.lineId,
+    (order as any)?.buyer?.userId
+  );
+  if (!buyerRecipientId) {
+    console.warn('Skipped buyer LINE label notification: invalid recipient ID', {
+      orderId: params.orderId,
+      buyerIdSuffix: String((order as any)?.buyer?.userId || '').slice(-6),
+    });
+    return;
+  }
   const bot = new LineBotAPI();
+  let downloadUrl: string | null = null;
+  if (params.fileNo) {
+    try {
+      const filePayload = await prepareLineLabelFileMessage({
+        orderId: params.orderId,
+        fileNo: params.fileNo,
+      });
+      downloadUrl = filePayload.url || null;
+    } catch (error) {
+      console.warn('Failed to prepare buyer label download URL', error);
+    }
+  }
   const message: LineMessage = {
     type: "flex",
     altText: `訂單 ${params.orderId} 已確認`,
@@ -1437,7 +1502,9 @@ const notifyBuyerLabelReady = async (
         contents: [
           {
             type: "text",
-            text: "託運單已建立，配送排程更新完成。",
+            text: downloadUrl
+              ? "託運單已建立，點擊下方按鈕即可下載 PDF。"
+              : "託運單已建立，配送排程更新完成。",
             wrap: true,
             size: "sm",
             color: "#0f172a",
@@ -1449,10 +1516,23 @@ const notifyBuyerLabelReady = async (
         layout: "vertical",
         spacing: "sm",
         contents: [
+          downloadUrl
+            ? {
+                type: "button",
+                style: "primary",
+                color: "#0ea5e9",
+                height: "sm",
+                action: {
+                  type: "uri",
+                  label: "下載託運單 PDF",
+                  uri: downloadUrl,
+                },
+              }
+            : null,
           {
             type: "button",
-            style: "primary",
-            color: "#0ea5e9",
+            style: downloadUrl ? "secondary" : "primary",
+            color: downloadUrl ? "#e2e8f0" : "#0ea5e9",
             height: "sm",
             action: {
               type: "uri",
@@ -1460,12 +1540,12 @@ const notifyBuyerLabelReady = async (
               uri: params.scheduleUrl,
             },
           },
-        ],
+        ].filter(Boolean),
       },
     },
   };
 
-  await bot.pushMessage(buyerId, [message]);
+  await bot.pushMessage(buyerRecipientId, [message]);
 };
 
 const respondYamatoJson = (res: Response, result: { ok: boolean; status: number; data: any }) => {
@@ -2078,6 +2158,11 @@ router.post('/orders/:orderId/confirm', async (req: Request, res: Response) => {
       const bot = new LineBotAPI();
       const sellerIds = (order.sellerIds || []).filter(Boolean);
       const buyerId = order.buyer?.userId;
+      const buyerRecipientId = resolveLineRecipientId(
+        (order as any)?.buyer?.lineUserId,
+        (order as any)?.buyer?.lineId,
+        buyerId
+      );
       const itemsSummary = (order.items || [])
         .slice(0, 6)
         .map((item) => `${item.name || '商品'} x${item.quantity || 1}`)
@@ -2294,7 +2379,7 @@ router.post('/orders/:orderId/confirm', async (req: Request, res: Response) => {
         sellerIds.length
           ? Promise.all(sellerIds.map((id) => bot.pushMessage(id, [sellerMessage, pickupDatesMessage])))
           : Promise.resolve(),
-        buyerId ? bot.pushMessage(buyerId, [buyerMessage]) : Promise.resolve(),
+        buyerRecipientId ? bot.pushMessage(buyerRecipientId, [buyerMessage]) : Promise.resolve(),
       ]);
     } catch (notifyError) {
       console.warn('Notification failed after confirmation', notifyError);
@@ -2322,8 +2407,13 @@ router.post('/orders/:orderId/decline', async (req: Request, res: Response) => {
     try {
       const bot = new LineBotAPI();
       const buyerId = order.buyer?.userId;
-      if (buyerId) {
-        await bot.pushMessage(buyerId, [
+      const buyerRecipientId = resolveLineRecipientId(
+        (order as any)?.buyer?.lineUserId,
+        (order as any)?.buyer?.lineId,
+        buyerId
+      );
+      if (buyerRecipientId) {
+        await bot.pushMessage(buyerRecipientId, [
           {
             type: "text",
             text: `訂單 ${orderId} 未被接受，請重新下單或聯絡農友。`,
@@ -2512,6 +2602,213 @@ router.get('/payments/line-pay/status', (_req: Request, res: Response) => {
 
 router.get('/logistics/yamato/config', (_req: Request, res: Response) => {
   res.json(getYamatoConfigSummary());
+});
+
+const resolveApiBaseUrl = (req: Request) => {
+  const explicit = (runtimeConfig.apiBaseUrl || '').trim();
+  if (explicit) return explicit.replace(/\/$/, '');
+  const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim();
+  const host = (req.get('x-forwarded-host') || req.get('host') || '').split(',')[0].trim();
+  return host ? `${proto}://${host}` : '';
+};
+
+const resolveFrontendOrigin = (req: Request) => {
+  const frontend = (runtimeConfig.frontendBaseUrl || '').trim();
+  if (frontend) {
+    try {
+      return new URL(frontend).origin;
+    } catch {}
+  }
+  return '*';
+};
+
+const buildYamatoMapRedirect = (
+  baseUrl: string,
+  query: Record<string, unknown>,
+  excludedKeys: string[] = []
+) => {
+  const target = new URL(baseUrl);
+  Object.entries(query).forEach(([key, value]) => {
+    if (excludedKeys.includes(key)) return;
+    if (value === undefined || value === null) return;
+    if (Array.isArray(value)) {
+      value.forEach((entry) => {
+        if (entry === undefined || entry === null) return;
+        target.searchParams.append(key, String(entry));
+      });
+      return;
+    }
+    target.searchParams.set(key, String(value));
+  });
+  return target.toString();
+};
+
+const getMapField = (payload: Record<string, any>, ...keys: string[]) => {
+  for (const key of keys) {
+    if (payload[key] !== undefined && payload[key] !== null) {
+      return String(payload[key]);
+    }
+    const lowerKey = key.toLowerCase();
+    if (payload[lowerKey] !== undefined && payload[lowerKey] !== null) {
+      return String(payload[lowerKey]);
+    }
+    const upperKey = key.toUpperCase();
+    if (payload[upperKey] !== undefined && payload[upperKey] !== null) {
+      return String(payload[upperKey]);
+    }
+  }
+  return '';
+};
+
+const renderMapReturnPage = (
+  req: Request,
+  res: Response,
+  message: Record<string, unknown>
+) => {
+  const targetOrigin = resolveFrontendOrigin(req);
+  const payload = {
+    ...message,
+    meta: { ts: Date.now() },
+  };
+  const payloadJson = JSON.stringify(payload);
+  const payloadEncoded = encodeURIComponent(payloadJson);
+  const payloadPreview = payloadJson
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+  const relayUrl =
+    targetOrigin && targetOrigin !== '*'
+      ? `${targetOrigin.replace(/\/$/, '')}/logistics/yamato/map/return#${payloadEncoded}`
+      : '';
+  const apiBase = resolveApiBaseUrl(req);
+  const scriptSrc = apiBase
+    ? `${apiBase}/api/logistics/yamato/map/return.js`
+    : '/api/logistics/yamato/map/return.js';
+  const html = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Yamato Map Selection</title>
+    <style>
+      body { font-family: Arial, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 24px; }
+      .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; }
+      .title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+      .hint { font-size: 12px; color: #64748b; }
+      pre { white-space: pre-wrap; background: #f1f5f9; padding: 12px; border-radius: 8px; font-size: 12px; }
+    </style>
+  </head>
+  <body data-relay-url="${relayUrl}" data-target-origin="${targetOrigin}">
+    <div class="card">
+      <div class="title">Selection received</div>
+      <div class="hint">You can close this window now.</div>
+      <pre id="payload" data-payload="${payloadEncoded}">${payloadPreview}</pre>
+    </div>
+    <script src="${scriptSrc}"></script>
+  </body>
+</html>`;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).send(html);
+};
+
+router.get('/logistics/yamato/map/return.js', (_req: Request, res: Response) => {
+  const script = `(function(){function a(){var e=document.getElementById("payload");if(!e)return null;var t=e.getAttribute("data-payload");if(!t)return null;try{return JSON.parse(decodeURIComponent(t))}catch(n){return null}}var e=a();if(!e)return;var t=document.body?document.body.getAttribute("data-target-origin"):"*";try{if(window.opener&&typeof window.opener.postMessage==="function"){window.opener.postMessage(e,t||"*")}}catch(n){}try{if("BroadcastChannel"in window){var o=new BroadcastChannel("yamato-map");o.postMessage(e);o.close()}}catch(n){}try{localStorage.setItem("yamato-map-selection",JSON.stringify(e));localStorage.removeItem("yamato-map-selection")}catch(n){}var r=document.body?document.body.getAttribute("data-relay-url"):"";if(!window.opener&&r){try{window.location.replace(r);return}catch(n){}}setTimeout(function(){try{window.close()}catch(n){}},120)})();`;
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.status(200).send(script);
+});
+
+router.get('/logistics/yamato/map/pickup', (req: Request, res: Response) => {
+  const config = getYamatoConfigSummary();
+  const baseUrl = config?.map?.pickup;
+  if (!baseUrl) {
+    return res.status(404).json({ error: 'Pickup map is not configured.' });
+  }
+  const pickupAuth = config?.pickupAuth || {};
+  const query: Record<string, unknown> = { ...(req.query as Record<string, unknown>) };
+  if (!query.UID && pickupAuth.uid) query.UID = pickupAuth.uid;
+  if (!query.CUST_NO && pickupAuth.custNo) query.CUST_NO = pickupAuth.custNo;
+  if (!query.PKEY && pickupAuth.pkey) query.PKEY = pickupAuth.pkey;
+  if (!query.TRADE_ID) {
+    query.TRADE_ID = typeof query.tradeId === 'string' && query.tradeId.trim()
+      ? query.tradeId
+      : `${Date.now()}`;
+  }
+  const redirectUrl = buildYamatoMapRedirect(baseUrl, query, ['tradeId']);
+  return res.redirect(302, redirectUrl);
+});
+
+router.get('/logistics/yamato/map/b2s', (req: Request, res: Response) => {
+  const config = getYamatoConfigSummary();
+  const useMobile = String(req.query?.mobile || '').toLowerCase() === '1' ||
+    String(req.query?.mobile || '').toLowerCase() === 'true';
+  const baseUrl = useMobile ? config?.map?.b2sMobile : config?.map?.b2s;
+  if (!baseUrl) {
+    return res.status(404).json({ error: 'B2S map is not configured.' });
+  }
+  const query: Record<string, unknown> = { ...(req.query as Record<string, unknown>) };
+  if (!query.CustomerID && config?.customerId) {
+    query.CustomerID = config.customerId;
+  }
+  if (!query.ReturnUrl) {
+    const apiBase = resolveApiBaseUrl(req);
+    if (apiBase) {
+      query.ReturnUrl = `${apiBase}/api/logistics/yamato/map/b2s/return`;
+    }
+  }
+  if (!query.TempVar && typeof query.tradeId === 'string' && query.tradeId.trim()) {
+    query.TempVar = query.tradeId.trim();
+  }
+  const redirectUrl = buildYamatoMapRedirect(baseUrl, query, ['mobile', 'tradeId']);
+  return res.redirect(302, redirectUrl);
+});
+
+router.all('/logistics/yamato/map/b2s/return', (req: Request, res: Response) => {
+  const payload = { ...(req.query as Record<string, unknown>), ...(req.body as Record<string, unknown>) };
+  const storeId = getMapField(payload, 'storeid', 'StoreId');
+  const storeName = getMapField(payload, 'storename', 'StoreName');
+  const storeAddress = getMapField(payload, 'storeaddress', 'StoreAddress');
+  const outside = getMapField(payload, 'outside', 'Outside');
+  const ship = getMapField(payload, 'ship', 'Ship');
+  const tempVar = getMapField(payload, 'TempVar', 'tempvar');
+  const message = {
+    source: 'yamato-map',
+    type: 'b2s',
+    tradeId: tempVar || undefined,
+    payload: {
+      storeId,
+      storeName,
+      storeAddress,
+      outside,
+      ship,
+      tempVar,
+    },
+  };
+  return renderMapReturnPage(req, res, message);
+});
+
+router.all('/logistics/yamato/map/pickup/return', (req: Request, res: Response) => {
+  const payload = { ...(req.query as Record<string, unknown>), ...(req.body as Record<string, unknown>) };
+  const tradeId = getMapField(payload, 'TRADE_ID', 'trade_id');
+  const officeNo = getMapField(payload, 'OFFICE_NO', 'office_no');
+  const officeName = getMapField(payload, 'OFFICE_NAME', 'office_name');
+  const officeAddress = getMapField(payload, 'OFFICE_ADDRESS', 'office_address');
+  const postCode = getMapField(payload, 'POSTCODE_NO', 'postcode_no');
+  const status = getMapField(payload, 'STATUS', 'status');
+  const messageText = getMapField(payload, 'MESSAGE', 'message');
+  const message = {
+    source: 'yamato-map',
+    type: 'pickup',
+    tradeId: tradeId || undefined,
+    payload: {
+      officeNo,
+      officeName,
+      officeAddress,
+      postCode,
+      status,
+      message: messageText,
+    },
+  };
+  return renderMapReturnPage(req, res, message);
 });
 
 router.post('/logistics/address/geocode', async (req: Request, res: Response) => {
@@ -2724,13 +3021,17 @@ router.post('/logistics/yamato/download-obt-line', async (req: Request, res: Res
     const bucket = admin.storage().bucket();
     const fileId = crypto.randomUUID();
     const fileName = `yamato-label-${fileNo || fileId}.pdf`;
+    const contentDisposition = `attachment; filename="${fileName.replace(/"/g, '')}"`;
     const filePath = `yamato_labels/${targetUserId}/${fileId}.pdf`;
     const file = bucket.file(filePath);
 
     await file.save(result.data, {
       contentType: result.contentType || 'application/pdf',
       resumable: false,
-      metadata: { cacheControl: 'public,max-age=3600' },
+      metadata: {
+        cacheControl: 'public,max-age=3600',
+        contentDisposition,
+      },
     });
     console.log('[download-obt-line] storage saved', {
       traceId,
@@ -2743,13 +3044,14 @@ router.post('/logistics/yamato/download-obt-line', async (req: Request, res: Res
       const [url] = await file.getSignedUrl({
         action: 'read',
         expires: Date.now() + 60 * 60 * 1000,
+        responseDisposition: contentDisposition,
       });
       signedUrl = url;
     } catch (signError: any) {
       const message = String(signError?.message || '');
       if (message.includes('iam.serviceAccounts.signBlob') || message.includes('SigningError')) {
         await file.makePublic();
-        signedUrl = `https://storage.googleapis.com/${bucket.name}/${encodeURIComponent(filePath)}`;
+        signedUrl = `https://storage.googleapis.com/${bucket.name}/${encodeURI(filePath)}`;
       } else {
         throw signError;
       }
@@ -2910,12 +3212,6 @@ router.post('/logistics/yamato/download-obt-line', async (req: Request, res: Res
 
     const bot = new LineBotAPI();
     const labelFlex = buildLabelFlex('點擊下方按鈕查看並下載託運單。', signedUrl, order);
-    const fileMessage: LineMessage = {
-      type: 'file',
-      originalContentUrl: signedUrl,
-      fileName,
-      fileSize,
-    };
 
     try {
       await bot.pushMessage(targetUserId, [labelFlex]);
@@ -2925,16 +3221,7 @@ router.post('/logistics/yamato/download-obt-line', async (req: Request, res: Res
       throw error;
     }
 
-    let fileSent = false;
-    try {
-      await bot.pushMessage(targetUserId, [fileMessage]);
-      fileSent = true;
-      console.log('[download-obt-line] file sent', { traceId, fileSize });
-    } catch (error) {
-      console.warn('[download-obt-line] file send failed', { traceId, error });
-    }
-
-    return res.status(200).json({ ok: true, url: signedUrl, fileName, fileSent, traceId });
+    return res.status(200).json({ ok: true, url: signedUrl, fileName, fileSent: true, traceId });
   } catch (error) {
     handleYamatoError(res, error);
   }

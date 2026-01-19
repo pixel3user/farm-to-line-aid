@@ -147,7 +147,7 @@ const MarketOnboarding: React.FC<MarketOnboardingProps> = ({ children }) => {
     );
   }, [userStores]);
 
-  const needsProfile = user?.role === 'market' && (!profileForm.displayName || !profileForm.email);
+  const needsProfile = user?.role === 'market' && (!user?.displayName || !user?.email);
   const needsBusiness =
     user?.role === 'market' &&
     (!user?.marketProfile?.businessName || !user?.marketProfile?.businessType || !hasBuyerStoreLocation);

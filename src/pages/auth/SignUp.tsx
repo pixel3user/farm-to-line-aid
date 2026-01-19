@@ -15,10 +15,12 @@ import {
   Store
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 const SignUp: React.FC = () => {
   const navigate = useNavigate();
   const { signUpWithEmail } = useAuth();
+  const { t } = useLanguage();
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -37,7 +39,7 @@ const SignUp: React.FC = () => {
     setError('');
 
     if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
+      setError(t('auth.passwordMismatch'));
       setIsLoading(false);
       return;
     }
@@ -47,7 +49,7 @@ const SignUp: React.FC = () => {
       const targetRoute = formData.role ? `/${formData.role}` : '/auth/role-selection';
       navigate(targetRoute, { replace: true });
     } catch (err) {
-      setError('Sign up failed. Please try again.');
+      setError(t('auth.signupFailed'));
       console.error('Sign up error:', err);
     } finally {
       setIsLoading(false);
@@ -70,12 +72,12 @@ const SignUp: React.FC = () => {
           </Link>
         </div>
         <h2 className="mt-6 text-center text-3xl font-bold text-gray-900">
-          Create your account
+          {t('auth.signupTitle')}
         </h2>
         <p className="mt-2 text-center text-sm text-gray-600">
-          Or{' '}
+          {t('auth.orBilingual')}{' '}
           <Link to="/auth/signin" className="font-medium text-green-600 hover:text-green-500">
-            sign in to your existing account
+            {t('auth.signinExistingBilingual')}
           </Link>
         </p>
       </div>
@@ -83,9 +85,9 @@ const SignUp: React.FC = () => {
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <Card>
           <CardHeader>
-            <CardTitle>Get started</CardTitle>
+            <CardTitle>{t('auth.getStarted')}</CardTitle>
             <CardDescription>
-              Join Farm2Market and start connecting with Taiwan's agricultural community
+              {t('auth.signupDescription')}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -97,7 +99,7 @@ const SignUp: React.FC = () => {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <Label htmlFor="name">Full name</Label>
+                <Label htmlFor="name">{t('auth.fullName')}</Label>
                 <div className="mt-1 relative">
                   <Input
                     id="name"
@@ -108,14 +110,14 @@ const SignUp: React.FC = () => {
                     value={formData.name}
                     onChange={(e) => handleInputChange('name', e.target.value)}
                     className="pl-10"
-                    placeholder="Enter your full name"
+                    placeholder={t('auth.fullNamePlaceholder')}
                   />
                   <User className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                 </div>
               </div>
 
               <div>
-                <Label htmlFor="email">Email address</Label>
+                <Label htmlFor="email">{t('auth.emailBilingual')}</Label>
                 <div className="mt-1 relative">
                   <Input
                     id="email"
@@ -126,14 +128,14 @@ const SignUp: React.FC = () => {
                     value={formData.email}
                     onChange={(e) => handleInputChange('email', e.target.value)}
                     className="pl-10"
-                    placeholder="Enter your email"
+                    placeholder={t('auth.emailPlaceholderBilingual')}
                   />
                   <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                 </div>
               </div>
 
               <div>
-                <Label htmlFor="role">I am a</Label>
+                <Label htmlFor="role">{t('auth.roleBilingual')}</Label>
                 <div className="mt-2 grid grid-cols-2 gap-3">
                   <button
                     type="button"
@@ -145,7 +147,7 @@ const SignUp: React.FC = () => {
                     }`}
                   >
                     <Users className="w-4 h-4 mr-2" />
-                    Farmer
+                    {t('auth.farmerBilingual')}
                   </button>
                   <button
                     type="button"
@@ -157,13 +159,13 @@ const SignUp: React.FC = () => {
                     }`}
                   >
                     <Store className="w-4 h-4 mr-2" />
-                    Market
+                    {t('auth.marketBilingual')}
                   </button>
                 </div>
               </div>
 
               <div>
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t('auth.passwordBilingual')}</Label>
                 <div className="mt-1 relative">
                   <Input
                     id="password"
@@ -174,7 +176,7 @@ const SignUp: React.FC = () => {
                     value={formData.password}
                     onChange={(e) => handleInputChange('password', e.target.value)}
                     className="pl-10 pr-10"
-                    placeholder="Create a password"
+                    placeholder={t('auth.passwordPlaceholderBilingual')}
                   />
                   <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <button
@@ -192,7 +194,7 @@ const SignUp: React.FC = () => {
               </div>
 
               <div>
-                <Label htmlFor="confirmPassword">Confirm password</Label>
+                <Label htmlFor="confirmPassword">{t('auth.confirmPasswordBilingual')}</Label>
                 <div className="mt-1 relative">
                   <Input
                     id="confirmPassword"
@@ -203,7 +205,7 @@ const SignUp: React.FC = () => {
                     value={formData.confirmPassword}
                     onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
                     className="pl-10 pr-10"
-                    placeholder="Confirm your password"
+                    placeholder={t('auth.confirmPasswordPlaceholderBilingual')}
                   />
                   <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <button
@@ -229,13 +231,13 @@ const SignUp: React.FC = () => {
                   className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
                 />
                 <label htmlFor="terms" className="ml-2 block text-sm text-gray-900">
-                  I agree to the{' '}
+                  {t('auth.termsIntroBilingual')}{' '}
                   <Link to="#" className="text-green-600 hover:text-green-500">
-                    Terms of Service
+                    {t('auth.termsOfServiceBilingual')}
                   </Link>{' '}
-                  and{' '}
+                  {t('auth.andBilingual')}{' '}
                   <Link to="#" className="text-green-600 hover:text-green-500">
-                    Privacy Policy
+                    {t('auth.privacyPolicyBilingual')}
                   </Link>
                 </label>
               </div>
@@ -245,15 +247,15 @@ const SignUp: React.FC = () => {
                 className="w-full"
                 disabled={isLoading}
               >
-                {isLoading ? 'Creating account...' : 'Create account'}
+                {isLoading ? t('auth.creatingAccount') : t('auth.createAccount')}
               </Button>
             </form>
 
             <div className="mt-6 text-center">
               <p className="text-sm text-gray-600">
-                Already have an account?{' '}
+                {t('auth.alreadyHaveAccountBilingual')}{' '}
                 <Link to="/auth/signin" className="font-medium text-green-600 hover:text-green-500">
-                  Sign in
+                  {t('auth.signinBilingual')}
                 </Link>
               </p>
             </div>

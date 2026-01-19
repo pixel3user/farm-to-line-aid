@@ -46,6 +46,8 @@ const ALLOWED_FUNCTION_CALLS = new Set([
   'product_list',
   'product_create',
   'product_update',
+  'product_open_image_upload',
+  'product_open_pickup_address',
   'store_list',
   'store_create',
   'marketing_material_list',
@@ -108,7 +110,7 @@ Privacy and data sharing:
    - Footer (optional): one or two buttons linking to LIFF tabs when clearly relevant: products, stores, marketing, analytics
 
 Tool use:
-- functionCalls are optional. Allowed: show_product_tools, show_store_tools, show_marketing_tools, show_analytics_tools, open_dashboard, show_help_options, product_list, product_create, product_update, store_list, store_create, marketing_material_list, analytics_get_user_stats, user_set_role, product_browse_public, store_browse_public, marketplace_get_stats, product_search_public, store_search_public.
+- functionCalls are optional. Allowed: show_product_tools, show_store_tools, show_marketing_tools, show_analytics_tools, open_dashboard, show_help_options, product_list, product_create, product_update, product_open_image_upload, product_open_pickup_address, store_list, store_create, marketing_material_list, analytics_get_user_stats, user_set_role, product_browse_public, store_browse_public, marketplace_get_stats, product_search_public, store_search_public.
 - Minimize website redirections. Prefer a short back-and-forth in chat to collect missing info and confirm intent. Only suggest dashboard links when necessary for a complex workflow or when the user asks.
 - Include a function call when executing an app feature is clearly intended.
 - After setting user role, proactively propose role-specific next steps and quick replies.
@@ -154,8 +156,10 @@ Rules:
 - Keep "text" short (1-2 sentences). When you include any functionCalls, set "text" to a brief status message (<20 words).
 - For product_create, required fields = name, price, unit, stock. Ask for missing fields first.
 - For product_update, update the most recent product when no id/name is given. If the user says edit/modify without details, call product_update with productName/productId to show the edit card. You can set pickupStoreId/pickupStoreName to use a store pickup address.
+- If the user asks to upload a product image (no URL provided), call product_open_image_upload to open the upload dialog.
+- If the user asks to add a pickup address (no address provided), call product_open_pickup_address to open the pickup address dialog.
 - Use the user's language (zh-TW or English).
-- Allowed function names: show_product_tools, show_store_tools, show_marketing_tools, show_analytics_tools, open_dashboard, show_help_options, product_list, product_create, product_update, store_list, store_create, marketing_material_list, analytics_get_user_stats, user_set_role, product_browse_public, store_browse_public, marketplace_get_stats, product_search_public, store_search_public.
+- Allowed function names: show_product_tools, show_store_tools, show_marketing_tools, show_analytics_tools, open_dashboard, show_help_options, product_list, product_create, product_update, product_open_image_upload, product_open_pickup_address, store_list, store_create, marketing_material_list, analytics_get_user_stats, user_set_role, product_browse_public, store_browse_public, marketplace_get_stats, product_search_public, store_search_public.
 
 Output nothing except the JSON object.
 `;
@@ -174,6 +178,8 @@ function getTools() {
         { name: 'product_list', description: 'List the user\'s products. If a limit is mentioned, include it in args.' },
         { name: 'product_create', description: 'Create a new product. Required: name, price (>0), unit, stock (>=0). Do not call until all provided; otherwise ask for the missing fields first.' },
         { name: 'product_update', description: 'Update an existing product. Optional args: { productId?, productName?, description?, category?, price?, unit?, stock?, imageUrl?, pickupAddress?, pickupContactName?, pickupContactTel?, pickupContactMobile?, pickupPostNumber?, pickupYamatoZipCode?, pickupStoreId?, pickupStoreName? }. Can be used with productName/productId only to open the edit card.' },
+        { name: 'product_open_image_upload', description: 'Open the product image upload dialog (no database change). Optional args: { productId?, productName?, media?: "upload" | "camera" }.' },
+        { name: 'product_open_pickup_address', description: 'Open the product pickup address dialog (no database change). Optional args: { productId?, productName? }.' },
         { name: 'store_list', description: 'List the user\'s stores. If a limit is mentioned, include it in args.' },
         { name: 'store_create', description: 'Create a new store. Ask for missing: name (required). type/location optional. Include parsed args.' },
         { name: 'marketing_material_list', description: 'List recent marketing materials. If a limit is mentioned, include it in args.' },

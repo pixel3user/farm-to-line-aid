@@ -103,7 +103,7 @@ const runtimeConfig: RuntimeConfig = {
   richMenuMarketId:
     process.env.LINE_RICHMENU_MARKET_ID ||
     fnConfig?.line?.richmenu_market_id,
-  liffUrl: process.env.LIFF_URL || process.env.LINE_LIFF_URL || fnConfig?.line?.liff_url,
+  liffUrl: process.env.LINE_LIFF_URL || process.env.LIFF_URL || fnConfig?.line?.liff_url,
   skipLineApi: getBooleanEnv(process.env.SKIP_LINE_API ?? fnConfig?.line?.skip_api, false),
   useMockLine: getBooleanEnv(process.env.USE_MOCK_LINE ?? fnConfig?.line?.use_mock, false),
   isEmulator: getBooleanEnv(process.env.FUNCTIONS_EMULATOR, false) || process.env.NODE_ENV === 'development',

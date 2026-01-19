@@ -1,6 +1,7 @@
 import type { QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import type { LinePayConfirmResponse, LinePayReserveResponse } from './linePay';
 import admin from './firebaseAdmin';
+import { buildProductSearchTokens, matchesProductSearch } from './search';
 
 const firestore = admin.firestore();
 
@@ -34,6 +35,9 @@ export interface ProductRecord {
   stock?: number;
   images?: string[];
   tags?: string[];
+  aliases?: string[];
+  nameTranslations?: Record<string, string>;
+  searchTokens?: string[];
   isActive?: boolean;
   pickup?: {
     address?: string;
@@ -321,7 +325,7 @@ export class DatabaseService {
     }
 
     // With a name filter, paginate through the entire queryable dataset, filter client-side by name, then return up to requestedLimit
-    const nameKw = filters.nameContains!.trim().toLowerCase();
+    const nameKw = filters.nameContains!.trim();
     const pageSize = 200; // per-page fetch size for efficiency
     let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | undefined;
     const matched: Array<Pick<ProductRecord, 'id' | 'name' | 'price' | 'unit' | 'stock' | 'images' | 'category'>> = [];
@@ -339,7 +343,7 @@ export class DatabaseService {
       for (const doc of snapshot.docs) {
         scanned++;
         const data = doc.data() as ProductRecord;
-        if ((data.name || '').toLowerCase().includes(nameKw)) {
+        if (matchesProductSearch(data, nameKw)) {
           matched.push({
             id: doc.id,
             name: data.name,
@@ -480,6 +484,8 @@ export class DatabaseService {
     }
 
     const docRef = firestore.collection('products').doc();
+    const aliases = Array.isArray(productData.aliases) ? productData.aliases : [];
+    const nameTranslations = productData.nameTranslations ?? {};
     const payload: ProductRecord = {
       userId,
       name,
@@ -490,6 +496,16 @@ export class DatabaseService {
       stock,
       images: productData.images ?? [],
       tags: productData.tags ?? [],
+      aliases,
+      nameTranslations,
+      searchTokens: buildProductSearchTokens({
+        name,
+        description: productData.description ?? '',
+        category: productData.category ?? 'general',
+        tags: productData.tags ?? [],
+        aliases,
+        nameTranslations
+      }),
       isActive: productData.isActive ?? true,
       geminiData: productData.geminiData ?? {},
       createdAt: nowTimestamp(),
@@ -562,6 +578,12 @@ export class DatabaseService {
     if (Array.isArray(updates.tags)) {
       payload.tags = updates.tags;
     }
+    if (Array.isArray(updates.aliases)) {
+      payload.aliases = updates.aliases;
+    }
+    if (updates.nameTranslations && typeof updates.nameTranslations === 'object') {
+      payload.nameTranslations = updates.nameTranslations;
+    }
     if (typeof updates.isActive === 'boolean') {
       payload.isActive = updates.isActive;
     }
@@ -576,6 +598,18 @@ export class DatabaseService {
       return;
     }
 
+    const merged: ProductRecord = {
+      ...data,
+      ...updates
+    };
+    payload.searchTokens = buildProductSearchTokens({
+      name: merged.name,
+      description: merged.description,
+      category: merged.category,
+      tags: merged.tags,
+      aliases: merged.aliases,
+      nameTranslations: merged.nameTranslations
+    });
     payload.updatedAt = nowTimestamp();
     await ref.update(payload);
   }

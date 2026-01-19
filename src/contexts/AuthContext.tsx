@@ -114,8 +114,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const loginInProgressRef = useRef(false);
   const dataLoadingRef = useRef(false);
   const lastLoadTimeRef = useRef(0);
+  const pendingLoadRef = useRef<{ userId: string; force: boolean } | null>(null);
   const liffUserRef = useRef<LiffUser | null>(liffUser);
   const userRef = useRef<LineUser | null>(user);
+  const firebaseUserRef = useRef<FirebaseUser | null>(firebaseUser);
   const { toast } = useToast();
   const { t } = useLanguage();
 
@@ -126,6 +128,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+
+  useEffect(() => {
+    firebaseUserRef.current = firebaseUser;
+  }, [firebaseUser]);
 
   useEffect(() => {
     const hasLiffLink = Boolean(liffUser?.userId);
@@ -839,16 +845,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setUser(newUser);
   };
 
-  const loadUserData = async (userId: string) => {
+  const loadUserData = async (userId: string, options?: { force?: boolean }) => {
+    const force = Boolean(options?.force);
     const now = Date.now();
     const timeSinceLastLoad = now - lastLoadTimeRef.current;
     
     if (dataLoadingRef.current) {
       console.log('Data loading already in progress, skipping...');
+      pendingLoadRef.current = {
+        userId,
+        force: pendingLoadRef.current?.force || force,
+      };
       return;
     }
     
-    if (timeSinceLastLoad < 1000) { // Prevent loading more than once per second
+    if (!force && timeSinceLastLoad < 1000) { // Prevent loading more than once per second
       console.log('Data loaded recently, skipping to prevent rapid calls...');
       return;
     }
@@ -959,6 +970,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     } finally {
       dataLoadingRef.current = false;
       setIsRefreshingData(false);
+      const pending = pendingLoadRef.current;
+      if (pending) {
+        pendingLoadRef.current = null;
+        if (pending.userId && pending.userId !== userId) {
+          void loadUserData(pending.userId, { force: pending.force });
+        } else if (pending.force) {
+          void loadUserData(userId, { force: true });
+        }
+      }
     }
   };
 
@@ -1057,18 +1077,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   const refreshUserData = React.useCallback(async () => {
-    const targetUserId = liffUserRef.current?.userId || userRef.current?.id;
-    if (targetUserId && !dataLoadingRef.current) {
-      console.log('Refreshing user data for:', targetUserId);
-      try {
-        await loadUserData(targetUserId);
-      } catch (error) {
-        console.error('Error refreshing user data:', error);
-      }
-    } else if (dataLoadingRef.current) {
-      console.log('Data loading already in progress, skipping refresh...');
-    } else {
+    const targetUserId =
+      firebaseUserRef.current?.uid ||
+      liffUserRef.current?.userId ||
+      userRef.current?.lineUserId ||
+      userRef.current?.id;
+    if (!targetUserId) {
       console.warn('No user ID available for refresh');
+      return;
+    }
+    console.log('Refreshing user data for:', targetUserId);
+    try {
+      await loadUserData(targetUserId, { force: true });
+    } catch (error) {
+      console.error('Error refreshing user data:', error);
     }
   }, []);
 

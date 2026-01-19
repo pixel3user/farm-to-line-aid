@@ -150,6 +150,29 @@ const FUNCTION_DECLARATIONS: FunctionDeclaration[] = [
     },
   },
   {
+    name: 'product_open_image_upload',
+    description: 'Open the product image upload dialog (no database change).',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        productId: { type: Type.STRING },
+        productName: { type: Type.STRING },
+        media: { type: Type.STRING },
+      },
+    },
+  },
+  {
+    name: 'product_open_pickup_address',
+    description: 'Open the product pickup address dialog (no database change).',
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        productId: { type: Type.STRING },
+        productName: { type: Type.STRING },
+      },
+    },
+  },
+  {
     name: 'store_list',
     description: "List the user's stores. If a limit is mentioned, include it in args.",
     parameters: {
@@ -277,8 +300,8 @@ const buildSystemInstruction = (locale?: string) => {
     parts: [
       {
         text: isTraditional
-          ? '你是繁體中文語音助理，協助農友管理產品、店家、行銷素材與營運分析。請用繁體中文回覆。不要透露思考過程或計畫步驟。使用工具後，請用一句到兩句話總結結果並提一個簡短的下一步問題。'
-          : 'You are a helpful voice assistant for Farm2Market. Respond in concise English. Do not reveal reasoning or planning. After using a tool, summarize the result in 1-2 sentences and ask a brief follow-up question.',
+          ? '你是繁體中文語音助理，協助農友管理產品、店家、行銷素材與營運分析。請用繁體中文回覆。不要透露思考過程或計畫步驟。使用工具後，請用一句到兩句話總結結果並提一個簡短的下一步問題。當使用者說要上傳產品圖片或新增取貨地址時，優先使用對應工具直接開啟上傳/取貨地址視窗。'
+          : 'You are a helpful voice assistant for Farm2Market. Respond in concise English. Do not reveal reasoning or planning. After using a tool, summarize the result in 1-2 sentences and ask a brief follow-up question. When the user asks to upload a product image or add a pickup address, prefer the tools that directly open the upload/pickup dialogs.',
       },
     ],
   };

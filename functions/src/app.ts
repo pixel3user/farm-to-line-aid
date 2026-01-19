@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import apiRoutes from './routes/api';
+import invoiceRoutes from './routes/invoices';
 
 const app = express();
 
@@ -19,7 +20,12 @@ app.use(express.urlencoded({ extended: true }));
 // Support both prefixed and root paths so Cloud Functions (where the function name is the first segment)
 // and local dev both resolve the same routes.
 app.use('/api', apiRoutes);
+app.use('/api/invoices', invoiceRoutes);
+// Cloud Functions base URL already includes the function name (e.g. /api),
+// so expose invoice routes at the root as well: /api/invoices/...
+app.use('/invoices', invoiceRoutes);
 app.use('/', apiRoutes);
+
 
 app.get('/health', (req, res) => {
   res.json({

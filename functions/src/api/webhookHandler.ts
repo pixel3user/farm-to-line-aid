@@ -51,7 +51,7 @@ export class WebhookHandler {
       const imageUrl = (p.images && p.images.length ? p.images[0] : undefined) || this.getGenericProductImageUrl(p.name, 'general');
       const priceText = typeof p.price === 'number' ? `NT$${p.price} ${p.unit || ''}`.trim() : '—';
       const stockText = typeof p.stock === 'number' ? String(p.stock) : '—';
-      const liffUrlBase = process.env.LIFF_URL || 'https://farm2market-99.web.app';
+      const liffUrlBase = process.env.LINE_LIFF_URL || process.env.LIFF_URL || 'https://farm2market-99.web.app';
       const paramProduct = p.id ? `&product=${encodeURIComponent(p.id)}` : '';
       const manageUrl = `${liffUrlBase}?tab=products&role=${role}${paramProduct}`;
       return {
@@ -226,7 +226,7 @@ export class WebhookHandler {
     try {
       const userProfile = await this.lineBot.getUserProfile(event.source.userId);
       const roleParam = (await DatabaseService.getLineUser(event.source.userId))?.role || 'farmer';
-      const webAppUrl = `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=dashboard&role=${roleParam}&userId=${userProfile.userId}&displayName=${encodeURIComponent(userProfile.displayName)}&pictureUrl=${encodeURIComponent(userProfile.pictureUrl || '')}`;
+      const webAppUrl = `${process.env.LINE_LIFF_URL || process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=dashboard&role=${roleParam}&userId=${userProfile.userId}&displayName=${encodeURIComponent(userProfile.displayName)}&pictureUrl=${encodeURIComponent(userProfile.pictureUrl || '')}`;
 
       const messages: LineMessage[] = [
         ...(introMessage ? [{ type: 'text' as const, text: introMessage }] : []),
@@ -816,8 +816,19 @@ export class WebhookHandler {
           await this.clearPendingImageBinding(userId);
 
           const ok: LineMessage[] = [
-            { type: 'text', text: `已更新產品「${target.name}」的照片。` },
-            ...this.buildMarketingMessages(target.name, marketing?.text, marketing?.enhancedImageUrl),
+            this.buildProductListingFlexCard({
+              title: '✅ 已更新產品照片',
+              role: 'farmer',
+              product: {
+                name: target.name,
+                price: target.price,
+                unit: target.unit,
+                stock: target.stock,
+                category: target.category,
+                tags: (target.tags as string[] | undefined) || [],
+              },
+              imageUrl: workingImages[0],
+            }),
           ];
           await this.lineBot.replyMessage(event.replyToken, ok);
           await this.persistConversation(context, ok);
@@ -904,7 +915,7 @@ Choose an option below to continue.`,
             {
               type: 'uri',
               label: 'Manage products',
-              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=products`
+              uri: `${process.env.LINE_LIFF_URL || process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=products`
             },
             {
               type: 'postback',
@@ -950,12 +961,12 @@ Select what you need help with below.`,
             {
               type: 'uri',
               label: 'Find new buyers',
-              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores&action=find`
+              uri: `${process.env.LINE_LIFF_URL || process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores&action=find`
             },
             {
               type: 'uri',
               label: 'Manage CRM',
-              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores`
+              uri: `${process.env.LINE_LIFF_URL || process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=stores`
             }
           ]
         }
@@ -996,12 +1007,12 @@ Let me know what you want to create.`,
             {
               type: 'uri',
               label: 'Generate campaign',
-              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=marketing&action=generate`
+              uri: `${process.env.LINE_LIFF_URL || process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=marketing&action=generate`
             },
             {
               type: 'uri',
               label: 'Copywriting help',
-              uri: `${process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=marketing&action=copywriting`
+              uri: `${process.env.LINE_LIFF_URL || process.env.LIFF_URL || 'https://farm2market-99.web.app'}?tab=marketing&action=copywriting`
             }
           ]
         }
@@ -1640,6 +1651,139 @@ Hi there! Just a friendly reminder that it's a great time to restock ${productNa
     return `${base}${encodeURIComponent(label)}`;
   }
 
+  private getProductCategoryLabel(category?: string): string {
+    switch (category) {
+      case 'eggs':
+        return '雞蛋';
+      case 'poultry':
+        return '家禽';
+      case 'vegetables':
+        return '蔬菜';
+      case 'fruits':
+        return '水果';
+      case 'dairy':
+        return '乳製品';
+      case 'other':
+        return '其他';
+      case 'general':
+      default:
+        return '一般';
+    }
+  }
+
+  private buildProductListingFlexCard(params: {
+    title: string;
+    role: 'farmer' | 'market';
+    product: {
+      name: string;
+      price?: number;
+      unit?: string;
+      stock?: number;
+      category?: string;
+      tags?: string[];
+    };
+    imageUrl?: string;
+  }): LineMessage {
+    const liffUrlBase = process.env.LINE_LIFF_URL || process.env.LIFF_URL || 'https://farm2market-99.web.app';
+    const listingUrl = `${liffUrlBase}?tab=products&role=${params.role}`;
+
+    const name = params.product.name || '產品';
+    const priceOk = typeof params.product.price === 'number' && Number.isFinite(params.product.price);
+    const stockOk = typeof params.product.stock === 'number' && Number.isFinite(params.product.stock);
+    const unit = (params.product.unit || '').trim();
+    const priceText = priceOk ? `NT$${params.product.price}${unit ? `/${unit}` : ''}` : '—';
+    const stockText = stockOk ? String(params.product.stock) : '—';
+    const categoryText = this.getProductCategoryLabel(params.product.category);
+    const tags = Array.isArray(params.product.tags) ? params.product.tags.filter(t => typeof t === 'string' && t.trim()).slice(0, 3) : [];
+    const tagsText = tags.length ? tags.join('、') : '—';
+
+    const heroUrl = params.imageUrl || this.getGenericProductImageUrl(name, params.product.category) || undefined;
+
+    return {
+      type: 'flex',
+      altText: `${params.title}：${name}`,
+      contents: {
+        type: 'bubble',
+        action: { type: 'uri', uri: listingUrl },
+        hero: heroUrl
+          ? {
+              type: 'image',
+              url: heroUrl,
+              size: 'full',
+              aspectRatio: '20:13',
+              aspectMode: 'cover',
+              action: { type: 'uri', uri: listingUrl },
+            }
+          : undefined,
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          contents: [
+            { type: 'text', text: params.title, weight: 'bold', size: 'lg' },
+            { type: 'text', text: name, margin: 'md', weight: 'bold', size: 'md', wrap: true },
+            {
+              type: 'box',
+              layout: 'vertical',
+              margin: 'md',
+              spacing: 'sm',
+              contents: [
+                {
+                  type: 'box',
+                  layout: 'baseline',
+                  spacing: 'sm',
+                  contents: [
+                    { type: 'text', text: '價格', color: '#6b7280', size: 'sm', flex: 2 },
+                    { type: 'text', text: priceText, color: '#111827', size: 'sm', flex: 8, wrap: true },
+                  ],
+                },
+                {
+                  type: 'box',
+                  layout: 'baseline',
+                  spacing: 'sm',
+                  contents: [
+                    { type: 'text', text: '庫存', color: '#6b7280', size: 'sm', flex: 2 },
+                    { type: 'text', text: stockText, color: '#111827', size: 'sm', flex: 8, wrap: true },
+                  ],
+                },
+                {
+                  type: 'box',
+                  layout: 'baseline',
+                  spacing: 'sm',
+                  contents: [
+                    { type: 'text', text: '類別', color: '#6b7280', size: 'sm', flex: 2 },
+                    { type: 'text', text: categoryText, color: '#111827', size: 'sm', flex: 8, wrap: true },
+                  ],
+                },
+                {
+                  type: 'box',
+                  layout: 'baseline',
+                  spacing: 'sm',
+                  contents: [
+                    { type: 'text', text: '標籤', color: '#6b7280', size: 'sm', flex: 2 },
+                    { type: 'text', text: tagsText, color: '#111827', size: 'sm', flex: 8, wrap: true },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        footer: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          contents: [
+            {
+              type: 'button',
+              style: 'primary',
+              height: 'sm',
+              action: { type: 'uri', label: '前往產品列表', uri: listingUrl },
+            },
+          ],
+        },
+      },
+    };
+  }
+
   private buildMarketingMessages(productName: string, text?: string, imageUrl?: string): LineMessage[] {
     const messages: LineMessage[] = [];
     if (imageUrl) {
@@ -1799,7 +1943,6 @@ Hi there! Just a friendly reminder that it's a great time to restock ${productNa
 
     let updatedDescription = description;
     let updatedImages = [...images];
-    let marketingMessages: LineMessage[] = [];
 
     if (imageUrl && imageBuffer) {
       const marketing = await this.runMarketingEnhancement({
@@ -1817,9 +1960,6 @@ Hi there! Just a friendly reminder that it's a great time to restock ${productNa
       if (marketing?.text) {
         updatedDescription = marketing.text;
       }
-      if (marketing && (marketing.text || marketing.enhancedImageUrl)) {
-        marketingMessages = this.buildMarketingMessages(name, marketing.text, marketing.enhancedImageUrl);
-      }
     }
 
     if (updatedDescription !== description || updatedImages.length !== images.length) {
@@ -1834,27 +1974,14 @@ Hi there! Just a friendly reminder that it's a great time to restock ${productNa
       .collection(PRODUCT_DRAFTS_COLLECTION).doc(draftId)
       .update({ status: 'completed', productId: id, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
 
-    const flex: LineMessage = {
-      type: 'flex',
-      altText: '已建立產品',
-      contents: {
-        type: 'bubble',
-        hero: imageUrl ? { type: 'image', url: imageUrl, size: 'full', aspectRatio: '20:13', aspectMode: 'cover' } : undefined,
-        body: {
-          type: 'box',
-          layout: 'vertical',
-          contents: [
-            { type: 'text', text: '✅ 已建立產品', weight: 'bold', size: 'lg' },
-            { type: 'text', text: `名稱: ${name}`, margin: 'md' },
-            { type: 'text', text: `價格: ${price} ${unit}` },
-            { type: 'text', text: `庫存: ${stock}` },
-            { type: 'text', text: `ID: ${id}`, size: 'xs', color: '#999999' },
-          ],
-        },
-      },
-    };
+    const flex = this.buildProductListingFlexCard({
+      title: '✅ 已建立產品',
+      role: 'farmer',
+      product: { name, price, unit, stock, category, tags },
+      imageUrl: updatedImages[0] || imageUrl,
+    });
 
-    const messages = [flex, ...marketingMessages];
+    const messages = [flex];
     await this.lineBot.replyMessage(replyToken, messages);
     return messages;
   }

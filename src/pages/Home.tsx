@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import heroImage from '@/assets/hero-farm-tech.webp';
 import heroVideo from '@/assets/farmer-video.mp4';
+import backgroundVideoMp4 from '@/assets/backgroundvideo.mp4';
+import backgroundVideoWebm from '@/assets/backgroundvideo.webm';
 import phoneShowcase from '@/assets/sample_img/Gemini_Generated_Image_qikttnqikttnqikt.webp';
 import { useScrollReveal } from '@/hooks/useScrollReveal';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -31,6 +33,7 @@ const Home: React.FC = () => {
   const revealContainerRef = useScrollReveal({ selector: '.reveal' });
   const { t } = useLanguage();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const mobileVideoRef = useRef<HTMLVideoElement>(null);
   const [isMobile, setIsMobile] = useState(() => {
     if (typeof window === 'undefined') return false;
     return window.matchMedia('(max-width: 768px)').matches;
@@ -130,7 +133,17 @@ const Home: React.FC = () => {
               <source src={heroVideo} type="video/mp4" />
             </video>
           ) : (
-            <img src={heroImage} alt="Fresh produce market" className="w-full h-full object-cover opacity-60" />
+            <video
+              ref={mobileVideoRef}
+              className="absolute inset-0 w-full h-full object-cover"
+              playsInline
+              muted
+              autoPlay
+              loop
+            >
+              <source src={backgroundVideoWebm} type="video/webm" />
+              <source src={backgroundVideoMp4} type="video/mp4" />
+            </video>
           )}
         </div>
 

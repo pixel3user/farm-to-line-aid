@@ -89,6 +89,10 @@ const LineDemo: React.FC = () => {
     }
   };
 
+  const handleScanQRCode = () => {
+    window.open('https://line.me/R/ti/p/%40196xyoju', '_blank');
+  };
+
   return (
     <div className="space-y-12">
       {/* Hero Section */}
@@ -120,7 +124,7 @@ const LineDemo: React.FC = () => {
                   {t('demo.open')}
                   <ExternalLink className="w-4 h-4 ml-2" />
                 </Button>
-                <Button size="lg" variant="outline" className="bg-white/10 border-white/30 text-white hover:bg-white/20">
+                <Button size="lg" variant="outline" className="bg-white/10 border-white/30 text-white hover:bg-white/20" onClick={handleScanQRCode}>
                   <QrCode className="w-5 h-5 mr-2" />
                   {t('demo.scan')}
                 </Button>
