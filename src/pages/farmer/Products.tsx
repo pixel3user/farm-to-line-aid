@@ -755,9 +755,9 @@ const FarmerProducts: React.FC = () => {
       const stepParam = searchParams.get('step');
       let overrideStep: number | null = null;
       if (stepParam === 'images') {
-        overrideStep = 4;
-      } else if (stepParam === 'pickup') {
         overrideStep = 2;
+      } else if (stepParam === 'pickup') {
+        overrideStep = 4;
       } else if (stepParam) {
         const parsed = Number(stepParam);
         if (!Number.isNaN(parsed)) {
@@ -1415,6 +1415,24 @@ const FarmerProducts: React.FC = () => {
       const newImageUrls = await uploadProductImages(Array.from(files), user.id, selectedProduct.id);
       const updatedImages = [...editFormData.images, ...newImageUrls].slice(0, 10); // Limit to 10 images
       setEditFormData(prev => ({ ...prev, images: updatedImages }));
+      if (newImageUrls.length && enhanceAfterImageRef.current) {
+        enhanceAfterImageRef.current = false;
+        const marketingTarget: MarketingProduct = {
+          id: selectedProduct.id,
+          name: editFormData.name || selectedProduct.name,
+          category: editFormData.category || selectedProduct.category,
+          description: editFormData.description || selectedProduct.description,
+          unit: editFormData.unit || selectedProduct.unit,
+          price: Number.isFinite(Number(editFormData.price)) ? Number(editFormData.price) : selectedProduct.price,
+          stock: Number.isFinite(Number(editFormData.stock)) ? Number(editFormData.stock) : selectedProduct.stock,
+          images: updatedImages,
+          photos: updatedImages,
+        };
+        resetEnhancementState();
+        setEnhancementContext('edit');
+        setCreatedProductForMarketing(marketingTarget);
+        setIsEnhancementDialogOpen(true);
+      }
     } catch (error) {
       console.error('Failed to upload images:', error);
       alert(t('farmer.products.uploadError'));
